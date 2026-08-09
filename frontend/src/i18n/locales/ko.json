@@ -558,6 +558,8 @@
     "side": "구분",
     "price": "가격",
     "qty": "수량",
+    "positionWeight": "보유 비중",
+    "lots": "수량(100주)",
     "reason": "사유",
     "schema": "스키마",
     "generated": "생성 시간",

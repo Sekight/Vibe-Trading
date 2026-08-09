@@ -54,6 +54,15 @@ class RunStateStore:
         """
         self._write_json(run_dir / "state.json", {"status": "success"})
 
+    def mark_warning(self, run_dir: Path, reason: str) -> None:
+        """Mark the run as finished but incomplete (e.g. iteration cap hit).
+
+        Args:
+            run_dir: Run directory.
+            reason: Why the run is only a warning.
+        """
+        self._write_json(run_dir / "state.json", {"status": "warning", "reason": reason})
+
     def mark_failure(self, run_dir: Path, reason: str) -> None:
         """Mark the run as failed.
 

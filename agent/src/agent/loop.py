@@ -847,13 +847,45 @@ class AgentLoop:
                     reasoning_chars = 0
                     last_reasoning_emit = None
                     _time.sleep(_stream_retry_delay_s())
-                    response = self.llm.stream_chat(
-                        messages,
-                        tools=tool_defs,
-                        on_text_chunk=_on_text_chunk,
-                        on_reasoning_chunk=_on_reasoning_chunk,
-                        should_cancel=self._cancel_event.is_set,
-                    )
+                    try:
+                        response = self.llm.stream_chat(
+                            messages,
+                            tools=tool_defs,
+                            on_text_chunk=_on_text_chunk,
+                            on_reasoning_chunk=_on_reasoning_chunk,
+                            should_cancel=self._cancel_event.is_set,
+                        )
+                    except ProviderStreamError as retry_exc:
+                        # Both stream attempts failed (persistent mid-stream reset
+                        # or relay drop). Fall back to a non-streaming invoke so
+                        # the run can complete instead of dying; deterministic 4xx
+                        # errors are re-raised without a fallback.
+                        if not retry_exc.retryable:
+                            raise
+                        logger.warning(
+                            "Provider stream failed twice (iter %s), falling back to "
+                            "non-streaming chat: %s",
+                            current_iter,
+                            retry_exc,
+                        )
+                        self._emit(
+                            "stream_reset",
+                            {
+                                "iter": current_iter,
+                                "reason": "provider_stream_nonstreaming_fallback",
+                                "provider": retry_exc.provider,
+                                "model": retry_exc.model,
+                            },
+                        )
+                        thinking_chunks.clear()
+                        reasoning_chars = 0
+                        last_reasoning_emit = None
+                        response = self.llm.chat(messages, tools=tool_defs)
+                        if response.content and not buffer_text_output:
+                            self._emit(
+                                "text_delta",
+                                {"delta": response.content, "iter": current_iter},
+                            )
 
                 # Cancelled mid-stream: discard this turn's partial response and
                 # end the run now, without executing any of its tool calls.
@@ -1129,6 +1161,15 @@ class AgentLoop:
         # returned dict so SessionService can surface a meaningful UI
         # message instead of "Execution failed: unknown" (issue #114).
         final_reason: str | None = None
+        has_metrics = (run_dir / "artifacts" / "metrics.csv").exists()
+        has_run_card = (run_dir / "run_card.json").exists()
+        # A backtest-shaped run writes config.json and code/signal_engine.py.
+        # If those exist but no report was produced, the user's objective was
+        # not met even when the model emitted a closing message.
+        looks_like_backtest = (run_dir / "config.json").exists() or (
+            run_dir / "code" / "signal_engine.py"
+        ).exists()
+        hit_iteration_limit = iteration >= self.max_iterations
         if self._cancel_event.is_set():
             final_reason = "cancelled by user"
             state_store.mark_cancelled(run_dir, final_reason)
@@ -1141,7 +1182,18 @@ class AgentLoop:
             )
             state_store.mark_failure(run_dir, final_reason)
             final_status = "failed"
-        elif (run_dir / "artifacts" / "metrics.csv").exists() or final_content:
+        elif has_metrics or has_run_card:
+            state_store.mark_success(run_dir)
+            final_status = "success"
+        elif final_content and (hit_iteration_limit or (looks_like_backtest and not has_run_card)):
+            final_reason = (
+                f"reached max iterations ({self.max_iterations}) without producing run card/metrics"
+                if hit_iteration_limit
+                else "run finished without run_card.json/metrics.csv; backtest may not have been executed"
+            )
+            state_store.mark_warning(run_dir, final_reason)
+            final_status = "warning"
+        elif final_content:
             state_store.mark_success(run_dir)
             final_status = "success"
         elif empty_model_response_iter is not None:

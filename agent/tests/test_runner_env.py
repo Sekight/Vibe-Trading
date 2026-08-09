@@ -121,8 +121,12 @@ def test_prepare_sandbox_home_reexposes_only_loader_paths(tmp_path: Path) -> Non
     sandbox = _prepare_sandbox_home(real_home)
     try:
         dst_vt = sandbox / ".vibe-trading"
-        # Loader-owned paths re-exposed (symlinked)...
-        assert (dst_vt / "cache").exists()
+        # Loader-owned paths re-exposed (symlinked on POSIX; on Windows without
+        # Developer Mode the small configs are copied and the cache is skipped).
+        if (dst_vt / "cache").exists():
+            assert (dst_vt / "cache").is_symlink()
+        else:
+            assert (dst_vt / "qveris.json").exists()
         assert (dst_vt / "qveris.json").exists()
         # ...persistent secrets/state are NOT.
         assert not (dst_vt / "memory").exists()
@@ -135,6 +139,35 @@ def test_prepare_sandbox_home_reexposes_only_loader_paths(tmp_path: Path) -> Non
     # Cleanup removes the ephemeral home; symlink targets (real cache) survive.
     assert not sandbox.exists()
     assert (vt / "cache").exists()
+
+
+def test_prepare_sandbox_home_copies_config_when_symlinks_unavailable(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    """Windows without Developer Mode: copy small loader configs, skip cache."""
+    def _symlink_denied(self, target, **kwargs) -> None:
+        raise OSError(22, "client does not hold the required privilege")
+
+    monkeypatch.setattr(Path, "symlink_to", _symlink_denied)
+    real_home = tmp_path / "home"
+    vt = real_home / ".vibe-trading"
+    (vt / "data-bridge").mkdir(parents=True)
+    (vt / "data-bridge" / "config.yaml").write_text("sources: []", encoding="utf-8")
+    (vt / "qveris.json").write_text("{}", encoding="utf-8")
+    (vt / "cache").mkdir()
+    (vt / ".env").write_text("SECRET=1", encoding="utf-8")
+
+    sandbox = _prepare_sandbox_home(real_home)
+    try:
+        dst_vt = sandbox / ".vibe-trading"
+        assert (dst_vt / "data-bridge" / "config.yaml").read_text(encoding="utf-8") == "sources: []"
+        assert (dst_vt / "qveris.json").read_text(encoding="utf-8") == "{}"
+        assert not (dst_vt / "cache").exists()
+        assert not (dst_vt / ".env").exists()
+    finally:
+        import shutil
+
+        shutil.rmtree(sandbox, ignore_errors=True)
 
 
 def test_make_rlimit_preexec_returns_callable_on_posix() -> None:

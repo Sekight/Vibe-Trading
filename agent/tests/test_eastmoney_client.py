@@ -1,9 +1,10 @@
 """Tests for eastmoney_client: secid resolution, kline parsing, error paths.
 
-All HTTP is mocked at :func:`backtest.loaders._http.throttled_get_json` (imported
+All HTTP is mocked at :func:`backtest.loaders._http.throttled_get` (imported
 into the client module), so no test touches a live Eastmoney endpoint.
 """
 
+import json
 from unittest.mock import patch
 
 import pytest
@@ -17,6 +18,17 @@ def _clear_us_cache():
     ec._US_SECID_CACHE.clear()
     yield
     ec._US_SECID_CACHE.clear()
+
+
+def _fake_response(body: str):
+    """Minimal requests.Response stand-in exposing what get_json reads."""
+    class _Response:
+        text = body
+
+        def raise_for_status(self) -> None:
+            return None
+
+    return _Response()
 
 
 class TestResolveSecidAShare:
@@ -56,7 +68,9 @@ class TestResolveSecidUS:
                 ]
             }
         }
-        with patch.object(ec, "throttled_get_json", return_value=payload) as mock_get:
+        with patch.object(
+            ec, "throttled_get", return_value=_fake_response(json.dumps(payload))
+        ) as mock_get:
             assert ec.resolve_secid("AAPL.US") == "105.AAPL"
             # Second call is served from cache: no further HTTP.
             assert ec.resolve_secid("AAPL.US") == "105.AAPL"
@@ -64,7 +78,7 @@ class TestResolveSecidUS:
 
     def test_handles_jsonp_wrapped_search_body(self):
         body = 'cb({"QuotationCodeTable":{"Data":[{"QuoteID":"106.BRK"}]}})'
-        with patch.object(ec, "throttled_get_json", return_value=body):
+        with patch.object(ec, "throttled_get", return_value=_fake_response(body)):
             assert ec.resolve_secid("BRK.US") == "106.BRK"
 
     def test_plain_json_body_with_parens_in_values(self):
@@ -77,17 +91,19 @@ class TestResolveSecidUS:
             '{"QuotationCodeTable":{"Data":'
             '[{"QuoteID":"105.AAPL","Name":"Apple Inc. (AAPL) [NASDAQ]"}]}}'
         )
-        with patch.object(ec, "throttled_get_json", return_value=body):
+        with patch.object(ec, "throttled_get", return_value=_fake_response(body)):
             assert ec.resolve_secid("AAPL.US") == "105.AAPL"
 
     def test_no_us_candidate_returns_none(self):
         payload = {"QuotationCodeTable": {"Data": [{"QuoteID": "1.600519"}]}}
-        with patch.object(ec, "throttled_get_json", return_value=payload):
+        with patch.object(
+            ec, "throttled_get", return_value=_fake_response(json.dumps(payload))
+        ):
             assert ec.resolve_secid("NOPE.US") is None
 
     def test_search_failure_returns_none_without_raising(self):
         with patch.object(
-            ec, "throttled_get_json", side_effect=RuntimeError("banned")
+            ec, "throttled_get", side_effect=RuntimeError("banned")
         ):
             assert ec.resolve_secid("AAPL.US") is None
 
@@ -105,7 +121,9 @@ class TestFetchKline:
                 ],
             }
         }
-        with patch.object(ec, "throttled_get_json", return_value=payload) as mock_get:
+        with patch.object(
+            ec, "throttled_get", return_value=_fake_response(json.dumps(payload))
+        ) as mock_get:
             rows = ec.fetch_kline("1.600519", klt=ec.KLT_BY_INTERVAL["1D"])
 
         assert rows == [
@@ -134,7 +152,9 @@ class TestFetchKline:
         assert kwargs["params"]["klt"] == "101"
 
     def test_empty_data_returns_empty_list(self):
-        with patch.object(ec, "throttled_get_json", return_value={"data": None}):
+        with patch.object(
+            ec, "throttled_get", return_value=_fake_response('{"data": null}')
+        ):
             assert ec.fetch_kline("1.600519", klt=101) == []
 
     def test_malformed_row_is_skipped_not_fatal(self):
@@ -146,14 +166,16 @@ class TestFetchKline:
                 ]
             }
         }
-        with patch.object(ec, "throttled_get_json", return_value=payload):
+        with patch.object(
+            ec, "throttled_get", return_value=_fake_response(json.dumps(payload))
+        ):
             rows = ec.fetch_kline("1.600519", klt=101)
         assert len(rows) == 1
         assert rows[0]["trade_date"] == "2024-01-03"
 
     def test_http_error_propagates(self):
         with patch.object(
-            ec, "throttled_get_json", side_effect=RuntimeError("HTTP 429")
+            ec, "throttled_get", side_effect=RuntimeError("HTTP 429")
         ):
             with pytest.raises(RuntimeError, match="429"):
                 ec.fetch_kline("1.600519", klt=101)

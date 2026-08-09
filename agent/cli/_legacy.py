@@ -7,7 +7,7 @@ Usage:
     vibe-trading serve --port 8899         Start API server
     vibe-trading chat                      Interactive mode
     vibe-trading list                      List runs
-    vibe-trading show <run_id>             Show run details
+    vibe-trading --show <run_id>           Show run details
 """
 
 from __future__ import annotations
@@ -1423,9 +1423,10 @@ def _print_result(result: dict, elapsed: float, *, no_rich: bool = False) -> Non
         actions = Table(box=None, show_header=False, padding=(0, 1))
         actions.add_column(style="cyan", no_wrap=True)
         actions.add_column(style="dim")
-        actions.add_row(f"vibe-trading show {rid}", "details")
-        actions.add_row(f"vibe-trading code {rid}", "generated Python")
-        actions.add_row(f"vibe-trading continue {rid} \"...\"", "refine this run")
+        actions.add_row(f"vibe-trading --show {rid}", "details")
+        actions.add_row(f"vibe-trading --check {rid}", "health check")
+        actions.add_row(f"vibe-trading --code {rid}", "generated Python")
+        actions.add_row(f"vibe-trading --continue {rid} \"...\"", "refine this run")
         panels.append(Panel(actions, border_style="dim", title="Next", padding=(0, 1)))
 
     if _terminal_width() < 104:
@@ -1502,7 +1503,10 @@ def cmd_run(prompt: str, max_iter: int, *, json_mode: bool = False, no_rich: boo
         return _result_exit_code(result)
     _print_result(result, time.perf_counter() - start, no_rich=no_rich)
     if result.get("run_id"):
-        tip = f"--show {result['run_id']}  |  --continue {result['run_id']} \"...\"  |  --code {result['run_id']}  |  --pine {result['run_id']}"
+        tip = (
+            f"vibe-trading --show {result['run_id']}  |  vibe-trading --check {result['run_id']}  |  "
+            f"--continue {result['run_id']} \"...\"  |  --code {result['run_id']}"
+        )
         if no_rich:
             print(tip)
         else:
@@ -2403,6 +2407,63 @@ def cmd_show(run_id: str) -> None:
 
     console.print(Panel("\n".join(lines), border_style=c, title=run_id))
     console.print(f"[dim]{run_dir}[/dim]")
+
+
+def cmd_check(run_id: Optional[str] = None) -> int:
+    """Check whether a run actually produced a backtest report."""
+    if run_id:
+        run_dir = RUNS_DIR / run_id
+        if not run_dir.exists():
+            console.print(f"[red]{run_id} not found[/red]")
+            return EXIT_USAGE_ERROR
+    else:
+        try:
+            run_dir = max(
+                (d for d in RUNS_DIR.iterdir() if d.is_dir()),
+                key=lambda d: d.stat().st_mtime,
+            )
+        except (ValueError, OSError):
+            run_dir = None
+        if run_dir is None:
+            console.print("[red]No runs found.[/red]")
+            return EXIT_USAGE_ERROR
+
+    state = _read_json(run_dir / "state.json")
+    checks = [
+        ("req.json", run_dir / "req.json"),
+        ("config.json", run_dir / "config.json"),
+        ("code/signal_engine.py", run_dir / "code" / "signal_engine.py"),
+        ("run_card.json", run_dir / "run_card.json"),
+        ("artifacts/metrics.csv", run_dir / "artifacts" / "metrics.csv"),
+        ("artifacts/trades.csv", run_dir / "artifacts" / "trades.csv"),
+        ("logs/runner_stdout.txt", run_dir / "logs" / "runner_stdout.txt"),
+    ]
+    table = Table(title=f"Run health: {run_dir.name}", border_style="dim", box=box.SIMPLE_HEAVY)
+    table.add_column("File", style="cyan", no_wrap=True)
+    table.add_column("Status", width=10)
+    table.add_column("Size", width=10)
+    for label, path in checks:
+        if path.exists():
+            table.add_row(label, "[green]OK[/green]", str(path.stat().st_size))
+        else:
+            table.add_row(label, "[red]missing[/red]", "-")
+    console.print(table)
+
+    st = state.get("status", "unknown")
+    style = _status_style(st)
+    report_ok = (run_dir / "run_card.json").exists() and (
+        run_dir / "artifacts" / "metrics.csv"
+    ).exists()
+    console.print(f"Status: [{style}]{st.upper()}[/{style}]")
+    if report_ok:
+        console.print("[green]Verdict: REPORT OK - run produced metrics and run card.[/green]")
+        return EXIT_SUCCESS
+    console.print(
+        "[yellow]Verdict: NO REPORT - backtest did not produce run_card.json/metrics.csv.[/yellow]"
+    )
+    if state.get("reason"):
+        console.print(f"[dim]Reason: {state['reason']}[/dim]")
+    return EXIT_RUN_FAILED
 
 
 def cmd_code(run_id: str) -> None:
@@ -4634,6 +4695,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--continue", dest="cont", nargs=2, metavar=("RUN_ID", "PROMPT"), help="Continue a run")
     parser.add_argument("--list", action="store_true", help="List runs")
     parser.add_argument("--show", metavar="RUN_ID", help="Show run details")
+    parser.add_argument("--check", metavar="RUN_ID", help="Check whether a run produced a report")
     parser.add_argument("--code", metavar="RUN_ID", help="Show generated code")
     parser.add_argument("--pine", metavar="RUN_ID", help="Show Pine Script for TradingView")
     parser.add_argument("--trace", metavar="RUN_ID", help="Replay a run trace")
@@ -4710,6 +4772,12 @@ def _build_parser() -> argparse.ArgumentParser:
 
     show_parser = subparsers.add_parser("show", help="Show run details")
     show_parser.add_argument("run_id", help="Run identifier")
+
+    check_parser = subparsers.add_parser("check", help="Check whether a run produced a report")
+    check_parser.add_argument(
+        "run_id",
+        nargs="?", default=None, help="Run identifier (defaults to the latest run)"
+    )
 
     chat_parser = subparsers.add_parser("chat", help="Interactive chat mode")
     chat_parser.add_argument("--max-iter", dest="chat_max_iter", type=int, default=50, help="Maximum agent iterations")
@@ -5736,7 +5804,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "list":
         return _coerce_exit_code(cmd_list(args.list_limit))
     if args.command == "show":
-        return _coerce_exit_code(cmd_show(args.show))
+        return _coerce_exit_code(cmd_show(args.run_id))
+    if args.command == "check":
+        return _coerce_exit_code(cmd_check(args.run_id))
     if args.command == "chat":
         return _coerce_exit_code(cmd_interactive(args.chat_max_iter))
     if args.command == "alpha":
@@ -5766,6 +5836,8 @@ def main(argv: list[str] | None = None) -> int:
         return _coerce_exit_code(cmd_list())
     if args.show:
         return _coerce_exit_code(cmd_show(args.show))
+    if args.check:
+        return _coerce_exit_code(cmd_check(args.check))
     if args.code:
         return _coerce_exit_code(cmd_code(args.code))
     if args.pine:

@@ -388,3 +388,92 @@ def test_fetch_stops_when_fallbacks_leave_symbols_missing(
                 "source": "primary",
             }
         )
+
+
+class _PrefixStrippingLocalLoader:
+    """Mimic the real local loader: strips the ``local:`` prefix from keys."""
+
+    name = "local"
+    fetched: list[str] = []
+
+    def fetch(self, codes, start_date, end_date, **kwargs):
+        del start_date, end_date, kwargs
+        type(self).fetched.extend(codes)
+        frame = pd.DataFrame(
+            {"open": [1.0], "high": [1.0], "low": [1.0], "close": [1.0]},
+            index=pd.DatetimeIndex([pd.Timestamp("2024-04-03")]),
+        )
+        return {
+            c.split(":", 1)[1] if c.lower().startswith("local:") else c: frame
+            for c in codes
+        }
+
+
+class _EmptyLocalLoader:
+    name = "local"
+
+    def fetch(self, *args, **kwargs):
+        del args, kwargs
+        return {}
+
+
+class _NetworkStubLoader:
+    name = "tencent"
+
+    def is_available(self):
+        return True
+
+    def fetch(self, *args, **kwargs):
+        del args, kwargs
+        raise AssertionError("network loader must not be fetched for source=local")
+
+
+def test_fetch_data_map_local_prefix_normalizes_result_keys(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _PrefixStrippingLocalLoader.fetched = []
+    monkeypatch.setattr(runner, "_get_loader", lambda source: _PrefixStrippingLocalLoader)
+
+    result = runner.fetch_data_map(
+        {
+            "codes": ["local:600097.SH"],
+            "start_date": "2024-04-03",
+            "end_date": "2024-04-04",
+            "source": "local",
+        }
+    )
+
+    assert _PrefixStrippingLocalLoader.fetched == ["600097.SH"]
+    assert list(result.data_map) == ["600097.SH"]
+    assert result.codes == ["600097.SH"]
+    assert result.effective_sources == ["local"]
+
+
+def test_fetch_data_map_local_fails_closed_without_network_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(runner, "_get_loader", lambda source: _EmptyLocalLoader)
+    monkeypatch.setitem(runner.LOADER_REGISTRY, "tencent", _NetworkStubLoader)
+
+    with pytest.raises(NoAvailableSourceError, match="600097.SH"):
+        runner.fetch_data_map(
+            {
+                "codes": ["local:600097.SH"],
+                "start_date": "2024-04-03",
+                "end_date": "2024-04-04",
+                "source": "local",
+            }
+        )
+
+
+def test_fetch_auto_local_fails_closed_without_network_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(runner, "resolve_loader", lambda market: _EmptyLocalLoader())
+    monkeypatch.setitem(runner.LOADER_REGISTRY, "tencent", _NetworkStubLoader)
+
+    with pytest.raises(NoAvailableSourceError, match="600097.SH"):
+        runner._fetch_auto(
+            ["local:600097.SH"],
+            {"start_date": "2024-04-03", "end_date": "2024-04-04"},
+        )

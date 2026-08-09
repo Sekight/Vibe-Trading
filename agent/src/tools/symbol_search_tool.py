@@ -33,7 +33,9 @@ logger = logging.getLogger(__name__)
 # returns multi-market candidates under ``QuotationCodeTable.Data`` with a
 # ready-made ``QuoteID`` secid. Requests route through the frozen, throttled
 # Eastmoney client; this is just the documented endpoint URL + query shape.
-_EASTMONEY_SUGGEST_URL = "https://searchapi.eastmoney.com/api/suggest/get"
+# HTTP is used on purpose: Eastmoney's edge returns a JSONP fallback page to
+# CPython HTTPS clients, while plain HTTP returns the real QuotationCodeTable.
+_EASTMONEY_SUGGEST_URL = "http://searchapi.eastmoney.com/api/suggest/get"
 
 # Eastmoney market-number -> our symbol suffix. Anything else is left unmapped
 # (those candidates are skipped rather than emitted with a wrong suffix).

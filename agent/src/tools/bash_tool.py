@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import subprocess
+import locale
+
 from typing import Any
 
 from src.agent.tools import BaseTool
@@ -11,6 +13,18 @@ from src.tools._shell_safety import broad_python_kill_error
 
 _OUTPUT_LIMIT = 50_000
 _DEFAULT_TIMEOUT = 120
+
+def _decode_output(data: bytes) -> str:
+    """Decode subprocess bytes, preferring UTF-8 and falling back to the OS locale.
+
+    Windows cmd outputs ANSI (e.g. GBK) by default, so UTF-8-only decoding turns
+    Chinese text into replacement chars in run logs."""
+    if not data:
+        return ""
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        return data.decode(locale.getpreferredencoding(False), errors="replace")
 
 
 class BashTool(BaseTool):
@@ -58,13 +72,12 @@ class BashTool(BaseTool):
                 cwd=cwd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True,
                 timeout=_DEFAULT_TIMEOUT,
-                encoding="utf-8",
-                errors="replace",
             )
-            stdout = result.stdout[:_OUTPUT_LIMIT] if len(result.stdout) > _OUTPUT_LIMIT else result.stdout
-            stderr = result.stderr[:_OUTPUT_LIMIT] if len(result.stderr) > _OUTPUT_LIMIT else result.stderr
+            stdout_raw = _decode_output(result.stdout)
+            stderr_raw = _decode_output(result.stderr)
+            stdout = stdout_raw[:_OUTPUT_LIMIT] if len(stdout_raw) > _OUTPUT_LIMIT else stdout_raw
+            stderr = stderr_raw[:_OUTPUT_LIMIT] if len(stderr_raw) > _OUTPUT_LIMIT else stderr_raw
             return json.dumps({
                 "status": "ok" if result.returncode == 0 else "error",
                 "exit_code": result.returncode,

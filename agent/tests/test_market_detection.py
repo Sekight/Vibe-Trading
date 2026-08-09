@@ -165,6 +165,12 @@ class TestNormalizeCodes:
         assert _normalize_codes(codes, "tushare") == codes
         assert _normalize_codes(codes, "yfinance") == codes
 
+    def test_local_prefix_stripped(self) -> None:
+        assert _normalize_codes(["local:600097.SH", "600097.SH"], "local") == [
+            "600097.SH",
+            "600097.SH",
+        ]
+
 
 # ---------------------------------------------------------------------------
 # _is_china_futures — audit-2026-05-18 B1 bug fix coverage

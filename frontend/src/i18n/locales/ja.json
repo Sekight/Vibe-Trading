@@ -558,6 +558,8 @@
     "side": "売買区分",
     "price": "価格",
     "qty": "数量",
+    "positionWeight": "保有割合",
+    "lots": "手",
     "reason": "理由",
     "schema": "スキーマ",
     "generated": "生成時刻",

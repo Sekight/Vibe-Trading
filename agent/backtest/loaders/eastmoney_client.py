@@ -25,14 +25,17 @@ import logging
 import re
 from typing import Any
 
-from backtest.loaders._http import resolve_min_interval, throttled_get_json
+from backtest.loaders._http import resolve_min_interval, throttled_get
 
 logger = logging.getLogger(__name__)
 
 # Eastmoney kline endpoints. push2his serves historical bars; searchapi resolves
 # a free-text ticker to its fully-qualified secid (needed for US tickers).
 _KLINE_URL = "https://push2his.eastmoney.com/api/qt/stock/kline/get"
-_SEARCH_URL = "https://searchapi.eastmoney.com/api/suggest/get"
+# Eastmoney's edge serves CPython HTTPS requests a JSONP fallback page instead
+# of the real suggest payload; plain HTTP returns QuotationCodeTable as expected.
+# Ticker/name search carries no secrets, so HTTP is used here deliberately.
+_SEARCH_URL = "http://searchapi.eastmoney.com/api/suggest/get"
 
 # Throttle/session bucket shared by all Eastmoney calls.
 _HOST_KEY = "eastmoney"
@@ -94,12 +97,17 @@ def get_json(url: str, *, params: dict[str, Any]) -> Any:
         requests.HTTPError: Non-2xx response status.
         ValueError: Body is not valid JSON.
     """
-    return throttled_get_json(
+    response = throttled_get(
         url,
         host_key=_HOST_KEY,
         min_interval=_min_interval(),
         params=params,
     )
+    response.raise_for_status()
+    payload = _strip_jsonp(response.text)
+    if payload is None:
+        raise ValueError("Body is not valid JSON or JSONP")
+    return payload
 
 
 def _resolve_a_share_secid(code: str, suffix: str) -> str | None:

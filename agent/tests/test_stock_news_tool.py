@@ -1,7 +1,7 @@
 """Tests for the stock-news tool.
 
 No request leaves the process: the Eastmoney HTTP boundary
-(:func:`backtest.loaders.eastmoney_client.throttled_get_json`) and the Yahoo
+(:func:`backtest.loaders.eastmoney_client.throttled_get`) and the Yahoo
 :func:`backtest.loaders.yahoo_client.search_news` helper are mocked so the real
 client + tool parsing run fully offline.
 """
@@ -22,6 +22,17 @@ from src.tools.stock_news_tool import (
     _snippet,
     _suffix_of,
 )
+
+
+def _fake_response(body: str):
+    """Minimal requests.Response stand-in exposing what get_json reads."""
+    class _Response:
+        text = body
+
+        def raise_for_status(self) -> None:
+            return None
+
+    return _Response()
 
 
 def _em_news_payload() -> dict[str, Any]:
@@ -124,7 +135,7 @@ class TestExecuteSuccess:
     def test_a_share_stock_news(self) -> None:
         tool = StockNewsTool()
         with patch.object(
-            eastmoney_client, "throttled_get_json", return_value=_em_news_payload()
+            eastmoney_client, "throttled_get", return_value=_fake_response(json.dumps(_em_news_payload()))
         ) as http:
             out = json.loads(tool.execute(code="600519.SH", scope="stock", limit=10))
 
@@ -145,7 +156,7 @@ class TestExecuteSuccess:
     def test_global_scope_needs_no_code(self) -> None:
         tool = StockNewsTool()
         with patch.object(
-            eastmoney_client, "throttled_get_json", return_value=_em_news_payload()
+            eastmoney_client, "throttled_get", return_value=_fake_response(json.dumps(_em_news_payload()))
         ):
             out = json.loads(tool.execute(scope="global"))
 
@@ -225,7 +236,7 @@ class TestExecuteError:
         tool = StockNewsTool()
         with patch.object(
             eastmoney_client,
-            "throttled_get_json",
+            "throttled_get",
             side_effect=RuntimeError("eastmoney banned"),
         ):
             out = json.loads(tool.execute(code="600519.SH"))

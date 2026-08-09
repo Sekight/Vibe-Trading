@@ -184,6 +184,13 @@ Hard constraints:
 - Do not include an `if __name__ == "__main__"` block
 - Pure pandas/numpy implementation, no external signal libraries
 
+Runner AST safety constraints (violations reject the file and force a rewrite):
+- NO decorators on any function or class, including `@staticmethod`, `@classmethod`, `@property` — write plain methods instead
+- NO `open(mode='w'/'a'/'x'/'+'...)`, `Path.write_text`, or any file writing inside SignalEngine methods or helpers; use `print(...)` to stdout for diagnostics if needed
+- NO network calls (`requests`/`httpx`/`urllib`/`socket`), subprocess, `os.system`, `eval`/`exec`/`compile`, or `getattr` indirection onto os/forbidden modules
+- NO executable statements at module top level or inside class bodies; keep logic inside `SignalEngine` methods
+- Imports at module top level may include `math`, `numpy`, `pandas`, `typing` only (other pure helpers are allowed unless forbidden above)
+
 ## Quality Checklist
 
 Self-check before marking any phase complete:

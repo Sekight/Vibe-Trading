@@ -16,6 +16,14 @@ category: strategy
 
 **You only need to write `signal_engine.py` and `config.json`. The `backtest` tool automatically handles data loading and backtest execution.**
 
+4.5. **Local AST safety pre-check (always run before `backtest`)**: the runner rejects decorators, file writes, network/subprocess/eval usage, and top-level executable statements. Catch them locally first to avoid a costly rewrite loop:
+   ```bash
+   python -c "import ast,sys; t=ast.parse(open('code/signal_engine.py',encoding='utf-8').read()); [sys.exit('decorator: '+getattr(n,'name','')) for n in ast.walk(t) if isinstance(n,(ast.FunctionDef,ast.AsyncFunctionDef,ast.ClassDef)) and n.decorator_list]; [sys.exit('open write') for n in ast.walk(t) if isinstance(n,ast.Call) and isinstance(n.func,ast.Name) and n.func.id=='open' and n.args and isinstance(n.args[1],ast.Constant) and any(c in n.args[1].value for c in 'wax+')]; print('AST OK')"
+   ```
+   Also ban these from the file body: imports of `requests/httpx/urllib/socket/subprocess`, `eval/exec/compile`, `os.system`/`os.popen`, and any top-level or class-body statement other than imports/constants/function/class definitions.
+
+**Zero-trade guard**: when the entry rule has a tight window (e.g. "within N bars"), print a diagnostic from `generate()` counting how many times the entry condition actually fires (touch count, breakout count, final signal count). If the count is 0 over the whole range, report that to the user and propose relaxing the window or picking another instrument instead of repeatedly tweaking the code.
+
 ## Requirements Parsing
 
 Extract the following from the user's description:
@@ -68,6 +76,12 @@ class SignalEngine:
 - Do not include an `if __name__ == "__main__"` block
 - Pure pandas / numpy implementation, with no external signal libraries
 - Output plain Python code, not Markdown fences
+
+**Runner AST safety constraints (violations reject the file and force a rewrite):**
+- NO decorators on any function or class, including `@staticmethod`, `@classmethod`, `@property` — write plain methods instead
+- NO `open(mode='w'/'a'/'x'/'+'...)`, `Path.write_text`, or any file writing inside methods or helpers; diagnostics must use `print(...)` to stdout
+- NO network calls (`requests`/`httpx`/`urllib`/`socket`), subprocess, `os.system`, `eval`/`exec`/`compile`, or `getattr` indirection onto os/forbidden modules
+- NO executable statements at module top level or inside class bodies; keep all logic inside `SignalEngine` methods (helper functions are allowed but must follow the same rules)
 
 ## Quality Checklist
 

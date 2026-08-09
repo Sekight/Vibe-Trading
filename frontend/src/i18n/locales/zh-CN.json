@@ -558,6 +558,8 @@
     "side": "方向",
     "price": "价格",
     "qty": "数量",
+    "positionWeight": "持仓占比",
+    "lots": "手数",
     "reason": "原因",
     "schema": "版本",
     "generated": "生成时间",

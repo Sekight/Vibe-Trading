@@ -189,7 +189,10 @@ def test_cancel_before_first_run_is_not_cleared(tmp_path: Path) -> None:
 
     reused = agent.run(user_message="new request")
 
-    assert reused["status"] == "success"
+    # max_iter=1 means the reused run ends on the forced last iteration without
+    # producing metrics/run card, so it is incomplete rather than success.
+    assert reused["status"] == "warning"
+    assert "max iterations" in reused["reason"]
     assert llm.calls == 1
 
 
@@ -353,11 +356,15 @@ class _StubLLMStreamFailure:
         )
 
     def chat(self, messages: list[dict[str, Any]], **_: Any) -> _StubLLMResponse:
-        return _StubLLMResponse()
+        raise ProviderStreamError(
+            provider="deepseek",
+            model="deepseek-v4-pro",
+            original=RuntimeError("chat exploded"),
+        )
 
 
 def test_provider_stream_error_returns_structured_failure(tmp_path: Path) -> None:
-    """Provider stream failures should stay diagnosable at the session boundary."""
+    """Provider stream + fallback chat failures stay diagnosable."""
     agent = _build_agent(_StubLLMStreamFailure(), max_iter=3, tmp_run_dir=tmp_path / "run")
 
     result = agent.run(user_message="anything")
@@ -390,6 +397,26 @@ def test_force_text_only_on_last_iteration(tmp_path: Path) -> None:
     )
     result = agent.run(user_message="do something")
 
-    assert result["status"] == "success"
+    # Iteration cap was reached and no metrics/run card were produced, so the
+    # run must be surfaced as incomplete rather than a silent success.
+    assert result["status"] == "warning"
+    assert "max iterations" in result["reason"]
     assert "Final answer" in result["content"]
     assert result["iterations"] == 5
+
+
+def test_backtest_shaped_run_without_report_is_warning(tmp_path: Path) -> None:
+    """Generated config/code without run_card must not be reported as success."""
+    run_dir = tmp_path / "run"
+    (run_dir / "code").mkdir(parents=True, exist_ok=True)
+    (run_dir / "config.json").write_text("{}", encoding="utf-8")
+    (run_dir / "code" / "signal_engine.py").write_text("# engine", encoding="utf-8")
+    agent = _build_agent(_StubLLMSuccess(), max_iter=5, tmp_run_dir=run_dir)
+
+    result = agent.run(user_message="backtest these symbols")
+
+    assert result["status"] == "warning"
+    assert "run_card" in result["reason"]
+    state = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+    assert state["status"] == "warning"
+    assert "run_card" in state["reason"]

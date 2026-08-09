@@ -1,7 +1,7 @@
 """Tests for the dragon-tiger (龙虎榜) tool.
 
 No request leaves the process: the HTTP boundary
-(:func:`backtest.loaders.eastmoney_client.throttled_get_json`) is mocked so the
+(:func:`backtest.loaders.eastmoney_client.throttled_get`) is mocked so the
 real client + tool parsing runs offline.
 """
 
@@ -15,6 +15,17 @@ import pytest
 
 from backtest.loaders import eastmoney_client
 from src.tools.dragon_tiger_tool import DragonTigerTool, _bare_code, _compact_date
+
+
+def _fake_response(body: str):
+    """Minimal requests.Response stand-in exposing what get_json reads."""
+    class _Response:
+        text = body
+
+        def raise_for_status(self) -> None:
+            return None
+
+    return _Response()
 
 
 def _appearance_payload() -> dict[str, Any]:
@@ -94,7 +105,7 @@ class TestExecuteSuccess:
     def test_full_market_list_no_code(self) -> None:
         tool = DragonTigerTool()
         with patch.object(
-            eastmoney_client, "throttled_get_json", return_value=_appearance_payload()
+            eastmoney_client, "throttled_get", return_value=_fake_response(json.dumps(_appearance_payload()))
         ) as http:
             out = json.loads(tool.execute(date="2024-01-02"))
 
@@ -117,7 +128,7 @@ class TestExecuteSuccess:
         tool = DragonTigerTool()
         payloads = [_appearance_payload(), _seat_payload()]
         with patch.object(
-            eastmoney_client, "throttled_get_json", side_effect=payloads
+            eastmoney_client, "throttled_get", side_effect=[_fake_response(json.dumps(p)) for p in payloads]
         ) as http:
             out = json.loads(tool.execute(date="2024-01-02", code="600519.SH"))
 
@@ -144,7 +155,7 @@ class TestExecuteError:
         tool = DragonTigerTool()
         with patch.object(
             eastmoney_client,
-            "throttled_get_json",
+            "throttled_get",
             side_effect=RuntimeError("eastmoney banned"),
         ), patch(
             "src.tools.dragon_tiger_tool.tushare_fallbacks.fetch_dragon_tiger",
@@ -164,7 +175,7 @@ class TestExecuteError:
         tool = DragonTigerTool()
         with patch.object(
             eastmoney_client,
-            "throttled_get_json",
+            "throttled_get",
             side_effect=RuntimeError("eastmoney banned"),
         ), patch(
             "src.tools.dragon_tiger_tool.tushare_fallbacks.fetch_dragon_tiger",

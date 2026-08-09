@@ -33,6 +33,7 @@ class _FlakyLoopLLM:
         self._errors = list(errors)
         self._final_content = final_content
         self.calls = 0
+        self.chat_calls = 0
 
     def stream_chat(
         self,
@@ -75,7 +76,8 @@ class _FlakyLoopLLM:
         Returns:
             Empty ``LLMResponse``.
         """
-        return LLMResponse(content="")
+        self.chat_calls += 1
+        return LLMResponse(content=self._final_content)
 
 
 def _transient_error() -> ProviderStreamError:
@@ -171,15 +173,29 @@ def test_transient_stream_failure_is_retried_and_run_succeeds(
     assert reset["model"] == "deepseek-v4-pro"
 
 
-def test_double_stream_failure_fails_run(monkeypatch, tmp_path: Path) -> None:
-    """Two consecutive transient failures → failed run, no third attempt."""
+def test_double_stream_failure_falls_back_to_nonstreaming_chat(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Two consecutive transient failures fall back to non-streaming chat."""
     llm = _FlakyLoopLLM([_transient_error(), _transient_error()], "Final answer.")
 
-    result = _run(monkeypatch, tmp_path, llm)
+    events: list[tuple[str, dict[str, Any]]] = []
+    result = _run(monkeypatch, tmp_path, llm, events)
 
-    assert result["status"] == "failed"
-    assert result["error_code"] == "provider_stream_error"
+    assert result["status"] == "success"
+    assert result["content"] == "Final answer."
     assert llm.calls == 2
+    assert llm.chat_calls == 1
+
+    event_types = [event_type for event_type, _ in events]
+    resets = [
+        data for event_type, data in events if event_type == "stream_reset"
+    ]
+    assert [r["reason"] for r in resets] == [
+        "provider_stream_retry",
+        "provider_stream_nonstreaming_fallback",
+    ]
+    assert "text_delta" in event_types
 
 
 def test_non_retryable_4xx_fails_without_retry(monkeypatch, tmp_path: Path) -> None:

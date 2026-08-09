@@ -323,6 +323,7 @@ class AgentTuningConfig(_EnvBase):
         alias="VT_REASONING_DELTA_MIN_INTERVAL_S", default=1.0,
     )
     vt_stream_retry_delay_s: float = Field(alias="VT_STREAM_RETRY_DELAY_S", default=1.0)
+    agent_max_iterations: int = Field(alias="AGENT_MAX_ITERATIONS", default=50)
     vibe_trading_tool_timeout_seconds: float = Field(
         alias="VIBE_TRADING_TOOL_TIMEOUT_SECONDS", default=1800.0,
     )

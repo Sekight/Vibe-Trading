@@ -16,6 +16,9 @@ const METRIC_LABELS_EN: Record<string, string> = {
   benchmark_return: "Benchmark",
   excess_return: "Excess Return",
   information_ratio: "IR",
+  avg_position_weight: "Avg Position Weight",
+  max_position_weight: "Max Position Weight",
+  risk_xray_avg_invested: "Avg Invested",
 };
 
 const METRIC_LABELS_ZH: Record<string, string> = {
@@ -34,6 +37,9 @@ const METRIC_LABELS_ZH: Record<string, string> = {
   benchmark_return: "基准收益",
   excess_return: "超额收益",
   information_ratio: "IR",
+  avg_position_weight: "平均持仓占比",
+  max_position_weight: "最大持仓占比",
+  risk_xray_avg_invested: "平均仓位",
 };
 
 // Canonical metric key set (English labels). Kept exported so consumers and
@@ -46,7 +52,7 @@ export function getMetricLabel(k: string): string {
   return METRIC_LABELS_EN[k] || k;
 }
 
-const PCT_KEYS = ["total_return", "annual_return", "win_rate", "max_drawdown", "benchmark_return", "excess_return"];
+const PCT_KEYS = ["total_return", "annual_return", "win_rate", "max_drawdown", "benchmark_return", "excess_return", "avg_position_weight", "max_position_weight", "risk_xray_avg_invested"];
 const RATIO_KEYS = ["sharpe", "calmar", "sortino", "profit_loss_ratio", "information_ratio"];
 const INT_KEYS = ["trade_count", "max_consecutive_loss"];
 const NEUTRAL_KEYS = new Set(["trade_count", "avg_holding_days", "final_value"]);
@@ -80,6 +86,7 @@ export const DISPLAY_ORDER = [
   "total_return", "annual_return", "sharpe", "max_drawdown", "win_rate", "trade_count",
   "calmar", "sortino", "profit_loss_ratio", "max_consecutive_loss",
   "benchmark_return", "excess_return", "information_ratio", "final_value", "avg_holding_days",
+  "avg_position_weight", "max_position_weight", "risk_xray_avg_invested",
 ];
 
 export function formatTimestamp(ts: number): string {

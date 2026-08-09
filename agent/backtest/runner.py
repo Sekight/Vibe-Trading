@@ -31,6 +31,7 @@ from backtest.loaders.registry import (
     FALLBACK_CHAINS,
     LOADER_REGISTRY,
     VALID_SOURCES,
+    _NO_NETWORK_FALLBACK_SOURCES,
     get_loader_cls_with_fallback,
     resolve_loader,
 )
@@ -264,9 +265,9 @@ def _validate_class_body(node: ast.ClassDef) -> None:
 # The structural checks above only reject *import-time* execution. The real
 # exposure is that once ``SignalEngine`` is instantiated and ``.generate()`` is
 # called, arbitrary code inside its method bodies runs with no runtime sandbox.
-# This scrubber walks the code that actually executes during a backtest — every
+# This scrubber walks the code that actually executes during a backtest 鈥?every
 # ``SignalEngine`` method plus any module-level helper transitively called from
-# one — and rejects network / process-spawn / dynamic-exec / filesystem-write
+# one 鈥?and rejects network / process-spawn / dynamic-exec / filesystem-write
 # operations there.
 #
 # It is deliberately scoped to *reachable* code, not the whole file: the bundled
@@ -279,7 +280,7 @@ def _validate_class_body(node: ast.ClassDef) -> None:
 # unused top-level import. Direct ``getattr``/``setattr``/``delattr`` indirection
 # onto ``os`` / forbidden modules is now rejected (see _reject_forbidden_getattr);
 # exotic reach via ``builtins.getattr`` or aliasing remains a documented residual
-# (VT-001) — this is defense-in-depth, not a kernel-level guarantee.
+# (VT-001) 鈥?this is defense-in-depth, not a kernel-level guarantee.
 _FORBIDDEN_IMPORT_MODULES = frozenset(
     {
         "socket",
@@ -300,7 +301,7 @@ _FORBIDDEN_IMPORT_MODULES = frozenset(
     }
 )
 # ``os`` itself is allowed (os.path etc.), but these attributes shell out, spawn,
-# or read the process environment — none has a place in a signal engine.
+# or read the process environment 鈥?none has a place in a signal engine.
 _FORBIDDEN_OS_ATTRS = frozenset(
     {
         "system",
@@ -323,7 +324,7 @@ _FORBIDDEN_BUILTINS = frozenset(
 )
 # getattr/setattr/delattr can indirect around the attribute scanner
 # (``getattr(os, "system")("id")``). We reject them ONLY when the target object
-# is ``os`` or a forbidden module — keyed off the target, not the attribute
+# is ``os`` or a forbidden module 鈥?keyed off the target, not the attribute
 # string, so ``getattr(os, "sys" + "tem")`` is caught too. Legitimate dynamic
 # access on user objects (``getattr(tech, name, None)``, ``getattr(self, x)``)
 # is unaffected.
@@ -379,8 +380,8 @@ def _reject_forbidden_open(node: ast.Call) -> None:
 def _reject_forbidden_getattr(node: ast.Call) -> None:
     """Reject getattr/setattr/delattr indirection onto ``os`` / forbidden modules.
 
-    Closes the documented bypass ``getattr(os, "system")("id")`` — and computed
-    variants like ``getattr(os, "sys" + "tem")`` — by keying off the *target*
+    Closes the documented bypass ``getattr(os, "system")("id")`` 鈥?and computed
+    variants like ``getattr(os, "sys" + "tem")`` 鈥?by keying off the *target*
     object (first positional arg), not the attribute string. Dynamic access on
     ordinary user objects (``getattr(tech, name, None)``) is left untouched.
     """
@@ -480,7 +481,7 @@ def _validate_signal_engine_source(file_path: Path) -> None:
         if isinstance(node, ast.ImportFrom) and node.module == "signal_engine":
             raise ValueError(
                 "Circular import: 'from signal_engine import ...' imports the file from itself. "
-                "Remove this import — SignalEngine is defined in this same file."
+                "Remove this import 鈥?SignalEngine is defined in this same file."
             )
         if isinstance(node, (ast.Import, ast.ImportFrom)):
             continue
@@ -616,6 +617,11 @@ def _normalize_codes(codes: List[str], source: str) -> List[str]:
     """
     if source in ("okx", "ccxt"):
         return [c.replace("/", "-").upper() for c in codes]
+    if source == "local":
+        # The local loader returns bars keyed by the clean symbol (it strips
+        # ``local:`` itself), so normalize here so the missing check and
+        # engine data keys see the same symbol the loader returns.
+        return [c.split(":", 1)[1] if c.lower().startswith("local:") else c for c in codes]
     return codes
 
 
@@ -1014,14 +1020,14 @@ def _create_market_engine(source: str, config: dict, codes: List[str]):
         from backtest.engines.forex import ForexEngine
         return ForexEngine(config)
 
-    # India equity routing — must precede source-based routing because India's
+    # India equity routing 鈥?must precede source-based routing because India's
     # effective source is ``yahoo``, which has no Wave-1 branch and would
     # otherwise fall through to the crypto default.
     if "india_equity" in markets:
         from backtest.engines.india_equity import IndiaEquityEngine
         return IndiaEquityEngine(config)
 
-    # Korea equity routing — same reason as India: its effective source
+    # Korea equity routing 鈥?same reason as India: its effective source
     # (``pykrx``) has no Wave-1 branch and would fall through to the default.
     if "kr_equity" in markets:
         from backtest.engines.korea_equity import KoreaEquityEngine
@@ -1101,7 +1107,7 @@ def _fetch_auto(codes: List[str], config: dict, interval: str = "1D") -> dict:
         except NoAvailableSourceError as exc:
             # Fallback: try legacy source mapping
             legacy_src = _MARKET_TO_SOURCE.get(market, "tushare")
-            logger.warning("Fallback chain failed for %s: %s — trying %s", market, exc, legacy_src)
+            logger.warning("Fallback chain failed for %s: %s 鈥?trying %s", market, exc, legacy_src)
             LoaderCls = _get_loader(legacy_src)
             loader = LoaderCls()
 
@@ -1124,6 +1130,13 @@ def _fetch_auto(codes: List[str], config: dict, interval: str = "1D") -> dict:
 
         # Retry only missing symbols so a partial primary response does not
         # silently shrink the requested universe or refetch successful data.
+        # local/qveris must never degrade to a network source: their data is
+        # user-owned local files, so a gap is a config problem to surface.
+        if src_name in _NO_NETWORK_FALLBACK_SOURCES:
+            if missing:
+                raise NoAvailableSourceError(
+                    f"incomplete data for {market}; missing symbols: {missing}"
+                )
         for fb_name in FALLBACK_CHAINS.get(market, []):
             if not missing:
                 break
@@ -1188,7 +1201,7 @@ def fetch_data_map(config: dict) -> DataFetchResult:
         # ``_get_loader`` may hand back a *different* loader when the requested
         # one is unavailable (e.g. an optional package like pykrx is missing, so
         # the kr_equity chain resolves to yahoo). Record who actually served the
-        # bars, never the name that was asked for — a run card that claims
+        # bars, never the name that was asked for 鈥?a run card that claims
         # ``pykrx`` while Yahoo supplied the data is a provenance lie.
         served_by = str(getattr(loader, "name", source) or source)
         if served_by != source:
@@ -1214,6 +1227,13 @@ def fetch_data_map(config: dict) -> DataFetchResult:
                 len(codes),
                 missing,
             )
+        if primary_source in _NO_NETWORK_FALLBACK_SOURCES:
+            # Explicit local/qveris requests fail closed: never let a
+            # missing local file silently degrade into a network fetch.
+            if missing:
+                raise NoAvailableSourceError(
+                    f"incomplete data for source={primary_source}; missing symbols: {missing}"
+                )
         if missing:
             market = _detect_market(codes[0])
             for fallback_source in FALLBACK_CHAINS.get(market, []):
@@ -1273,8 +1293,8 @@ def _sanitize_data_map(data_map: dict) -> dict:
     Each loader only drops NaN rows, so a bar that violates the OHLC
     invariants (``high < low``, a non-positive price, or a high/low that fails
     to bracket open/close) can still reach the backtest and surface as NaN/inf
-    metrics. Applying :func:`validate_ohlc` here — the single point every
-    fetched map converges through — guards every source uniformly (``auto``,
+    metrics. Applying :func:`validate_ohlc` here 鈥?the single point every
+    fetched map converges through 鈥?guards every source uniformly (``auto``,
     single-source, runtime fallback, and any future loader), so the per-loader
     checks no longer have to be added one at a time.
 

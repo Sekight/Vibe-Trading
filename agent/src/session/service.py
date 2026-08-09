@@ -370,6 +370,7 @@ class SessionService:
         from src.agent.loop import AgentLoop
         from src.memory.persistent import PersistentMemory
         from src.config.loader import load_runtime_agent_config, sanitize_session_overrides
+        from src.config.accessor import get_env_config
 
         llm = ChatLLM()
         pm = PersistentMemory()
@@ -409,7 +410,7 @@ class SessionService:
             registry=registry,
             llm=llm,
             event_callback=event_callback,
-            max_iterations=50,
+            max_iterations=get_env_config().agent_tuning.agent_max_iterations,
             persistent_memory=pm,
         )
         self._active_loops[session_id] = agent

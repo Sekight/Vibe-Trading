@@ -700,6 +700,38 @@ function parseTradeNumber(value?: string): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function isAShareCode(code?: string): boolean {
+  return !!code && /\.(SH|SZ|BJ)$/i.test(code.trim());
+}
+
+function tradeLots(tr: Record<string, string>, qty: number | null): number | null {
+  if (tr.lots != null && tr.lots !== "") {
+    const lots = parseTradeNumber(tr.lots);
+    if (lots != null) return lots;
+  }
+  return qty != null && isAShareCode(tr.code) ? qty / 100 : null;
+}
+
+function tradePositionWeight(
+  tr: Record<string, string>,
+  run: RunData,
+  qty: number | null,
+  price: number | null,
+): number | null {
+  if (tr.position_weight != null && tr.position_weight !== "") {
+    const weight = parseTradeNumber(tr.position_weight);
+    if (weight != null) return weight;
+  }
+  if (qty == null || price == null) return null;
+  const ts = tr.time || tr.timestamp;
+  if (!ts) return null;
+  const point = (run.equity_curve || []).find((p) => p.time === ts);
+  if (!point) return null;
+  const equity = Number(point.equity);
+  if (!Number.isFinite(equity) || equity <= 0) return null;
+  return (qty * price) / equity;
+}
+
 function signedNumberClass(value: number | null): string {
   if (value == null || value === 0) return "text-muted-foreground";
   return value > 0 ? "text-success" : "text-danger";
@@ -720,6 +752,10 @@ function TradesTab({ run }: { run: RunData }) {
   const hasPnl = trades.some((tr) => parseTradeNumber(tr.pnl) != null);
   const hasReturnPct = trades.some((tr) => parseTradeNumber(tr.return_pct) != null);
   const hasHoldingDays = trades.some((tr) => (tr.holding_days ?? "") !== "");
+  const hasLots = trades.some((tr) => tradeLots(tr, parseTradeNumber(tr.qty)) != null);
+  const hasWeight = trades.some((tr) => (
+    tradePositionWeight(tr, run, parseTradeNumber(tr.qty), parseTradeNumber(tr.price)) != null
+  ));
 
   const filtered = trades.filter((tr) => (
     (!sideFilter || normalizeSide(tr.side) === sideFilter)
@@ -795,6 +831,8 @@ function TradesTab({ run }: { run: RunData }) {
               <th className="py-2 pr-4">{i18n.t("runDetail.side")}</th>
               <th className="py-2 pr-4 text-right">{i18n.t("runDetail.price")}</th>
               <th className="py-2 pr-4 text-right">{i18n.t("runDetail.qty")}</th>
+              {hasLots && <th className="py-2 pr-4 text-right">{i18n.t("runDetail.lots")}</th>}
+              {hasWeight && <th className="py-2 pr-4 text-right">{i18n.t("runDetail.positionWeight")}</th>}
               {hasPnl && <th className="py-2 pr-4 text-right">{i18n.t("runDetail.pnl")}</th>}
               {hasReturnPct && <th className="py-2 pr-4 text-right">{i18n.t("runDetail.returnPct")}</th>}
               {hasHoldingDays && <th className="py-2 pr-4 text-right">{i18n.t("runDetail.holdingDays")}</th>}
@@ -806,6 +844,8 @@ function TradesTab({ run }: { run: RunData }) {
               const side = normalizeSide(tr.side);
               const pnl = parseTradeNumber(tr.pnl);
               const returnPct = parseTradeNumber(tr.return_pct);
+              const price = parseTradeNumber(tr.price);
+              const qty = parseTradeNumber(tr.qty);
               return (
                 <tr key={i} className={cn("border-b last:border-0 hover:bg-muted/40", i % 2 === 1 && "bg-muted/10")}>
                   <td className="py-2 ps-4 pr-4 font-mono text-xs">{tr.time || tr.timestamp}</td>
@@ -822,6 +862,22 @@ function TradesTab({ run }: { run: RunData }) {
                   </td>
                   <td className="py-2 pr-4 text-right font-mono tabular-nums">{tr.price}</td>
                   <td className="py-2 pr-4 text-right font-mono tabular-nums">{tr.qty}</td>
+                  {hasLots && (
+                    <td className="py-2 pr-4 text-right font-mono tabular-nums">
+                      {(() => {
+                        const lots = tradeLots(tr, qty);
+                        return lots != null ? lots.toFixed(2) : "—";
+                      })()}
+                    </td>
+                  )}
+                  {hasWeight && (
+                    <td className="py-2 pr-4 text-right font-mono tabular-nums">
+                      {(() => {
+                        const weight = tradePositionWeight(tr, run, qty, price);
+                        return weight != null ? `${(weight * 100).toFixed(2)}%` : "—";
+                      })()}
+                    </td>
+                  )}
                   {hasPnl && (
                     <td className={cn("py-2 pr-4 text-right font-mono tabular-nums", signedNumberClass(pnl))}>
                       {pnl != null ? formatSigned(pnl) : "—"}

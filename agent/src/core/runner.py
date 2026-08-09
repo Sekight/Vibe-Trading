@@ -131,9 +131,18 @@ def _prepare_sandbox_home(real_home: Path | None) -> Path:
                 try:
                     (dst_root / rel).symlink_to(src, target_is_directory=src.is_dir())
                 except OSError:
-                    # Best-effort: a loader that can't find its config just falls
-                    # back to a live fetch / disabled cache — never a hard break.
-                    pass
+                    # Windows without Developer Mode cannot create symlinks.
+                    # Copy the small loader-owned config files instead; the
+                    # opt-in cache can be large and is left to fall back.
+                    if rel == "cache":
+                        continue
+                    try:
+                        if src.is_dir():
+                            shutil.copytree(src, dst_root / rel, dirs_exist_ok=True)
+                        else:
+                            shutil.copy2(src, dst_root / rel)
+                    except OSError:
+                        pass
             try:
                 os.chmod(dst_root, 0o755)
             except OSError:

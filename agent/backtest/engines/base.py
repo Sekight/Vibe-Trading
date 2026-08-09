@@ -731,6 +731,11 @@ class BaseEngine(ABC):
             turnover_series=realized_turnover,
         )
         m.update(benchmark_metadata)
+        # Portfolio exposure: average and peak target invested weight.
+        position_weight_series = target_pos.sum(axis=1)
+        if len(position_weight_series):
+            m["avg_position_weight"] = float(position_weight_series.mean())
+            m["max_position_weight"] = float(position_weight_series.max())
         m["by_symbol"] = by_symbol_stats(self.trades)
         m["by_exit_reason"] = by_exit_reason_stats(self.trades)
 
@@ -1261,15 +1266,44 @@ class BaseEngine(ABC):
         target_pos.to_csv(out / "positions.csv")
 
         # Trades (compatible format)
+        equity_by_date = {
+            str(ts.date()) if hasattr(ts, "date") else str(ts): eq
+            for ts, eq in equity_series.items()
+        }
+
+        def _weight_and_lots(symbol, price, size, ts_key):
+            equity = equity_by_date.get(ts_key)
+            weight = round(size * price / equity, 4) if equity not in (None, 0) else None
+            lots = (
+                round(size / 100.0, 2)
+                if symbol.upper().endswith((".SH", ".SZ", ".BJ"))
+                else None
+            )
+            return weight, lots
+
         trade_rows = []
         for t in self.trades:
+            entry_key = (
+                str(t.entry_time.date()) if hasattr(t.entry_time, "date") else str(t.entry_time)
+            )
+            exit_key = (
+                str(t.exit_time.date()) if hasattr(t.exit_time, "date") else str(t.exit_time)
+            )
+            entry_weight, entry_lots = _weight_and_lots(
+                t.symbol, t.entry_price, t.size, entry_key
+            )
+            exit_weight, exit_lots = _weight_and_lots(
+                t.symbol, t.exit_price, t.size, exit_key
+            )
             # Entry event
             trade_rows.append({
-                "timestamp": str(t.entry_time.date()) if hasattr(t.entry_time, "date") else str(t.entry_time),
+                "timestamp": entry_key,
                 "code": t.symbol,
                 "side": "buy" if t.direction == 1 else "sell",
                 "price": round(t.entry_price, 4),
                 "qty": round(t.size, 6),
+                "position_weight": entry_weight,
+                "lots": entry_lots,
                 "reason": "signal",
                 "pnl": 0.0,
                 "holding_days": 0,
@@ -1281,18 +1315,20 @@ class BaseEngine(ABC):
             except Exception:
                 hold_days = 0
             trade_rows.append({
-                "timestamp": str(t.exit_time.date()) if hasattr(t.exit_time, "date") else str(t.exit_time),
+                "timestamp": exit_key,
                 "code": t.symbol,
                 "side": "sell" if t.direction == 1 else "buy",
                 "price": round(t.exit_price, 4),
                 "qty": round(t.size, 6),
+                "position_weight": exit_weight,
+                "lots": exit_lots,
                 "reason": t.exit_reason,
                 "pnl": round(t.pnl, 4),
                 "holding_days": hold_days,
                 "return_pct": round(t.pnl_pct, 2),
             })
 
-        trade_cols = ["timestamp", "code", "side", "price", "qty", "reason", "pnl", "holding_days", "return_pct"]
+        trade_cols = ["timestamp", "code", "side", "price", "qty", "position_weight", "lots", "reason", "pnl", "holding_days", "return_pct"]
         pd.DataFrame(trade_rows or [], columns=trade_cols).to_csv(out / "trades.csv", index=False)
 
         # Metrics

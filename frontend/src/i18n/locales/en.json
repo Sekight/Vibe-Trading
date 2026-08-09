@@ -563,6 +563,8 @@
     "side": "Side",
     "price": "Price",
     "qty": "Qty",
+    "positionWeight": "Position Weight",
+    "lots": "Lots",
     "reason": "Reason",
     "schema": "Schema",
     "generated": "Generated",

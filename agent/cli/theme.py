@@ -179,7 +179,9 @@ def _make_console() -> Console:
         emoji=False,  # project rule: no emoji anywhere
         markup=True,
         stderr=False,
-        legacy_windows=False if sys.platform == "win32" else None,
+        # Use the Win32 console API on Windows so legacy cmd/conhost renders
+        # colors/panels without leaking raw ANSI escape sequences.
+        legacy_windows=True if sys.platform == "win32" else None,
     )
 
 
