@@ -520,7 +520,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 
 ```text
 <run_id>/
-├─ config.json                 回测参数：codes / start_date / end_date / interval / source / initial_cash / commission / engine / optimizer / validation
+├─ config.json                 回测参数：codes / start_date / end_date / interval / source / initial_cash / 费率 / engine / optimizer / validation / entry_mode / exit_mode（详见 8.34）
 ├─ req.json                    用户原始 prompt + context（session_id）
 ├─ state.json                  状态：{"status":"success"} 或失败原因
 ├─ run_card.json / run_card.md 结果摘要：metrics、data_sources、hash、artifacts 清单
@@ -608,13 +608,55 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 > - `code/signal_engine.py`：策略信号引擎代码，回测实际执行的入场/出场/仓位逻辑。
 > - `run_card.json`：run card，即回测结果摘要，含 artifacts 清单、状态、指标与数据来源；它是“报告”的标志性文件。
 > - `artifacts/metrics.csv`：核心指标一行，如 total_return / annual_return / max_drawdown / sharpe / win_rate / trade_count。
-> - `artifacts/trades.csv`：逐笔交易明细，含入场/出场日期、价格、手数、持仓占比、止损价、盈亏。
+> - `artifacts/trades.csv`：逐笔交易明细，含入场/出场日期、价格、手数、持仓占比、出场原因、盈亏。
 > - `logs/runner_stdout.txt`：回测子进程的标准输出日志，排查回测内部报错用。
 > - 判定标准：`run_card.json` 和 `artifacts/metrics.csv` 同时存在 → REPORT OK；缺任一个 → NO REPORT，说明代码可能生成了但回测没真正跑完。
 
-
-
-
+> ### 8.34 run 目录下的 `config.json` 是什么？里面的字段都怎么用？
+>
+> `config.json` 是回测 runner 实际读取的“参数单”：agent 按你的提示词生成，也可以手动改；`python -m backtest.runner <run_dir>` 读它决定数据源、周期、标的、本金、费率、成交模式等，再加载 `code/signal_engine.py` 跑回测。它不含 API key；改完不会自动生效，需要重跑 runner 或用 `--continue` 续跑。
+>
+> 常见字段（不写某字段就用默认值；旧别名可同时保留）：
+>
+> | 字段 | 作用 | 默认值 |
+> | --- | --- | --- |
+> | `source` | 数据源：tencent / local / tushare / akshare / auto 等 | tushare |
+> | `interval` | K 线周期：1m / 5m / 15m / 30m / 1H / 4H / 1D | 1D |
+> | `codes` | 标的池，如 ["600519.SH"]；local 源可用 ["local:600097.SH"] | 必填 |
+> | `start_date` / `end_date` | 回测起止日期，YYYY-MM-DD | 必填 |
+> | `initial_cash` | 初始本金，引擎和指标都读它；`initial_capital` 是旧别名 | 1,000,000 |
+> | `commission_rate` | 佣金费率（A股万2.5=0.00025，双边） | 0.00025 |
+> | `commission_min` | 单笔最低佣金（A股 5 元）；旧别名 `min_commission` | 5.0 |
+> | `stamp_tax` | 印花税，卖出单边（A股万5=0.0005）；旧别名 `stamp_duty` | 0.0005 |
+> | `transfer_fee` | 过户费（A股万0.1=0.00001，双边） | 0.00001 |
+> | `slippage` | 滑点比例（买价×1.001、卖价×0.999） | 0.001 |
+> | `engine` | 回测引擎：daily / options | daily |
+> | `entry_mode` | 开仓成交时点：next_open（次日开盘）或 close（信号日收盘） | next_open |
+> | `exit_mode` | 平仓成交时点：next_open / close / stop（止损价成交） | next_open |
+> | `optimizer` | 权重优化器名（如 risk_parity）；`optimizer_params` 传参数 | 无（不优化） |
+> | `constraints` | 组合约束（总仓位、单标的上限等），需配合 optimizer 才生效 | 无 |
+> | `validation` | 设为 true 时跑蒙特卡洛等稳健性验证，产出 artifacts/validation.json | false |
+> | `benchmark` | 基准标的，如 "000300.SH"；配 local 数据源才能拿到真实基准 | 无 |
+> | `extra_fields` | 取数时额外字段（如 vwap / amount） | 无 |
+> | `fundamental_fields` / `event_feeds` | 进阶：给回测注入基本面或事件数据 | 无 |
+> | `leverage` | 杠杆倍数；A股引擎强制 1，写多少都被覆盖 | 1.0 |
+>
+> 注意：`_run_card_effective_sources`、`_run_card_warnings` 是 runner 运行后写入的内部字段，不要手动编辑。
+>
+> #### 成交时点 `entry_mode` / `exit_mode`（重点）
+>
+> - 允许组合只有三种：`next_open/next_open`（默认，旧行为不变）、`close/close`、`close/stop`；`next_open/close`、`next_open/stop`、`close/next_open` 会在 `agent/backtest/engines/base.py` 直接报错。
+> - `next_open`：信号日收盘出信号，次日开盘成交，避免用到当日收盘信息。
+> - `close`：信号日收盘价成交，适合“尾盘集合竞价 / 当天决定当天成交”。
+> - `stop`（只能配 `entry_mode=close`）：出场按策略给的止损价成交；当日最低价触及止损价时，成交价 = min(当日开盘价, 止损价)（跳空低开按开盘价，避免成交价低于开盘价）；未触及止损则按收盘价成交。
+>
+> #### `stop_prices`（策略代码字段，不写在 config.json）
+>
+> - 止损价由 `signal_engine.py` 自己算：`SignalEngine.generate()` 返回权重的同时，把 `self.stop_prices = {代码: pd.Series(止损价, index=交易日)}` 带上。
+> - 只有 `exit_mode="stop"` 时引擎才读它；某天止损价为 NaN/缺失，当天出场退回收盘价成交。
+> - `config.json` 不需要也不能写 `stop_prices`。
+>
+>
   ## 9. 命令速查表
 
 

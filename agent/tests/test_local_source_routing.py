@@ -16,6 +16,7 @@ import pytest
 
 from backtest.benchmark import resolve_benchmark
 from backtest.engines.crypto import CryptoEngine
+from backtest.engines.china_a import ChinaAEngine
 from backtest.engines.global_equity import GlobalEquityEngine
 from backtest.runner import _create_market_engine
 
@@ -32,6 +33,18 @@ class TestLocalSourceEngineRouting:
     def test_local_crypto_still_routes_to_crypto_engine(self) -> None:
         engine = _create_market_engine("local", {"initial_cash": 100_000}, ["BTC-USDT"])
         assert isinstance(engine, CryptoEngine)
+
+    def test_tencent_a_share_routes_to_china_a_engine(self) -> None:
+        engine = _create_market_engine(
+            "tencent", {"initial_cash": 100_000}, ["600519.SH"],
+        )
+        assert isinstance(engine, ChinaAEngine)
+
+    def test_local_a_share_routes_to_china_a_engine(self) -> None:
+        engine = _create_market_engine(
+            "local", {"initial_cash": 100_000}, ["000001.SZ"],
+        )
+        assert isinstance(engine, ChinaAEngine)
 
 
 class _FakeLoader:

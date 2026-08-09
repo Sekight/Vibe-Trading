@@ -137,6 +137,7 @@ def _align(
     signal_map: Dict[str, pd.Series],
     codes: List[str],
     optimizer: Optional[Callable] = None,
+    shift_bars: int = 1,
 ) -> tuple:
     """Build aligned date index, close matrix, target-position matrix, return matrix.
 
@@ -207,9 +208,14 @@ def _align(
         np.nan_to_num(sig_vals, copy=False, nan=0.0)
         np.clip(sig_vals, -1.0, 1.0, out=sig_vals)
         # shift(1) + fillna(0): prepend 0, drop last
+        # Same-bar mode (shift_bars=0) keeps the signal on its own bar;
+        # otherwise prepend 0 and drop the last bar (next-bar-open semantics).
         shifted_vals = np.empty_like(sig_vals)
-        shifted_vals[0] = 0.0
-        shifted_vals[1:] = sig_vals[:-1]
+        if shift_bars > 0:
+            shifted_vals[0] = 0.0
+            shifted_vals[1:] = sig_vals[:-1]
+        else:
+            shifted_vals[:] = sig_vals
         # Place into unified grid via searchsorted
         row_idx = np.searchsorted(dates_i8, own_idx.values.view("i8"))
         pos_arr[row_idx, j] = shifted_vals
@@ -375,6 +381,19 @@ class BaseEngine(ABC):
         self.config = config
         self.initial_capital: float = config.get("initial_cash", 1_000_000)
         self.default_leverage: float = config.get("leverage", 1.0)
+        # Execution modes: next_open (default, existing behavior) or close-family.
+        # close/stop fill on the same bar the signal is emitted; the signal series
+        # is not shifted when the close family is active.
+        self.entry_mode: str = str(config.get("entry_mode", "next_open"))
+        self.exit_mode: str = str(config.get("exit_mode", "next_open"))
+        _exec_pair = f"{self.entry_mode}/{self.exit_mode}"
+        if _exec_pair not in {"next_open/next_open", "close/close", "close/stop"}:
+            raise ValueError(
+                "Allowed: next_open/next_open (default), close/close, close/stop."
+                f"Unsupported entry_mode/exit_mode combination: {_exec_pair!r}. "
+                "Allowed: next_open/next_open (default), close/close, close/stop."
+            )
+        self._same_bar: bool = self.entry_mode == "close"
         # Markets that clear at or below zero (e.g. EU day-ahead power) opt in
         # to opening on negative-price bars. Default False preserves the legacy
         # "reject any open_price <= 0" behavior. An exactly-zero open is always
@@ -393,6 +412,8 @@ class BaseEngine(ABC):
         self.equity_snapshots: List[EquitySnapshot] = []
         self._bar_idx: int = 0
         self._active_symbol: str = ""  # set by _rebalance/_close_position for subclass use
+        self._stop_map: Optional[Dict[str, pd.Series]] = None
+        self._stop_arr: Optional[np.ndarray] = None
 
     # ── Market rule interface (subclass must implement) ──
 
@@ -511,6 +532,10 @@ class BaseEngine(ABC):
             The prospective fill price, or None when the bar has no usable open.
         """
         raw = bar.get("open", bar.get("close"))
+        # Same-bar mode fills at the decision bar's close (stop exits fill at
+        # min(open, stop) which is bounded by the same band when stop is inside it).
+        if self._same_bar:
+            raw = bar.get("close", bar.get("open"))
         if raw is None or pd.isna(raw):
             return None
         price = float(raw)
@@ -571,6 +596,35 @@ class BaseEngine(ABC):
     def valuation_open(self, bar: pd.Series) -> float:
         """Return the price observable when open orders are sized."""
         return float(bar.get("open", bar.get("close", 0)))
+
+    def _open_fill_price(self, bar: pd.Series) -> float:
+        """Raw (pre-slippage) fill price for opening orders."""
+        if self._same_bar:
+            return float(bar.get("close", bar.get("open", 0)))
+        return self.execution_open(bar)
+
+    def _close_fill_price(self, bar: pd.Series, ts: pd.Timestamp, symbol: str) -> float:
+        """Raw (pre-slippage) fill price for closing orders."""
+        if not self._same_bar:
+            return self.execution_open(bar)
+        stop = self._stop_price(ts, symbol)
+        low = bar.get("low")
+        if stop is not None and low is not None and pd.notna(low) and float(low) <= stop:
+            open_px = bar.get("open")
+            if open_px is not None and pd.notna(open_px):
+                return min(float(open_px), stop)
+            return stop
+        return float(bar.get("close", bar.get("open", 0)))
+
+    def _stop_price(self, ts: pd.Timestamp, symbol: str) -> Optional[float]:
+        """Return the strategy-provided stop price at ``ts`` or None."""
+        if self._stop_arr is None or self._code_to_col is None:
+            return None
+        col = self._code_to_col.get(symbol)
+        if col is None or self._bar_idx >= len(self._stop_arr):
+            return None
+        val = self._stop_arr[self._bar_idx, col]
+        return None if val is None or np.isnan(val) else float(val)
 
     # ── PnL / margin calculation hooks ──
     # Override in FuturesBaseEngine to inject contract multiplier.
@@ -676,10 +730,19 @@ class BaseEngine(ABC):
         opt_fn = _load_optimizer(config)
         dates, close_df, target_pos, ret_df = _align(
             data_map, signal_map, valid_codes, optimizer=opt_fn,
+            shift_bars=0 if self._same_bar else 1,
         )
 
         # Sync codes after _align may have dropped all-NaN symbols
         valid_codes = [c for c in valid_codes if c in target_pos.columns]
+
+        # Optional stop-price series from the strategy. Only used for
+        # exit_mode="stop" same-bar exits; without it stops fall back to close.
+        self._stop_map = None
+        if self._same_bar and self.exit_mode == "stop":
+            stop_map = getattr(signal_engine, "stop_prices", None)
+            if isinstance(stop_map, dict):
+                self._stop_map = stop_map
 
         # 4. Bar-by-bar execution
         self._execute_bars(dates, data_map, close_df, target_pos, valid_codes)
@@ -810,7 +873,8 @@ class BaseEngine(ABC):
             m,
             data_sources=_run_card_data_sources(config, loader),
             strategy_path=run_dir / "code" / "signal_engine.py",
-            warnings=config.get("content_filter_warnings") or None,
+            warnings=((config.get("content_filter_warnings") or [])
+                      + (config.get("_run_card_warnings") or [])) or None,
         )
 
         # Print scalar metrics (skip nested dicts for JSON compat).
@@ -839,6 +903,19 @@ class BaseEngine(ABC):
         # Store as instance attrs for use in _calc_equity / _safe_price
         self._close_arr = _close_arr
         self._code_to_col = _code_to_col
+        # Align optional stop prices to the unified bar grid (same-bar only).
+        _stop_arr = None
+        if self._stop_map:
+            stop_df = pd.DataFrame(index=dates)
+            for c in codes:
+                s = self._stop_map.get(c)
+                if s is not None:
+                    stop_df[c] = pd.Series(s).reindex(dates)
+            if len(stop_df.columns):
+                # reindex keeps NaN columns for codes without a stop series,
+                # matching the close matrix column order (codes).
+                _stop_arr = stop_df.reindex(columns=codes).values
+        self._stop_arr = _stop_arr
 
         for i, ts in enumerate(dates):
             self._bar_idx = i
@@ -849,6 +926,12 @@ class BaseEngine(ABC):
             # Rebalances happen at the bar open, so using close_df[ts] here
             # would let the yet-unknown decision-bar close affect order size.
             equity = self._calc_open_equity(data_map, close_df, ts)
+            # Same-bar mode fills at the decision bar's close, which is already
+            # known when the signal is emitted; value the book at close there.
+            if self._same_bar:
+                equity = self._calc_equity(close_df, ts)
+            else:
+                equity = self._calc_open_equity(data_map, close_df, ts)
             target_weights: Dict[str, Optional[float]] = {}
             for c in codes:
                 try:
@@ -996,6 +1079,8 @@ class BaseEngine(ABC):
         # Clean up temporary instance attributes
         self._close_arr = None
         self._code_to_col = None
+        self._stop_arr = None
+        self._stop_map = None
 
     def _calc_open_equity(
         self,
@@ -1111,8 +1196,8 @@ class BaseEngine(ABC):
             need_close = target_dir == 0 or target_dir != current_pos.direction
             if need_close:
                 if self.can_execute(symbol, 0, bar):
-                    open_price = self.execution_open(bar)
-                    price = self.apply_slippage(open_price, -current_pos.direction)
+                    raw_price = self._close_fill_price(bar, ts, symbol)
+                    price = self.apply_slippage(raw_price, -current_pos.direction)
                     self._close_position(symbol, price, ts, "signal")
                 else:
                     return  # blocked (e.g. limit-down can't sell)
@@ -1138,13 +1223,13 @@ class BaseEngine(ABC):
         bar = df.loc[ts]
         if not self.can_execute(symbol, direction, bar):
             return None
-        open_price = self.execution_open(bar)
+        raw_price = self._open_fill_price(bar)
         # Zero is always rejected (size = notional / price is undefined);
         # negatives are rejected unless this engine opted into non-positive
         # prices, in which case abs()-based sizing/margin below handle them.
-        if open_price == 0 or (open_price < 0 and not self.allow_nonpositive_prices):
+        if raw_price == 0 or (raw_price < 0 and not self.allow_nonpositive_prices):
             return None
-        price = self.apply_slippage(open_price, direction)
+        price = self.apply_slippage(raw_price, direction)
         leverage = self._leverage_for_symbol(symbol)
         target_notional = abs(target_weight) * equity * leverage
         size = self.round_size(

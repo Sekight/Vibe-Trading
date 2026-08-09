@@ -956,6 +956,13 @@ def main(run_dir: Path) -> None:
         sys.exit(1)
     data_map = _maybe_inject_fundamentals_for_factor_panel(data_map, config)
 
+    # Data coverage guard: a loader can silently return a shorter window than
+    # requested (e.g. tencent caps a single request at 500 bars).
+    coverage_warnings = _data_coverage_warnings(config, data_map)
+    if coverage_warnings:
+        config["_run_card_warnings"] = coverage_warnings
+        print(json.dumps({"warning": "incomplete data coverage", "details": coverage_warnings}))
+
     # Engine
     engine_type = config.get("engine", "daily")
     signal_engine = engine_cls()
@@ -981,6 +988,32 @@ def main(run_dir: Path) -> None:
     else:
         market_engine = _create_market_engine(effective_source, config, codes)
         market_engine.run_backtest(config, loader, signal_engine, run_dir, bars_per_year=bars_per_year)
+
+
+def _data_coverage_warnings(
+    config: dict, data_map: Dict[str, pd.DataFrame],
+) -> List[str]:
+    """Warn when a loader's earliest bar is materially later than requested.
+
+    A few calendar days of weekend/holiday at the start boundary are normal;
+    the 10-day tolerance targets silent truncation (e.g. a provider cap).
+    """
+    warnings: List[str] = []
+    try:
+        start_ts = pd.Timestamp(config["start_date"])
+    except Exception:
+        return warnings
+    tolerance = pd.Timedelta(days=10)
+    for code, frame in data_map.items():
+        if frame is None or frame.empty:
+            continue
+        first = frame.index.min()
+        if first is not None and pd.notna(first) and first - start_ts > tolerance:
+            warnings.append(
+                f"data coverage for {code} starts {first.date()} "
+                f"instead of requested {start_ts.date()}"
+            )
+    return warnings
 
 
 def _create_market_engine(source: str, config: dict, codes: List[str]):
@@ -1032,6 +1065,12 @@ def _create_market_engine(source: str, config: dict, codes: List[str]):
     if "kr_equity" in markets:
         from backtest.engines.korea_equity import KoreaEquityEngine
         return KoreaEquityEngine(config)
+
+    # A-share routing must be market-driven, not source-driven: tencent/local
+    # loaders serve A-share bars but previously fell through to CryptoEngine.
+    if "a_share" in markets:
+        from backtest.engines.china_a import ChinaAEngine
+        return ChinaAEngine(config)
 
     # Original routing (Wave 1)
     if source in ("okx", "ccxt"):
