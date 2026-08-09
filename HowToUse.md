@@ -409,6 +409,8 @@ git push origin mumu-main
   2. 新增环境变量 `AGENT_MAX_ITERATIONS`（默认 50）：WebUI 会话的 AgentLoop 会读取它。建议在 `C:\Users\mumu\.vibe-trading\.env` 里设 `AGENT_MAX_ITERATIONS=12`，一般策略任务 8-12 轮足够，能封顶异常长跑并省 token。
 - 同时建议设 `VIBE_TRADING_SSE_TIMEOUT=600`，避免前端在中途断开等待；设完重启后端。
 - 工作流建议：①把“3 根窗口 / ATR×0.3 / 5% 风险 / 尾盘 14:55”等数字写死在 prompt 里，减少 agent 猜测；②同一只股票反复调参时，先离线跑一次拿到 `artifacts/ohlcv_*.csv`，之后用 local loader（`local:600097.SH`）或直接改已生成代码本地回测，完全不走 LLM；③策略信号数很少时，先看条件频次统计再决定放宽/换标的；④想保留已有 run 的上下文继续改，用 `vibe-trading --continue <run_id> "把窗口改成 5"`（见 4.5），不要从零重开。
+- 数据缓存：固定标的 + 固定区间反复调参时，可开 loader 数据缓存 `VIBE_TRADING_DATA_CACHE=1` 复用已下载行情；是否值得开、怎么开、有哪些坑见 8.35。
+
 ### 8.21 data-bridge 是什么？怎么配置？
 
 - 概念：data-bridge 是 Vibe-Trading 的“自带数据桥”，源码实现是 `agent/backtest/loaders/local_loader.py`。它让你把自己本地的 CSV / Parquet / DuckDB 行情文件喂给回测，不联网、不依赖东财/腾讯等在线数据源，也不会因为网络问题反复失败。
@@ -657,6 +659,29 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 > - `config.json` 不需要也不能写 `stop_prices`。
 >
 >
+### 8.35 loader 数据缓存（`VIBE_TRADING_DATA_CACHE`）要不要开？什么时候开？
+
+结论先说：你现在主要用 WebUI / `vibe-trading run` 发任务，这个缓存帮助不大（原因见下），更推荐直接用 data-bridge；只有当你改用 `python -m backtest.runner <run_dir>` 直接反复调同一批标的 + 固定区间时，才值得开。
+
+- 是什么：回测 loader 的“可选本地行情缓存”。开启后，各数据源（tencent / tushare / akshare / mootdx / eastmoney / yfinance / ccxt / okx / futu / finnhub / tiingo / fmp / baostock / local 等）把“已完全结算的历史 K 线”按 key 存成 parquet；下次同一请求直接读本地，不联网。
+- 怎么开：在 `C:\Users\mumu\.vibe-trading\.env` 加 `VIBE_TRADING_DATA_CACHE=1`（`true/yes/on` 也行），默认关闭，不设或写 `0` 即关。默认目录是 `C:\Users\mumu\.vibe-trading\cache\loaders`；想换位置再加 `VIBE_TRADING_DATA_CACHE_ROOT=E:\...\loader-cache`。改完重启 `serve` / `dev` 后端，或新开 CLI 进程。
+- 缓存了什么：只有 loader 返回的行情 DataFrame（OHLCV + 你请求的 `extra_fields`）。不缓存 run card、策略代码、LLM 分析、token 用量，也不含 API key。目录结构为 `cache\loaders\<source>\<sha256>.parquet` + 同名 `.parquet.json` 元数据。
+- key 怎么算：`缓存版本 + source + symbol + timeframe + start_date + end_date + fields`。所以只有“同一数据源 + 同一标的 + 同一周期 + 同一区间 + 同一字段”才会命中。
+- 增量吗：不做增量。区间从 2023-01-01~2023-12-28 改成 ~2023-12-31 时，key 变了，会全量重拉并写一个新文件，旧文件仍留在磁盘，不会只补 3 天。
+- 什么时候会缓存成功：只有 `end_date` 严格早于今天（最后一根 bar 已结算）才会缓存；区间结束日等于今天或未来时每次重新联网，避免把未完成的 bar 缓存成“最终数据”。
+- 什么时候建议开：
+  - 同一批标的 + 固定区间反复调参，且用直接 runner 跑（`python -m backtest.runner <run_dir>`）：缓存命中后取数是秒级，完全跳过网络。
+  - 数据源网络不稳、限流或按次计费（yfinance / finnhub / tiingo / fmp / tushare 等）。
+  - 长区间分页很慢的源（腾讯日线 500 根/段）。
+- 什么时候不建议开 / 注意：
+  - 本机 WebUI 和 `vibe-trading run` 的 agent 回测走沙箱临时 HOME；本机没有开发者模式、创建不了符号链接，`agent/src/core/runner.py` 对 `cache` 目录“不复制、只跳过”，所以缓存对沙箱内取数基本无效（写了也随临时 HOME 删除）。缓存主要对直接跑 runner 有用。
+  - 命中率低就别开：每次区间/标的都不同，只会不断累积 parquet 文件。
+  - 已经用 data-bridge 本地 CSV 时没必要：数据本来就在本地，再缓存一份是重复占盘。
+  - 缓存没有自动过期：数据源后续修正复权、除权或历史数据时，旧缓存不会自己失效；2026-08-10 腾讯 500 根截断 bug 就是靠把缓存版本 3 升到 4 才让旧坏条目失效的。
+  - 若在数据源出 bug 或网络半截期间开着缓存，坏数据也会被缓存并反复命中；遇到可疑结果先清缓存再重跑。
+- 怎么清：回测没在跑时删除 `C:\Users\mumu\.vibe-trading\cache\loaders` 整个目录，或只删对应 `<source>` 子目录即可，程序下次会自动重建。
+- 替代方案：需要“确定且可长期复用”的数据，直接用 data-bridge（8.21）：把 `artifacts/ohlcv_*.csv` 复制到 data-bridge 目录，对话里用 `local:<symbol>` 回测，比缓存更透明、可控、可跨项目复用。
+
   ## 9. 命令速查表
 
 
