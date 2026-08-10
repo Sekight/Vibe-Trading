@@ -957,6 +957,9 @@ vibe-trading serve --port 8899
 | `GET` | `/runs` | runs を一覧表示 |
 | `GET` | `/runs/{run_id}` | run details |
 | `GET` | `/runs/{run_id}/pine` | Multi-platform indicator export |
+| `GET` | `/runs/{run_id}/analysis` | 回測分析レポート（`analysis.md`）とステータス |
+| `GET` | `/runs/{run_id}/analysis/charts` | artifacts から分析チャートデータを算出 + PNG リスト |
+| `GET` | `/runs/{run_id}/analysis/charts/{name}.png` | 保存済み分析チャート PNG を返す |
 | `POST` | `/sessions` | session を作成 |
 | `POST` | `/sessions/{id}/messages` | message を送信 |
 | `GET` | `/sessions/{id}/events` | SSE event stream |

@@ -960,6 +960,9 @@ vibe-trading serve --port 8899
 | `GET` | `/runs` | runs 목록 |
 | `GET` | `/runs/{run_id}` | run details |
 | `GET` | `/runs/{run_id}/pine` | multi-platform indicator export |
+| `GET` | `/runs/{run_id}/analysis` | 백테스트 분석 리포트(`analysis.md`)와 상태 |
+| `GET` | `/runs/{run_id}/analysis/charts` | artifacts에서 분석 차트 데이터 계산 + PNG 목록 |
+| `GET` | `/runs/{run_id}/analysis/charts/{name}.png` | 저장된 분석 차트 PNG 반환 |
 | `POST` | `/sessions` | session 생성 |
 | `POST` | `/sessions/{id}/messages` | message 전송 |
 | `GET` | `/sessions/{id}/events` | SSE event stream |

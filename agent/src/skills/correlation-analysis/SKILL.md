@@ -249,7 +249,7 @@ def sector_clustering(
 ## Mode 4: Realized Correlation
 
 > **Authoritative Source**: This section is the single source of truth for regime classification rules.
-> Other files (e.g., `agent/src/agent/context.py` Layer 3, `docs/trade-attribution-design.md`) reference this definition.
+> Other files (e.g., `docs/trade-attribution-design.md`) reference this definition.
 
 **Use case**: Compute rolling correlation time series and analyze conditional correlation by market regime (bull / bear / high-volatility) to discover how correlation evolves dynamically.
 

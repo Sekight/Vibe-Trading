@@ -1,4 +1,4 @@
-"""Tests for the post-backtest attribution layers in system prompt."""
+"""Tests for the post-backtest analysis contract in the system prompt."""
 
 from __future__ import annotations
 
@@ -11,59 +11,29 @@ from src.agent.context import ContextBuilder
 
 
 @pytest.mark.unit
-class TestAttributionLayersPresence:
-    """Verify all 4 attribution layers exist in system prompt."""
+class TestPostBacktestAnalysisPresence:
+    """Verify the system prompt delegates analysis to write_run_analysis."""
 
-    def test_system_prompt_contains_layer1_trade_attribution(self):
+    def test_system_prompt_instructs_write_run_analysis(self):
         from src.agent.context import _SYSTEM_PROMPT
 
-        assert "Layer 1" in _SYSTEM_PROMPT
-        assert "Trade Attribution" in _SYSTEM_PROMPT
+        assert "write_run_analysis" in _SYSTEM_PROMPT
+        assert "analysis.md" in _SYSTEM_PROMPT
+        assert "analysis.status.json" in _SYSTEM_PROMPT
 
-    def test_system_prompt_contains_layer2_beta_regression(self):
+    def test_system_prompt_forbids_inline_attribution_duplication(self):
         from src.agent.context import _SYSTEM_PROMPT
 
-        assert "Layer 2" in _SYSTEM_PROMPT
-        assert "Beta Regression" in _SYSTEM_PROMPT
+        assert "do not repeat the full attribution analysis inline" in _SYSTEM_PROMPT
 
-    def test_system_prompt_contains_layer3_regime_analysis(self):
-        from src.agent.context import _SYSTEM_PROMPT
-
-        assert "Layer 3" in _SYSTEM_PROMPT
-        assert "Regime Analysis" in _SYSTEM_PROMPT
-
-    def test_system_prompt_contains_layer4_monte_carlo(self):
-        from src.agent.context import _SYSTEM_PROMPT
-
-        assert "Layer 4" in _SYSTEM_PROMPT
-        assert "Monte Carlo" in _SYSTEM_PROMPT
-
-
-@pytest.mark.unit
-class TestAttributionSkillReferences:
-    """Verify skill routing references in attribution layers."""
-
-    def test_layer3_references_correlation_analysis_skill(self):
-        """Layer 3 should delegate regime classification to correlation-analysis skill."""
-        from src.agent.context import _SYSTEM_PROMPT
-
-        assert 'load_skill("correlation-analysis")' in _SYSTEM_PROMPT
-
-    def test_layer2_references_performance_attribution_skill(self):
-        """Layer 2 should reference performance-attribution for deep analysis."""
-        from src.agent.context import _SYSTEM_PROMPT
-
-        assert 'load_skill("performance-attribution")' in _SYSTEM_PROMPT
-
-    def test_at_risk_references_backtest_diagnose_skill(self):
-        """At-risk routing should reference backtest-diagnose for code-level diagnosis."""
+    def test_system_prompt_keeps_backtest_diagnose_reference(self):
         from src.agent.context import _SYSTEM_PROMPT
 
         assert 'load_skill("backtest-diagnose")' in _SYSTEM_PROMPT
 
 
 @pytest.mark.unit
-class TestAttributionPromptIntegrity:
+class TestPromptIntegrity:
     """Verify prompt formatting and structural integrity."""
 
     def test_system_prompt_format_succeeds(self):
@@ -87,27 +57,14 @@ class TestAttributionPromptIntegrity:
         assert "{skill_count}" not in result
         assert "{data_source_count}" not in result
 
-    def test_strategy_routing_thresholds_present(self):
-        """Verify strategy routing classification is defined."""
-        from src.agent.context import _SYSTEM_PROMPT
-
-        assert "Sharpe" in _SYSTEM_PROMPT
-        assert "MaxDD" in _SYSTEM_PROMPT
-
-    def test_override_mechanism_present(self):
-        """Verify user can override routing to run all layers."""
-        from src.agent.context import _SYSTEM_PROMPT
-
-        assert "Override" in _SYSTEM_PROMPT or "override" in _SYSTEM_PROMPT
-
-    def test_threshold_rationale_self_contained(self):
-        """Threshold rationale is documented inline, not via a gitignored docs/ path."""
+    def test_rationale_self_contained(self):
+        """The prompt contract is documented inline, not via a gitignored docs/ path."""
         from pathlib import Path
         import src.agent.context as ctx_module
 
         source = Path(ctx_module.__file__).read_text(encoding="utf-8")
-        # The rationale comment must be present and self-contained.
-        assert "attribution thresholds" in source.lower()
+        # The write_run_analysis contract must be present and self-contained.
+        assert "write_run_analysis" in source
         # The internal docs/ tree is gitignored and never published; the module
         # must not point at a file that won't exist in the distributed repo.
         assert "docs/" not in source

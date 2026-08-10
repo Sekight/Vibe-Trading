@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Query, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 
 # ---------------------------------------------------------------------------
@@ -291,6 +291,51 @@ def register_runs_routes(
             "exists": True,
             "content": pine_path.read_text(encoding="utf-8"),
         }
+
+    @app.get("/runs/{run_id}/analysis", dependencies=[Depends(require_auth)])
+    async def get_run_analysis(run_id: str):
+        """Return analysis.md content and analysis.status.json for a run."""
+        _host_validate_path_param(run_id, "run_id")
+        run_dir = _host_RUNS_DIR() / run_id
+        if not run_dir.exists():
+            raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+        markdown_path = run_dir / "analysis.md"
+        status_path = run_dir / "analysis.status.json"
+        return {
+            "run_id": run_id,
+            "markdown": markdown_path.read_text(encoding="utf-8") if markdown_path.exists() else None,
+            "status": _load_json_file(status_path),
+        }
+
+    @app.get("/runs/{run_id}/analysis/charts", dependencies=[Depends(require_auth)])
+    async def get_run_analysis_charts(run_id: str):
+        """Return chart-ready payloads and saved PNG metadata for a run."""
+        _host_validate_path_param(run_id, "run_id")
+        run_dir = _host_RUNS_DIR() / run_id
+        if not run_dir.exists():
+            raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+        metrics_path = run_dir / "artifacts" / "metrics.csv"
+        if not metrics_path.exists():
+            return {"run_id": run_id, "charts": {}, "pngs": [], "available": False}
+        from backtest.analysis.charts import compute_chart_payload, list_pngs  # noqa: PLC0415
+        from backtest.analysis.digest import build_digest  # noqa: PLC0415
+        digest = build_digest(run_dir)
+        return {
+            "run_id": run_id,
+            "charts": compute_chart_payload(digest),
+            "pngs": list_pngs(run_dir),
+            "available": True,
+        }
+
+    @app.get("/runs/{run_id}/analysis/charts/{name}.png", dependencies=[Depends(require_auth)])
+    async def get_run_analysis_chart_png(run_id: str, name: str):
+        """Serve one saved analysis PNG from ``analysis_charts/``."""
+        _host_validate_path_param(run_id, "run_id")
+        _host_validate_path_param(name, "chart_name")
+        png_path = _host_RUNS_DIR() / run_id / "analysis_charts" / f"{name}.png"
+        if not png_path.is_file():
+            raise HTTPException(status_code=404, detail=f"PNG {name}.png not found for run {run_id}")
+        return FileResponse(png_path, media_type="image/png")
 
     @app.get("/runs/{run_id}", response_model=RunResponse, dependencies=[Depends(require_auth)])
     async def get_run_result(

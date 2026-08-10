@@ -988,6 +988,9 @@ vibe-trading serve --port 8899
 | `GET` | `/runs` | List runs |
 | `GET` | `/runs/{run_id}` | Run details |
 | `GET` | `/runs/{run_id}/pine` | Multi-platform indicator export |
+| `GET` | `/runs/{run_id}/analysis` | Run analysis report (`analysis.md`) and status |
+| `GET` | `/runs/{run_id}/analysis/charts` | Analysis chart payloads computed from artifacts + PNG list |
+| `GET` | `/runs/{run_id}/analysis/charts/{name}.png` | Serve one saved analysis chart PNG |
 | `POST` | `/sessions` | Create session |
 | `POST` | `/sessions/{id}/messages` | Send message |
 | `GET` | `/sessions/{id}/events` | SSE event stream |

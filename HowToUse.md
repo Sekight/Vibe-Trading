@@ -6,7 +6,7 @@
 
 ---
 
-## 1. 两个重要概念：短命令 vs 完整路径
+ ## 1. 两个重要概念：短命令 vs 完整路径
 
 - 激活 venv 后，`vibe-trading` 短命令会由 PATH 自动解析到：
   `E:\gitCloneProgram\vibe-trading-src\.venv\Scripts\vibe-trading.exe`
@@ -119,6 +119,14 @@ vibe-trading --list                                 # 等同 vibe-trading list
 ```
 
 说明：
+- 直接重跑某个已完成的 run（代码和数据都已就绪，不经过 agent、不烧 LLM token）：在 `agent` 目录下执行
+
+  ```powershell
+  cd E:\gitCloneProgram\vibe-trading-src\agent
+  ..\.venv\Scripts\python.exe -m backtest.runner "C:\Users\mumu\.vibe-trading\runs\<run_id>"
+  ```
+
+  后面加 `--with-analysis` 会在回测成功后补生成 LLM 分析报告 `analysis.md`（会调用一次 LLM，见 8.36）。
 - `--continue` 是关键新用法：改参数、修条件、接着上次结果继续跑都用它，比从零重开省 token。语法是顶层 `vibe-trading --continue <run_id> "新指令"`，不是 `run --continue`。
 - `--show` / `--check` / `--code` / `--pine` / `--trace` 都是只读操作，不消耗 LLM token。带 run_id 的命令统一用 `--` 形式；子命令 `show` / `check` 也保留可用，但文档只写 `--` 形式。
 - 交互式 `vibe-trading chat` 里也有对应快捷指令：`/show <run_id>`、`/code <run_id>`、`/continue <run_id> <prompt>`。
@@ -185,6 +193,22 @@ vibe-trading serve --port 8899
 `vibe-trading setup` 不需要每次运行：只在首次、`frontend/package.json` 或锁文件变更、node_modules/dist 被删后执行。
 
 ---
+
+### 5.7 运行详情页的标签页
+
+打开任意 run 后，详情页从左到右是：
+
+| 标签 | 内容 |
+|---|---|
+| 图表 | 原有价格/权益曲线（基于 artifacts 里的 OHLCV / equity） |
+| 分析图 | 回测成功后自动生成的 7 张分析图（ECharts 交互渲染，PNG 兜底） |
+| 分析 | LLM 生成的 `analysis.md` 报告（agent 自动写，或 runner 补生成） |
+| 交易 | `artifacts/trades.csv` 交易明细（含持仓占比、手数） |
+| 运行卡片 | `run_card.json` 摘要 |
+| 代码 | 本次策略 `code/signal_engine.py` |
+| 验证 | `validation.json` 稳健性结果（存在时才显示） |
+
+7 张分析图：净值曲线（累计收益率 %）、回撤瀑布图（水下曲线，0 在上、负值在下）、单笔盈亏散点（红赚绿亏）、月度损益热力图（红赚绿亏）、盈亏 vs 持仓时长、MAE/MFE 金标准图、持仓分桶盈亏与胜率。图表数据从 `artifacts/` 现算，不额外落库。
 
 ## 6. 修改代码与添加依赖
 
@@ -335,6 +359,26 @@ git push origin mumu-main
 - 已执行（2026-08-07）：该行已追加到 `C:\Users\mumu\.vibe-trading\.env`，新 run 直接生效。
 - 该变量只加目录白名单，不影响 API key 和其他配置。
 
+### 8.14 OpenCode Go 套餐的 API key 能用于 Vibe-Trading 吗？
+
+- 可以。OpenCode Go 提供 OpenAI 兼容端点，Vibe-Trading 已内置 `opencode-go` provider（`agent/src/providers/capabilities.py`）。
+- 配置写入 `C:\Users\mumu\.vibe-trading\.env`：
+  ```ini
+  LANGCHAIN_PROVIDER=opencode-go
+  OPENAI_API_KEY=你的Go key
+  OPENAI_BASE_URL=https://opencode.ai/zen/go/v1
+  LANGCHAIN_MODEL_NAME=deepseek-v4-flash
+  ```
+- 可用模型清单：https://opencode.ai/zen/go/v1/models（含 deepseek-v4-flash、deepseek-v4-pro、kimi-k3、glm-5.2 等）。
+- `vibe-trading init` 的列表暂未列出 OpenCode Go，直接编辑 `.env` 或后续加进 init 列表。
+- 注意：`opencode.ai/zen/go/v1/models` 和端点表格里的 Model ID 就是 OpenAI 兼容请求要填的 `model`；`opencode-go/<model-id>` 前缀只用于 OpenCode 自己的配置，Vibe-Trading 直接用短 ID 即可。
+- 验证（2026-08-10 已实测通过）：`vibe-trading provider doctor` 显示 `provider=opencode-go`、`OPENAI_API_KEY=set`；最小 `vibe-trading run -p "Reply with exactly: OK"` 成功生成 run card，run_id 为 `20260810_225636_96_e7fbce`。
+- 踩坑：`.env` 里必须写成 `OPENAI_API_KEY=sk-...` 同一行；key 换行会导致 dotenv 读不到。`.env` 编辑后若 doctor 显示 key 未 set，先检查是否断行。
+- `provider doctor` 会把 base_url 脱敏成 `https://opencode.ai`（只显示域名），实际请求仍会使用 `OPENAI_BASE_URL=https://opencode.ai/zen/go/v1`，不要看到域名就去改掉完整路径。
+- chat completions 偶发 500 时先等 1-2 分钟重试：2026-08-10 实测 OpenCode Go 端点曾连续 500，同一 key/模型稍后重试即返回 200，不是本地配置错误。
+
+- 多套 provider 配置并存时，生效的是 `LANGCHAIN_PROVIDER` 指定的那一套：当前为 `opencode-go`，所以只读取 `OPENAI_API_KEY` / `OPENAI_BASE_URL`；`DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL` 即使仍在 `.env` 中也不会参与请求，只是保留待用。想切回 DeepSeek 官方，把 `LANGCHAIN_PROVIDER` 改成 `deepseek` 即可，模型名无需改。
+
 ### 8.14 `AgentLoop error: Connection error / WinError 10054` 是什么？
 
 - 含义：agent 调用 LLM（如 DeepSeek）时，远端把连接强制关闭，属于瞬时网络或服务端问题，不是本地配置/代码错误。
@@ -386,6 +430,7 @@ git push origin mumu-main
 - 不需要重新 `pip install`：源码版是 `pip install -e .`，新进程启动时直接读取仓库里的最新源码。
 - `vibe-trading dev` 的 Vite 热更新只对前端源码生效；Python 后端改动同样要重启整个 `dev` 进程。
 - 如果只是跑一次性 CLI（`vibe-trading run -p "..."`），每条命令都是新进程，改动直接生效，不需要先重启。
+- 改前端源码后：`vibe-trading dev` 下 Vite 热更新，改完刷新页面即可；`setup + serve` 生产/单端口模式需要重新执行 `vibe-trading setup` 生成新 dist，刷新页面即生效，无需重启后端。
 
 ### 8.18 日志出现 `WinError 10054 远程主机强迫关闭了一个现有的连接`？
 
@@ -516,6 +561,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 位置：
 - 当前默认：`C:\Users\mumu\.vibe-trading\runs\<run_id>`（CLI 和 WebUI 都是这里）。
 - 早期/其他版本也可能出现在 `E:\gitCloneProgram\vibe-trading-src\agent\runs\<run_id>`；`run_card.json` 的 `run_dir` 字段会记录本次实际目录。
+- 注意：`vibe-trading serve` / `vibe-trading dev` 启动时会自动把旧版 `agent/runs`（及 sessions/uploads）迁移到 `~/.vibe-trading` 下，迁移后 `agent/runs` 目录会被清空移除；已迁移的 run 仍在 run 列表里，只是物理位置变了，无需手动处理。
 - 允许的 run roots 由 `VIBE_TRADING_ALLOWED_RUN_ROOTS` 控制，见 8.13。
 
 结构（以一次成功 run 为例）：
@@ -526,6 +572,9 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 ├─ req.json                    用户原始 prompt + context（session_id）
 ├─ state.json                  状态：{"status":"success"} 或失败原因
 ├─ run_card.json / run_card.md 结果摘要：metrics、data_sources、hash、artifacts 清单
+├─ analysis.md                 LLM 生成的策略分析报告（agent 自动写，或 --with-analysis 补生成）
+├─ analysis.status.json        分析状态：ok / failed / skipped + generated_by / llm_usage
+├─ analysis_charts/            自动生成的 7 张分析图 PNG
 ├─ llm_usage.json              agent 每轮迭代的 token 统计（input / output / total）
 ├─ trace.jsonl                 agent 步骤追踪日志（调试用）
 ├─ code/
@@ -549,6 +598,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 - 中途失败/被中止的 run 可能只有 `req.json`、`trace.jsonl`、`state.json`，没有 `code/` 和 `artifacts/`。
 - 没有自动清理机制：新任务永远新建目录，旧 run 不会被覆盖也不会自动删除，需要自己手动清理。
 - 查看入口：`vibe-trading list` 列所有 run，`vibe-trading --show <run_id>` 看 run card 和指标。
+- 分析产物：`analysis_charts/` 的 7 张 PNG 在回测成功后自动生成；`analysis.md` / `analysis.status.json` 是 LLM 分析报告（agent 自动写，或 runner 加 `--with-analysis` 补生成），不存在不代表回测失败，见 8.36。
 
 ### 8.25 `source=local` 报 missing: ['local:600097.SH']，然后卡在 tushare token？
 
@@ -613,6 +663,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 > - `artifacts/trades.csv`：逐笔交易明细，含入场/出场日期、价格、手数、持仓占比、出场原因、盈亏。
 > - `logs/runner_stdout.txt`：回测子进程的标准输出日志，排查回测内部报错用。
 > - 判定标准：`run_card.json` 和 `artifacts/metrics.csv` 同时存在 → REPORT OK；缺任一个 → NO REPORT，说明代码可能生成了但回测没真正跑完。
+> - `analysis.md` / `analysis.status.json`：可选分析产物（见 8.36），不存在不代表回测失败。
 
 > ### 8.34 run 目录下的 `config.json` 是什么？里面的字段都怎么用？
 >
@@ -682,6 +733,24 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 - 怎么清：回测没在跑时删除 `C:\Users\mumu\.vibe-trading\cache\loaders` 整个目录，或只删对应 `<source>` 子目录即可，程序下次会自动重建。
 - 替代方案：需要“确定且可长期复用”的数据，直接用 data-bridge（8.21）：把 `artifacts/ohlcv_*.csv` 复制到 data-bridge 目录，对话里用 `local:<symbol>` 回测，比缓存更透明、可控、可跨项目复用。
 
+### 8.36 回测分析报告（analysis.md）和 7 张分析图是什么？
+
+- 每次回测成功后，runner 都会自动生成 `analysis_charts/*.png`（7 张：净值曲线、回撤瀑布、单笔盈亏散点、月度损益热力图、盈亏 vs 持仓时长、MAE/MFE、持仓分桶），不需要额外参数、不烧 LLM token；单张图失败不阻塞回测。
+- LLM 分析报告 `analysis.md` 是可选产物，由两条路径生成，行为一致（同一份 digest 同一套 prompt）：
+  1. agent 路径：回测成功后 agent 自动调用 `write_run_analysis` 工具写 `analysis.md` + `analysis.status.json`，最终回复只引用文件路径，不再重复长篇归因（省 token）。
+  2. runner 路径：在 `agent` 目录下执行 `..\.venv\Scripts\python.exe -m backtest.runner "C:\Users\mumu\.vibe-trading\runs\<run_id>" --with-analysis`（也支持 `--withAnalysis`），回测成功后会补生成同一份分析（会调用一次 LLM；`VIBE_TRADING_ANALYSIS_TIMEOUT` 可调超时，默认 120 秒）。
+- `analysis.status.json` 记录 `status`（ok / failed / skipped）、`generated_by`（agent / runner）、`generated_at`、`llm_usage`（provider 上报时的真实 token 用量）。LLM 失败只把 status 记为 failed，不会让回测失败。
+- WebUI 的“分析图”标签从 `/runs/{id}/analysis/charts` 现算 ECharts 数据，PNG 只是兜底图片；数据不重复落库。
+
+### 8.37 直接跑 runner 报 `PermissionError: ... artifacts\trades.csv`？
+
+- 原因：这个 CSV 正被 WPS 表格 / Excel 等程序打开，Windows 下文件被占用时无法覆盖写入；不是代码 bug，也不是路径问题。
+- 解决：先关掉打开 `trades.csv` 的 WPS / Excel 窗口（或退出 WPS），再重跑 `..\.venv\Scripts\python.exe -m backtest.runner "C:\Users\mumu\.vibe-trading\runs\<run_id>" --with-analysis`。
+- 只想补生成 `analysis.md`、不重跑回测时：`..\.venv\Scripts\python.exe -c "from backtest.analysis.report import generate_analysis_report; print(generate_analysis_report(r'C:\Users\mumu\.vibe-trading\runs\<run_id>', generated_by='runner'))"`（需要 `run_card.json` 和 `artifacts/metrics.csv` 已存在；不写 trades.csv，仍会调用一次 LLM）。
+- 为什么这条命令不用跑回测：`generate_analysis_report` 与回测引擎无关，只检查 `run_card.json` + `artifacts/metrics.csv` 是否存在，然后读已有 artifacts 算 digest（配对交易/月度损益/持仓分桶/MAE/MFE）→ 拼 prompt → 调一次 LLM → 写 `analysis.md` + `analysis.status.json`；不写 trades.csv，也不启动 loader/engine。`--with-analysis` 则是两段式：runner 先重跑回测（覆盖 artifacts），再调用同一个 `generate_analysis_report`，所以单独调它就是“只取第二段”。
+- 注意：单独跑 `generate_analysis_report` 不会生成 `analysis_charts/*.png`（PNG 由回测 runner 自动生成）。如果只想补 PNG 而不重跑回测：`..\.venv\Scripts\python.exe -c "from backtest.analysis.charts import generate_chart_artifacts; import json; print(json.dumps(generate_chart_artifacts(r'C:\Users\mumu\.vibe-trading\runs\<run_id>'), ensure_ascii=False))"`。WebUI 的“分析图”标签从 API 现算 ECharts 数据，PNG 只是兜底，缺少 PNG 不影响图表显示。
+- 注意：重跑 runner 会覆盖 `artifacts/` 下全部文件，查看前最好先关掉相关编辑器。
+
   ## 9. 命令速查表
 
 
@@ -706,6 +775,9 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 | 开发模式（前后端一起） | `vibe-trading dev` |
 | 新增 Python 依赖 | `pip install -e . --timeout 1800` |
 | 新增前端依赖 | `vibe-trading setup` 或 `cd frontend; npm install` |
+| 直接重跑某个 run（无 LLM） | `cd agent; ..\.venv\Scripts\python.exe -m backtest.runner "<run_dir>"` |
+| 重跑并生成 LLM 分析报告 | 上一条命令加 `--with-analysis`（也支持 `--withAnalysis`） |
+| 查看 run 分析报告/图表 | WebUI 运行详情“分析图 / 分析”标签，或 API `/runs/<id>/analysis` |
 | 首次推送 | `git push -u origin mumu-main` |
 | 日常推送 | `git add -A; git commit -m "..."; git push origin mumu-main` |
 

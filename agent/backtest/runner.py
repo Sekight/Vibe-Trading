@@ -873,7 +873,7 @@ def _maybe_inject_fundamentals_for_factor_panel(
 
 # --- Main entry ---
 
-def main(run_dir: Path) -> None:
+def main(run_dir: Path, with_analysis: bool = False) -> None:
     """Load config, fetch data, run the selected backtest engine.
 
     With ``source="auto"``, routes each code through the appropriate loader.
@@ -989,6 +989,29 @@ def main(run_dir: Path) -> None:
         market_engine = _create_market_engine(effective_source, config, codes)
         market_engine.run_backtest(config, loader, signal_engine, run_dir, bars_per_year=bars_per_year)
 
+    # Deterministic post-backtest artifacts: analysis charts are generated for
+    # every successful run regardless of the LLM. The LLM analysis report is
+    # opt-in so the agent path (which writes analysis.md itself via
+    # write_run_analysis) never double-charges tokens.
+    if (run_dir / "run_card.json").exists():
+        _finalize_run_analysis(run_dir, with_analysis=with_analysis)
+
+
+def _finalize_run_analysis(run_dir: Path, *, with_analysis: bool = False) -> None:
+    """Generate deterministic analysis charts and the optional LLM report."""
+    try:
+        from backtest.analysis.charts import generate_chart_artifacts
+        chart_result = generate_chart_artifacts(run_dir)
+        print(json.dumps({"analysis_charts": chart_result["generated"], "png_count": len(chart_result["pngs"])}, ensure_ascii=False))
+    except Exception as exc:  # noqa: BLE001 - charts are best-effort
+        print(json.dumps({"warning": "analysis charts failed", "details": str(exc)[:500]}, ensure_ascii=False))
+    if with_analysis:
+        try:
+            from backtest.analysis.report import generate_analysis_report
+            result = generate_analysis_report(run_dir, generated_by="runner")
+            print(json.dumps({"analysis": result}, ensure_ascii=False))
+        except Exception as exc:  # noqa: BLE001 - report is best-effort
+            print(json.dumps({"warning": "analysis report failed", "details": str(exc)[:500]}, ensure_ascii=False))
 
 def _data_coverage_warnings(
     config: dict, data_map: Dict[str, pd.DataFrame],
@@ -1358,7 +1381,10 @@ class _AutoLoader:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: python -m backtest.runner <run_dir>")
-        sys.exit(1)
-    main(Path(sys.argv[1]))
+    import argparse
+
+    parser = argparse.ArgumentParser(prog="backtest.runner", description="Run a backtest from a run directory")
+    parser.add_argument("run_dir", help="Path to the run directory")
+    parser.add_argument("--with-analysis", "--withAnalysis", dest="with_analysis", action="store_true", help="Generate the LLM analysis report after a successful backtest")
+    args = parser.parse_args()
+    main(Path(args.run_dir), with_analysis=args.with_analysis)

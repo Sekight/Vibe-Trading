@@ -2,10 +2,14 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { RunDetail } from "../RunDetail";
 import type { RunData } from "@/lib/api";
+import { echarts } from "@/lib/echarts";
 
 const apiMock = vi.hoisted(() => ({
   getRun: vi.fn(),
   getRunCode: vi.fn(),
+  getRunAnalysis: vi.fn(),
+  getRunAnalysisCharts: vi.fn(),
+  fetchRunAnalysisPng: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({ api: apiMock }));
@@ -14,6 +18,15 @@ vi.mock("@/components/charts/CandlestickChart", () => ({
 }));
 vi.mock("@/components/charts/EquityChart", () => ({
   EquityChart: () => <div data-testid="equity-chart" />,
+}));
+vi.mock("@/lib/echarts", () => ({
+  echarts: {
+    init: vi.fn(() => ({
+      setOption: vi.fn(),
+      resize: vi.fn(),
+      dispose: vi.fn(),
+    })),
+  },
 }));
 
 function deferred<T>() {
@@ -37,6 +50,9 @@ describe("RunDetail page", () => {
   beforeEach(() => {
     apiMock.getRun.mockReset();
     apiMock.getRunCode.mockReset();
+    apiMock.getRunAnalysis.mockReset();
+    apiMock.getRunAnalysisCharts.mockReset();
+    apiMock.fetchRunAnalysisPng.mockReset();
   });
 
   it("does not let an older route load replace the current run or code", async () => {
@@ -167,5 +183,73 @@ describe("RunDetail page", () => {
     expect(keyCell.closest("table")?.parentElement).toHaveClass("overflow-x-auto");
     expect(screen.getByRole("columnheader", { name: "Path" })).toHaveClass("ps-4");
     expect(screen.getByText("artifacts/result.json")).toHaveClass("ps-4");
+  });
+
+  it("renders the analysis charts tab with ECharts payloads", async () => {
+    apiMock.getRun.mockResolvedValue({
+      status: "success", run_id: "an-charts", prompt: "Charts run",
+    });
+    apiMock.getRunCode.mockResolvedValue({});
+    apiMock.getRunAnalysisCharts.mockResolvedValue({
+      run_id: "an-charts",
+      available: true,
+      charts: {
+        equity_return: [{ date: "2024-01-05", value: 1.2 }],
+        drawdown: [{ date: "2024-01-05", value: -1.2 }], pnl_scatter: [], monthly_heatmap: [], pnl_vs_holding: [], mae_mfe: [], holding_buckets: [],
+      },
+      pngs: [],
+    });
+
+    renderRunDetail("/runs/an-charts");
+    await screen.findByText("Charts run");
+    fireEvent.click(screen.getByRole("tab", { name: "Analysis Charts" }));
+
+    expect(apiMock.getRunAnalysisCharts).toHaveBeenCalledWith("an-charts");
+    expect(await screen.findByText("Equity curve (cumulative return %)")).toBeInTheDocument();
+    expect(screen.getAllByText("No data for this chart").length).toBeGreaterThan(0);
+
+    type AxisNameOption = { xAxis?: { name: string; nameLocation: string }; yAxis?: { name: string; nameLocation?: string } };
+    const chartOptions = vi.mocked(echarts.init).mock.results.map((result) => result.value?.setOption.mock.calls[0]?.[0] as AxisNameOption);
+    const equityOption = chartOptions.find((option) => option.xAxis?.name === "Date");
+    const drawdownOption = chartOptions.find((option) => option.yAxis?.name === "Drawdown (%)");
+    expect(equityOption?.xAxis.nameLocation).toBe("middle");
+    expect(drawdownOption?.yAxis?.nameLocation).toBe("start");
+  });
+
+  it("renders the analysis report tab with markdown and status", async () => {
+    apiMock.getRun.mockResolvedValue({
+      status: "success", run_id: "an-report", prompt: "Report run",
+    });
+    apiMock.getRunCode.mockResolvedValue({});
+    apiMock.getRunAnalysis.mockResolvedValue({
+      run_id: "an-report",
+      markdown: "## 一句话结论\n策略有效",
+      status: { status: "ok", generated_by: "runner", generated_at: "now", llm_usage: { total_tokens: 33 } },
+    });
+
+    renderRunDetail("/runs/an-report");
+    await screen.findByText("Report run");
+    fireEvent.click(screen.getByRole("tab", { name: "Analysis" }));
+
+    expect(apiMock.getRunAnalysis).toHaveBeenCalledWith("an-report");
+    expect(await screen.findByText("策略有效")).toBeInTheDocument();
+    expect(screen.getByText(/total_tokens/)).toBeInTheDocument();
+    expect(document.querySelector(".prose")).toBeTruthy();
+  });
+
+  it("shows the empty state for runs without an analysis report", async () => {
+    apiMock.getRun.mockResolvedValue({
+      status: "success", run_id: "an-empty", prompt: "Empty run",
+    });
+    apiMock.getRunCode.mockResolvedValue({});
+    apiMock.getRunAnalysis.mockResolvedValue({
+      run_id: "an-empty", markdown: null, status: null,
+    });
+
+    renderRunDetail("/runs/an-empty");
+    await screen.findByText("Empty run");
+    fireEvent.click(screen.getByRole("tab", { name: "Analysis" }));
+
+    expect(await screen.findByText("No analysis report")).toBeInTheDocument();
   });
 });

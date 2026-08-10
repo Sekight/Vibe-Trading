@@ -954,6 +954,9 @@ vibe-trading serve --port 8899
 | `GET` | `/runs` | 列出 runs |
 | `GET` | `/runs/{run_id}` | Run 详情 |
 | `GET` | `/runs/{run_id}/pine` | 多平台指标导出 |
+| `GET` | `/runs/{run_id}/analysis` | 回测分析报告（`analysis.md`）与状态 |
+| `GET` | `/runs/{run_id}/analysis/charts` | 从 artifacts 现算分析图数据 + PNG 列表 |
+| `GET` | `/runs/{run_id}/analysis/charts/{name}.png` | 返回单张分析图 PNG |
 | `POST` | `/sessions` | 创建 session |
 | `POST` | `/sessions/{id}/messages` | 发送消息 |
 | `GET` | `/sessions/{id}/events` | SSE event stream |

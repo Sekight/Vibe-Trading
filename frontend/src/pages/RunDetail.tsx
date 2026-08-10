@@ -19,22 +19,41 @@ import {
   ShieldCheck,
   XCircle,
   CircleSlash,
+  ChartScatter,
+  FileText,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { api, type BacktestMetrics, type RunCard, type RunData, type ValidationData } from "@/lib/api";
+import { api, type BacktestMetrics, type RunAnalysis, type RunAnalysisCharts, type RunCard, type RunData, type ValidationData } from "@/lib/api";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
+import remarkGfm from "remark-gfm";
 import { CandlestickChart } from "@/components/charts/CandlestickChart";
 import { EquityChart } from "@/components/charts/EquityChart";
 import { MetricsCard } from "@/components/chat/MetricsCard";
 import { ValidationPanel } from "@/components/charts/ValidationPanel";
 import { Skeleton, SkeletonMetrics, SkeletonChart } from "@/components/common/Skeleton";
 import { ErrorBoundary } from "@/components/common/ErrorBoundary";
+import { getChartTheme } from "@/lib/chart-theme";
+import { echarts } from "@/lib/echarts";
+import { useThemeDark } from "@/lib/theme-store";
+import type { EChartsCoreOption } from "echarts/core";
 
 const rehypePlugins = [rehypeHighlight];
+const remarkPlugins = [remarkGfm];
 
-type Tab = "chart" | "trades" | "runCard" | "code" | "validation";
+const analysisProseClassName =
+  "prose prose-sm dark:prose-invert max-w-none text-[15px] leading-relaxed " +
+  "prose-p:text-[15px] prose-p:leading-[1.75] prose-p:my-3 " +
+  "prose-headings:font-sans prose-headings:font-semibold prose-headings:text-foreground " +
+  "prose-h1:text-2xl prose-h1:mt-6 prose-h1:mb-3 " +
+  "prose-h2:text-xl prose-h2:mt-6 prose-h2:mb-3 " +
+  "prose-h3:text-lg prose-h3:mt-5 prose-h3:mb-2 " +
+  "prose-h4:text-base prose-h4:mt-5 prose-h4:mb-2 " +
+  "prose-li:my-1.5 prose-ul:my-3 prose-ol:my-3 prose-table:my-4 " +
+  "prose-blockquote:my-4 prose-code:font-mono prose-pre:my-4 prose-hr:my-6";
+
+type Tab = "chart" | "analysisCharts" | "analysis" | "trades" | "runCard" | "code" | "validation";
 type ChartPayload = Pick<RunData, "price_series" | "indicator_series" | "trade_markers">;
 type ChartCache = Record<string, ChartPayload>;
 type ChartLoadProgress = { done: number; total: number };
@@ -117,10 +136,12 @@ export function RunDetail() {
   const hasRunCard = !!run?.run_card;
   const TABS: { id: Tab; label: string; icon: typeof BarChart3; hidden?: boolean }[] = [
     { id: "chart", label: i18n.t("runDetail.chart"), icon: BarChart3 },
+    { id: "analysisCharts", label: i18n.t("runDetail.analysisCharts"), icon: ChartScatter },
+    { id: "analysis", label: i18n.t("runDetail.analysis"), icon: FileText },
     { id: "trades", label: i18n.t("runDetail.trades"), icon: List },
-    { id: "validation", label: i18n.t("runDetail.validation"), icon: ShieldCheck, hidden: !hasValidation },
     { id: "runCard", label: i18n.t("runDetail.runCard"), icon: FileCheck2, hidden: !hasRunCard },
     { id: "code", label: i18n.t("runDetail.code"), icon: Code2 },
+    { id: "validation", label: i18n.t("runDetail.validation"), icon: ShieldCheck, hidden: !hasValidation },
   ];
 
   useEffect(() => {
@@ -380,6 +401,8 @@ export function RunDetail() {
               onCancelLoadAll={handleCancelLoadAllCharts}
             />
           )}
+          {tab === "analysisCharts" && runId && <AnalysisChartsTab runId={runId} />}
+          {tab === "analysis" && runId && <AnalysisTab runId={runId} />}
           {tab === "trades" && <TradesTab run={run} />}
           {tab === "validation" && run.validation && <ValidationPanel data={run.validation} />}
           {tab === "runCard" && run.run_card && <RunCardTab card={run.run_card} />}
@@ -950,9 +973,342 @@ function CodeTab({ code }: { code: Record<string, string> }) {
         </div>
       </div>
       <div className="flex-1 overflow-auto p-3 text-xs leading-relaxed bg-muted/20 [&_pre]:m-0 [&_pre]:bg-transparent [&_code]:text-xs">
-        <ReactMarkdown rehypePlugins={rehypePlugins}>
+        <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins}>
           {`\`\`\`python\n${activeCode}\n\`\`\``}
         </ReactMarkdown>
+      </div>
+    </div>
+  );
+}
+
+const ANALYSIS_RED = "#dc2626";
+const ANALYSIS_GREEN = "#16a34a";
+
+const ANALYSIS_CHART_ORDER: Array<{ key: keyof RunAnalysisCharts["charts"]; titleKey: string }> = [
+  { key: "equity_return", titleKey: "runDetail.chartEquityReturn" },
+  { key: "drawdown", titleKey: "runDetail.chartDrawdown" },
+  { key: "pnl_scatter", titleKey: "runDetail.chartPnlScatter" },
+  { key: "monthly_heatmap", titleKey: "runDetail.chartMonthlyHeatmap" },
+  { key: "pnl_vs_holding", titleKey: "runDetail.chartPnlVsHolding" },
+  { key: "mae_mfe", titleKey: "runDetail.chartMaeMfe" },
+  { key: "holding_buckets", titleKey: "runDetail.chartHoldingBuckets" },
+];
+
+function AnalysisChartsTab({ runId }: { runId: string }) {
+  const [data, setData] = useState<RunAnalysisCharts | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [pngUrls, setPngUrls] = useState<Record<string, string>>({});
+  const generationRef = useRef(0);
+
+  useEffect(() => {
+    const generation = ++generationRef.current;
+    setLoading(true);
+    setError(null);
+    setData(null);
+    setPngUrls({});
+    api.getRunAnalysisCharts(runId)
+      .then(async (charts) => {
+        if (generationRef.current !== generation) return;
+        setData(charts);
+        if (charts.available && charts.pngs.length > 0) {
+          const urls: Record<string, string> = {};
+          await Promise.all(charts.pngs.map(async (png) => {
+            try {
+              urls[png.key] = await api.fetchRunAnalysisPng(runId, png.filename);
+            } catch {
+              // PNG is a fallback; keep the slot empty when it cannot load.
+            }
+          }));
+          if (generationRef.current === generation) setPngUrls(urls);
+        }
+      })
+      .catch((err) => {
+        if (generationRef.current === generation) {
+          setError(err instanceof Error ? err.message : String(err));
+        }
+      })
+      .finally(() => {
+        if (generationRef.current === generation) setLoading(false);
+      });
+    return () => { generationRef.current += 1; };
+  }, [runId]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 p-8 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" /> {i18n.t("runDetail.loadingAnalysisCharts")}
+      </div>
+    );
+  }
+  if (error) return <div className="p-8 text-sm text-red-500">{error}</div>;
+  if (!data || !data.available) {
+    return (
+      <div className="p-8 space-y-1">
+        <p className="font-medium text-sm">{i18n.t("runDetail.noAnalysisCharts")}</p>
+        <p className="text-sm text-muted-foreground">{i18n.t("runDetail.noAnalysisChartsDesc")}</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid gap-4 p-4 lg:grid-cols-2">
+      {ANALYSIS_CHART_ORDER.map(({ key, titleKey }) => (
+        <AnalysisChartCard key={key} chartKey={key} title={i18n.t(titleKey as any)} payload={data.charts} pngUrl={pngUrls[key]} />
+      ))}
+    </div>
+  );
+}
+
+function AnalysisChartCard({
+  chartKey,
+  title,
+  payload,
+  pngUrl,
+}: {
+  chartKey: keyof RunAnalysisCharts["charts"];
+  title: string;
+  payload: RunAnalysisCharts["charts"];
+  pngUrl?: string;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const dark = useThemeDark();
+  const points = payload[chartKey];
+  const hasData = Array.isArray(points) && points.length > 0;
+
+  useEffect(() => {
+    if (!ref.current || !hasData) return;
+    const t = getChartTheme();
+    const chart = echarts.init(ref.current);
+    const nameTextStyle = { color: t.textColor, fontSize: 10, fontWeight: 500 };
+    const axis = {
+      axisLine: { lineStyle: { color: t.axisColor } },
+      axisLabel: { color: t.textColor, fontSize: 10 },
+      nameTextStyle,
+      nameGap: 18,
+    };
+    const valueAxis = {
+      type: "value",
+      splitLine: { lineStyle: { color: t.gridColor } },
+      axisLabel: { color: t.textColor, fontSize: 10 },
+      nameTextStyle,
+      nameGap: 18,
+    };
+    const tooltip = {
+      backgroundColor: t.tooltipBg,
+      borderColor: t.tooltipBorder,
+      textStyle: { color: t.tooltipText, fontSize: 11 },
+    };
+    const grid = { left: 18, right: 18, top: 44, bottom: 56, containLabel: true };
+    const middleName = { nameLocation: "middle" as const, nameGap: 24 };
+
+    let option: EChartsCoreOption = {};
+    if (chartKey === "equity_return" && Array.isArray(points)) {
+      const rows = points as Array<{ date: string; value: number }>;
+      option = {
+        grid, tooltip: { ...tooltip, trigger: "axis" },
+        xAxis: { type: "category", name: i18n.t("runDetail.chartAxisDate" as any), data: rows.map((r) => r.date), ...axis, ...middleName },
+        yAxis: { ...valueAxis, name: i18n.t("runDetail.chartAxisCumReturn" as any) },
+        series: [{
+          type: "line", data: rows.map((r) => r.value), showSymbol: false, smooth: true,
+          lineStyle: { color: t.infoColor, width: 2 },
+          areaStyle: { color: `${t.infoColor}22` },
+        }],
+      };
+    } else if (chartKey === "drawdown" && Array.isArray(points)) {
+      const rows = points as Array<{ date: string; value: number }>;
+      option = {
+        grid, tooltip: { ...tooltip, trigger: "axis" },
+        xAxis: { type: "category", name: i18n.t("runDetail.chartAxisDate" as any), data: rows.map((r) => r.date), ...axis, ...middleName },
+        yAxis: { ...valueAxis, name: i18n.t("runDetail.chartAxisDrawdown" as any), inverse: true, nameLocation: "start" },
+        series: [{
+          type: "line", data: rows.map((r) => r.value), showSymbol: false,
+          lineStyle: { color: ANALYSIS_RED, width: 1.4 },
+          areaStyle: { color: `${ANALYSIS_RED}44` },
+        }],
+      };
+    } else if (chartKey === "pnl_scatter" && Array.isArray(points)) {
+      const rows = points as Array<{ index: number; entry_ts?: string; code?: string; return_pct?: number; win: boolean }>;
+      option = {
+        grid, tooltip: { ...tooltip, trigger: "item" },
+        xAxis: { ...valueAxis, name: i18n.t("runDetail.chartAxisTradeIndex" as any), ...middleName },
+        yAxis: { ...valueAxis, name: i18n.t("runDetail.chartAxisTradePnl" as any) },
+        series: [{
+          type: "scatter",
+          data: rows.map((r) => ({
+            value: [r.index, r.return_pct ?? 0],
+            itemStyle: { color: r.win ? ANALYSIS_RED : ANALYSIS_GREEN },
+          })),
+          symbolSize: 9,
+        }],
+      };
+    } else if (chartKey === "monthly_heatmap" && Array.isArray(points)) {
+      const rows = points as Array<{ year: number; month: number; pnl: number; count: number }>;
+      const years = [...new Set(rows.map((r) => r.year))].sort();
+      const maxAbs = Math.max(1, ...rows.map((r) => Math.abs(r.pnl)));
+      option = {
+        grid: { left: 18, right: 18, top: 44, bottom: 80, containLabel: true },
+        tooltip: { ...tooltip, trigger: "item", formatter: (params: { data: { value: number[] } }) => {
+          const value = params.data.value;
+          return `${years[value[1]] ?? ""}-${String(value[0] + 1).padStart(2, "0")}: ${value[2]}%`;
+        } },
+        xAxis: { type: "category", name: i18n.t("runDetail.chartAxisMonth" as any), data: Array.from({ length: 12 }, (_, i) => String(i + 1)), splitArea: { show: true }, ...axis, ...middleName },
+        yAxis: { type: "category", name: i18n.t("runDetail.chartAxisYear" as any), data: years, splitArea: { show: true }, ...axis },
+        visualMap: {
+          min: -maxAbs, max: maxAbs, calculable: true, orient: "horizontal", left: "center", bottom: 24,
+          textStyle: { color: t.textColor, fontSize: 10 },
+          inRange: { color: [ANALYSIS_GREEN, "#f5f5f5", ANALYSIS_RED] },
+        },
+        series: [{
+          type: "heatmap",
+          data: rows.map((r) => [r.month - 1, years.indexOf(r.year), r.pnl]),
+          label: { show: false },
+          itemStyle: { borderColor: t.tooltipBg, borderWidth: 1 },
+        }],
+      };
+    } else if (chartKey === "pnl_vs_holding" && Array.isArray(points)) {
+      const rows = points as Array<{ holding_days?: number; return_pct?: number; win: boolean }>;
+      option = {
+        grid, tooltip: { ...tooltip, trigger: "item" },
+        xAxis: { ...valueAxis, name: i18n.t("runDetail.chartAxisHoldingDays" as any), ...middleName },
+        yAxis: { ...valueAxis, name: i18n.t("runDetail.chartAxisTradePnl" as any) },
+        series: [{
+          type: "scatter",
+          data: rows.map((r) => ({
+            value: [r.holding_days ?? 0, r.return_pct ?? 0],
+            itemStyle: { color: r.win ? ANALYSIS_RED : ANALYSIS_GREEN },
+          })),
+          symbolSize: 9,
+        }],
+      };
+    } else if (chartKey === "mae_mfe" && Array.isArray(points)) {
+      const rows = points as Array<{ mae_pct?: number; mfe_pct?: number; win: boolean }>;
+      const maxValue = Math.max(1, ...rows.map((r) => Math.max(r.mae_pct ?? 0, r.mfe_pct ?? 0)));
+      option = {
+        grid, tooltip: { ...tooltip, trigger: "item" },
+        xAxis: { ...valueAxis, name: i18n.t("runDetail.chartAxisMae" as any), ...middleName },
+        yAxis: { ...valueAxis, name: i18n.t("runDetail.chartAxisMfe" as any) },
+        series: [
+          {
+            type: "scatter",
+            data: rows.map((r) => ({
+              value: [r.mae_pct ?? 0, r.mfe_pct ?? 0],
+              itemStyle: { color: r.win ? ANALYSIS_RED : ANALYSIS_GREEN },
+            })),
+            symbolSize: 9,
+          },
+          {
+            type: "line", data: [[0, 0], [maxValue, maxValue]], showSymbol: false, silent: true,
+            lineStyle: { type: "dashed", color: t.warningColor, width: 1 },
+          },
+        ],
+      };
+    } else if (chartKey === "holding_buckets" && Array.isArray(points)) {
+      const rows = points as Array<{ bucket: string; avg_return_pct: number; win_rate: number }>;
+      option = {
+        grid,
+        tooltip: { ...tooltip, trigger: "axis" },
+        legend: { top: 0, textStyle: { color: t.textColor, fontSize: 10 } },
+        xAxis: { type: "category", name: i18n.t("runDetail.chartAxisBucket" as any), data: rows.map((r) => r.bucket), ...axis, ...middleName },
+        yAxis: [
+          { ...valueAxis, name: i18n.t("runDetail.chartAxisAvgReturn" as any) },
+          { ...valueAxis, name: i18n.t("runDetail.chartAxisWinRate" as any), min: 0, max: 105 },
+        ],
+        series: [
+          {
+            type: "bar", name: "avg %",
+            data: rows.map((r) => ({
+              value: r.avg_return_pct,
+              itemStyle: { color: r.avg_return_pct >= 0 ? ANALYSIS_RED : ANALYSIS_GREEN },
+            })),
+          },
+          {
+            type: "line", name: "win %", yAxisIndex: 1,
+            data: rows.map((r) => r.win_rate * 100), showSymbol: true, symbolSize: 6,
+            lineStyle: { color: t.infoColor, width: 1.5 },
+          },
+        ],
+      };
+    }
+    chart.setOption(option);
+    const ro = new ResizeObserver(() => chart.resize());
+    ro.observe(ref.current!);
+    return () => { ro.disconnect(); chart.dispose(); };
+  }, [chartKey, points, dark]);
+
+  return (
+    <div className="rounded-md border border-border/60 bg-card p-3">
+      <h3 className="mb-2 text-sm font-medium">{title}</h3>
+      {hasData ? (
+        <div ref={ref} className="h-72 w-full" />
+      ) : pngUrl ? (
+        <img src={pngUrl} alt={title} className="h-72 w-full object-contain" />
+      ) : (
+        <div className="flex h-72 items-center justify-center text-sm text-muted-foreground">
+          {i18n.t("runDetail.chartNoData")}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AnalysisTab({ runId }: { runId: string }) {
+  const [analysis, setAnalysis] = useState<RunAnalysis | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const generationRef = useRef(0);
+
+  useEffect(() => {
+    const generation = ++generationRef.current;
+    setLoading(true);
+    setError(null);
+    setAnalysis(null);
+    api.getRunAnalysis(runId)
+      .then((result) => { if (generationRef.current === generation) setAnalysis(result); })
+      .catch((err) => {
+        if (generationRef.current === generation) setError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => { if (generationRef.current === generation) setLoading(false); });
+    return () => { generationRef.current += 1; };
+  }, [runId]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 p-8 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" /> {i18n.t("runDetail.loadingAnalysis")}
+      </div>
+    );
+  }
+  if (error) return <div className="p-8 text-sm text-red-500">{error}</div>;
+  if (!analysis || !analysis.markdown) {
+    return (
+      <div className="p-8 space-y-1">
+        <p className="font-medium text-sm">{i18n.t("runDetail.noAnalysis")}</p>
+        <p className="text-sm text-muted-foreground">{i18n.t("runDetail.noAnalysisDesc")}</p>
+      </div>
+    );
+  }
+
+  const status = analysis.status;
+  return (
+    <div className="space-y-4 p-4">
+      {status && (
+        <div className="rounded-md border border-border/60 bg-card p-3 text-xs text-muted-foreground">
+          <div className="flex flex-wrap gap-x-6 gap-y-1">
+            <span><b className="text-foreground">{i18n.t("runDetail.analysisStatus")}:</b> {status.status}</span>
+            <span><b className="text-foreground">{i18n.t("runDetail.analysisGeneratedBy")}:</b> {status.generated_by}</span>
+            <span><b className="text-foreground">{i18n.t("runDetail.analysisGeneratedAt")}:</b> {status.generated_at}</span>
+          </div>
+          {status.error && <p className="mt-1 text-red-500">{status.error}</p>}
+          {status.llm_usage && (
+            <p className="mt-1"><b className="text-foreground">{i18n.t("runDetail.analysisUsage")}:</b> {JSON.stringify(status.llm_usage)}</p>
+          )}
+        </div>
+      )}
+      <div className="rounded-md border border-border/60 bg-card p-4 [&_pre]:overflow-auto [&_pre]:rounded [&_pre]:bg-muted/40 [&_pre]:p-2 [&_table]:w-full [&_td]:border [&_td]:border-border/60 [&_td]:p-1 [&_th]:border [&_th]:border-border/60 [&_th]:p-1">
+        <div className={analysisProseClassName}>
+          <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins}>{analysis.markdown}</ReactMarkdown>
+        </div>
       </div>
     </div>
   );

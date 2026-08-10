@@ -140,6 +140,13 @@ export const api = {
   },
   getRunCode: (id: string) => request<Record<string, string>>(`/runs/${id}/code`),
   getRunPine: (id: string) => request<PineScriptResult>(`/runs/${id}/pine`),
+  getRunAnalysis: (id: string) => request<RunAnalysis>(`/runs/${id}/analysis`),
+  getRunAnalysisCharts: (id: string) => request<RunAnalysisCharts>(`/runs/${id}/analysis/charts`),
+  fetchRunAnalysisPng: async (id: string, filename: string) => {
+    const res = await fetch(`${BASE}/runs/${id}/analysis/charts/${filename}`, { headers: authHeaders() });
+    if (!res.ok) throw await errorFromResponse(res);
+    return URL.createObjectURL(await res.blob());
+  },
   listSessions: () => request<SessionItem[]>("/sessions"),
   createSession: (title?: string) => request<SessionItem>("/sessions", { method: "POST", body: JSON.stringify({ title: title || "" }) }),
   deleteSession: (sid: string) => request<{ status: string }>(`/sessions/${sid}`, { method: "DELETE" }),
@@ -598,6 +605,43 @@ export interface RunCardArtifact {
   sha256: string;
 }
 
+export interface RunAnalysisStatus {
+  status: "ok" | "failed" | "skipped";
+  generated_by: string;
+  generated_at: string;
+  error?: string;
+  llm_usage?: Record<string, number>;
+  config_hash?: string;
+  strategy_hash?: string;
+}
+
+export interface RunAnalysis {
+  run_id: string;
+  markdown: string | null;
+  status: RunAnalysisStatus | null;
+}
+
+export interface AnalysisPngInfo {
+  key: string;
+  filename: string;
+  path: string;
+}
+
+export interface RunAnalysisCharts {
+  run_id: string;
+  available: boolean;
+  generated?: boolean;
+  charts: {
+    equity_return?: Array<{ date: string; value: number }>;
+    drawdown?: Array<{ date: string; value: number }>;
+    pnl_scatter?: Array<{ index: number; entry_ts?: string; code?: string; direction?: string; return_pct?: number; win: boolean }>;
+    monthly_heatmap?: Array<{ year: number; month: number; pnl: number; count: number }>;
+    pnl_vs_holding?: Array<{ holding_days?: number; return_pct?: number; pnl?: number; win: boolean; code?: string }>;
+    mae_mfe?: Array<{ entry_ts?: string; code?: string; mae_pct?: number; mfe_pct?: number; win: boolean }>;
+    holding_buckets?: Array<{ bucket: string; min_days: number; max_days: number | null; count: number; total_pnl: number; avg_return_pct: number; win_rate: number; avg_profit_loss_ratio?: number | null }>;
+  };
+  pngs: AnalysisPngInfo[];
+}
 export interface BacktestMetrics {
   final_value: number;
   total_return: number;
