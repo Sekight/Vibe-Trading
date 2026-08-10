@@ -21,7 +21,8 @@ def test_ok_report_persists_markdown_and_usage(tmp_path: Path) -> None:
 
     assert result["status"] == "ok"
     assert len(calls) == 1
-    assert "核心指标" in calls[0]
+    assert "指标解读（全量指标）" in calls[0]
+    assert "equal-weight(universe)" in calls[0]
     markdown = (run_dir / "analysis.md").read_text(encoding="utf-8")
     assert "> generated_by: runner" in markdown
     assert "策略有效" in markdown

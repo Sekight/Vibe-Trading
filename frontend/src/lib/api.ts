@@ -619,6 +619,11 @@ export interface RunAnalysis {
   run_id: string;
   markdown: string | null;
   status: RunAnalysisStatus | null;
+  benchmark?: {
+    label?: string;
+    ticker?: string | null;
+    return?: number | null;
+  };
 }
 
 export interface AnalysisPngInfo {
@@ -632,8 +637,8 @@ export interface RunAnalysisCharts {
   available: boolean;
   generated?: boolean;
   charts: {
-    equity_return?: Array<{ date: string; value: number }>;
-    drawdown?: Array<{ date: string; value: number }>;
+    equity_return?: Array<{ date: string; value: number; benchmark?: number | null }>;
+    drawdown?: Array<{ date: string; value: number; benchmark?: number | null }>;
     pnl_scatter?: Array<{ index: number; entry_ts?: string; code?: string; direction?: string; return_pct?: number; win: boolean }>;
     monthly_heatmap?: Array<{ year: number; month: number; pnl: number; count: number }>;
     pnl_vs_holding?: Array<{ holding_days?: number; return_pct?: number; pnl?: number; win: boolean; code?: string }>;
@@ -641,6 +646,7 @@ export interface RunAnalysisCharts {
     holding_buckets?: Array<{ bucket: string; min_days: number; max_days: number | null; count: number; total_pnl: number; avg_return_pct: number; win_rate: number; avg_profit_loss_ratio?: number | null }>;
   };
   pngs: AnalysisPngInfo[];
+  benchmark_label?: string | null;
 }
 export interface BacktestMetrics {
   final_value: number;

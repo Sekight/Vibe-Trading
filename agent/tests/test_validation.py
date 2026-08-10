@@ -19,6 +19,7 @@ import pytest
 from backtest.models import TradeRecord
 from backtest.validation import (
     bootstrap_sharpe_ci,
+    default_monte_carlo_simulations,
     monte_carlo_test,
     run_validation,
     walk_forward_analysis,
@@ -406,3 +407,14 @@ def test_load_trades_blank_holding_days_defaults_to_zero(tmp_path: Path) -> None
     assert len(trades) == 1
     assert trades[0].holding_bars == 0
     assert trades[0].pnl == 10.0
+
+
+def test_default_monte_carlo_simulations_scales_down() -> None:
+    assert default_monte_carlo_simulations(9) == 1000
+    assert default_monte_carlo_simulations(99) == 1000
+    assert default_monte_carlo_simulations(100) == 500
+    assert default_monte_carlo_simulations(299) == 500
+    assert default_monte_carlo_simulations(300) == 200
+    assert default_monte_carlo_simulations(999) == 200
+    assert default_monte_carlo_simulations(1000) == 100
+    assert default_monte_carlo_simulations(5000) == 100

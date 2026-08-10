@@ -20,10 +20,14 @@ import pandas as pd
 import pytest
 
 from backtest.engines.base import _align
+from backtest.engines.base import _benchmark_label, _validation_request
 from backtest.engines import base as base_engine
+from backtest.benchmark import _infer_market
 from backtest.engines.china_a import ChinaAEngine
 from backtest.loaders.base import validate_date_range
 from backtest.runner import BacktestConfigSchema
+
+from backtest.models import EquitySnapshot, TradeRecord
 
 
 # ---------------------------------------------------------------------------
@@ -241,6 +245,7 @@ class TestSymbolIsolation:
 
         assert metrics["benchmark_ticker"] == "000300.SH"
         assert metrics["benchmark_return"] == 0.00495
+        assert metrics["benchmark_label"] == "000300.SH"
 
         run_card_path = tmp_path / "run_card.json"
         assert run_card_path.exists()
@@ -249,7 +254,122 @@ class TestSymbolIsolation:
         assert run_card["backtest"]["codes"] == ["000001.SZ"]
         assert run_card["data_sources"] == ["tushare"]
         assert run_card["metrics"]["benchmark_return"] == 0.00495
+        assert run_card["metrics"]["benchmark_label"] == "000300.SH"
         assert (tmp_path / "run_card.md").exists()
+
+    def test_backtest_records_auto_benchmark_metadata(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """benchmark=auto should fetch the market default and label it by market."""
+        dates = pd.bdate_range("2024-04-01", periods=3)
+        bars = pd.DataFrame(
+            {
+                "open": [10.0, 11.0, 12.0],
+                "high": [10.5, 11.5, 12.5],
+                "low": [9.5, 10.5, 11.5],
+                "close": [10.2, 11.2, 12.2],
+                "volume": [1000, 1100, 1200],
+            },
+            index=dates,
+        )
+
+        class FakeLoader:
+            def fetch(self, *args, **kwargs):
+                return {"000001.SZ": bars.copy()}
+
+        class SignalEngine:
+            def generate(self, data_map):
+                return {"000001.SZ": pd.Series(0.0, index=data_map["000001.SZ"].index)}
+
+        def fake_resolve_benchmark(**kwargs):
+            assert kwargs["explicit"] is None
+            return SimpleNamespace(
+                ticker="000300.SH",
+                ret_series=pd.Series([0.0, 0.01, -0.005], index=dates),
+                total_ret=0.00495,
+            )
+
+        monkeypatch.setattr("backtest.benchmark.resolve_benchmark", fake_resolve_benchmark)
+
+        engine = ChinaAEngine({"initial_cash": 1_000_000})
+        metrics = engine.run_backtest(
+            {
+                "codes": ["000001.SZ"],
+                "start_date": "2024-04-01",
+                "end_date": "2024-04-30",
+                "source": "tencent",
+                "benchmark": "auto",
+                "initial_cash": 1_000_000,
+            },
+            FakeLoader(),
+            SignalEngine(),
+            tmp_path,
+        )
+
+        assert metrics["benchmark_ticker"] == "000300.SH"
+        assert metrics["benchmark_return"] == 0.00495
+        assert metrics["benchmark_label"] == "a_share"
+
+        run_card = json.loads((tmp_path / "run_card.json").read_text(encoding="utf-8"))
+        assert run_card["metrics"]["benchmark_ticker"] == "000300.SH"
+        assert run_card["metrics"]["benchmark_label"] == "a_share"
+
+    def test_failed_benchmark_fetch_labels_equal_weight(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        """A failed benchmark fetch must label the effective equal-weight series honestly."""
+        dates = pd.bdate_range("2024-04-01", periods=3)
+        bars = pd.DataFrame(
+            {
+                "open": [10.0, 11.0, 12.0],
+                "high": [10.5, 11.5, 12.5],
+                "low": [9.5, 10.5, 11.5],
+                "close": [10.2, 11.2, 12.2],
+                "volume": [1000, 1100, 1200],
+            },
+            index=dates,
+        )
+
+        class FakeLoader:
+            def fetch(self, *args, **kwargs):
+                return {"000001.SZ": bars.copy()}
+
+        class SignalEngine:
+            def generate(self, data_map):
+                return {"000001.SZ": pd.Series(0.0, index=data_map["000001.SZ"].index)}
+
+        monkeypatch.setattr("backtest.benchmark.resolve_benchmark", lambda **kwargs: None)
+
+        engine = ChinaAEngine({"initial_cash": 1_000_000})
+        metrics = engine.run_backtest(
+            {
+                "codes": ["000001.SZ"],
+                "start_date": "2024-04-01",
+                "end_date": "2024-04-30",
+                "source": "tencent",
+                "benchmark": "auto",
+                "initial_cash": 1_000_000,
+            },
+            FakeLoader(),
+            SignalEngine(),
+            tmp_path,
+        )
+
+        assert metrics["benchmark_label"] == "equal-weight(universe)"
+        assert "benchmark_ticker" not in metrics
+        assert "benchmark_requested" not in metrics
+
+        run_card = json.loads((tmp_path / "run_card.json").read_text(encoding="utf-8"))
+        assert run_card["metrics"]["benchmark_label"] == "equal-weight(universe)"
+        assert "benchmark_requested" not in run_card["metrics"]
+        assert any(
+            "benchmark fetch failed" in warning and "auto" in warning
+            for warning in (run_card.get("warnings") or [])
+        )
 
     def test_configured_fundamental_enrichment_failure_is_not_silent(
         self,
@@ -621,3 +741,114 @@ class TestValidationArtifactDir:
         assert parsed == {
             "bootstrap": {"observed_sharpe": None, "median_sharpe": None}
         }
+
+
+class TestBenchmarkLabel:
+    def test_infer_market_uses_suffix_for_a_share(self) -> None:
+        assert _infer_market(["600097.SH"], "tencent") == "a_share"
+        assert _infer_market(["000001.SZ"], "local") == "a_share"
+        assert _infer_market(["688001.SH"], "yfinance") == "a_share"
+        assert _infer_market(["123456.BJ"], "akshare") == "a_share"
+    def test_no_benchmark_is_equal_weight(self) -> None:
+        assert _benchmark_label(["600097.SH"], None) == "equal-weight(universe)"
+        assert _benchmark_label([], None) == "equal-weight(universe)"
+
+    def test_auto_uses_market_of_first_code(self) -> None:
+        assert _benchmark_label(["600097.SH"], "auto") == "a_share"
+        assert _benchmark_label(["AAPL.US"], "auto") == "us_equity"
+        assert _benchmark_label(["BTC-USDT"], "auto") == "crypto"
+
+    def test_explicit_benchmark_uses_ticker(self) -> None:
+        assert _benchmark_label(["600097.SH"], "000300.SH") == "000300.SH"
+
+
+class TestAutoMonteCarlo:
+    def test_auto_validation_request_when_trade_count_reaches_threshold(self) -> None:
+        assert _validation_request({}, 9) is None
+        assert _validation_request({}, 10)["monte_carlo"]["n_simulations"] == 1000
+        assert _validation_request({}, 150)["monte_carlo"]["n_simulations"] == 500
+        assert _validation_request({}, 1000)["monte_carlo"]["n_simulations"] == 100
+
+    def test_explicit_validation_config_wins(self) -> None:
+        explicit = {"bootstrap": {"n_bootstrap": 20}}
+        assert _validation_request({"validation": explicit}, 3) == explicit
+
+    def test_true_runs_all_three(self) -> None:
+        request = _validation_request({"validation": True}, 3)
+        assert set(request) == {"monte_carlo", "bootstrap", "walk_forward"}
+
+    def test_engine_writes_validation_json_automatically(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        dates = pd.bdate_range("2024-04-01", periods=3)
+        bars = pd.DataFrame(
+            {
+                "open": [10.0, 11.0, 12.0],
+                "high": [10.5, 11.5, 12.5],
+                "low": [9.5, 10.5, 11.5],
+                "close": [10.2, 11.2, 12.2],
+                "volume": [1000, 1100, 1200],
+            },
+            index=dates,
+        )
+
+        class FakeLoader:
+            def fetch(self, *args, **kwargs):
+                return {"000001.SZ": bars.copy()}
+
+        class SignalEngine:
+            def generate(self, data_map):
+                return {"000001.SZ": pd.Series(0.0, index=data_map["000001.SZ"].index)}
+
+        class TenTradeEngine(ChinaAEngine):
+            def _execute_bars(self, dates, data_map, close_df, target_pos, codes):
+                self.trades = []
+                for _ in range(10):
+                    self.trades.append(
+                        TradeRecord(
+                            symbol="000001.SZ",
+                            direction=1,
+                            entry_price=10.0,
+                            exit_price=10.5,
+                            entry_time=dates[0],
+                            exit_time=dates[1],
+                            size=100.0,
+                            leverage=1.0,
+                            pnl=50.0,
+                            pnl_pct=0.05,
+                            exit_reason="signal",
+                            holding_bars=1,
+                            commission=0.0,
+                        )
+                    )
+                self.equity_snapshots = [
+                    EquitySnapshot(
+                        timestamp=ts,
+                        capital=1_000_000.0,
+                        unrealized=0.0,
+                        equity=1_000_000.0,
+                        positions=0,
+                    )
+                    for ts in dates
+                ]
+
+        monkeypatch.setattr(
+            "backtest.validation.run_validation",
+            lambda *args, **kwargs: {"monte_carlo": {"p_value_sharpe": 0.5}},
+        )
+        engine = TenTradeEngine({"initial_cash": 1_000_000})
+        metrics = engine.run_backtest(
+            {
+                "codes": ["000001.SZ"],
+                "start_date": "2024-04-01",
+                "end_date": "2024-04-30",
+                "source": "tushare",
+                "initial_cash": 1_000_000,
+            },
+            FakeLoader(),
+            SignalEngine(),
+            tmp_path,
+        )
+
+        assert "validation" in metrics
+        assert (tmp_path / "artifacts" / "validation.json").exists()

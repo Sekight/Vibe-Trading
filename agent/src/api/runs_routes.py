@@ -44,6 +44,23 @@ def _load_csv_to_dict(path: Path, limit: Optional[int] = None) -> List[Dict[str,
         return []
 
 
+def _benchmark_summary(run_dir: Path) -> Dict[str, Any]:
+    """Best-effort benchmark metadata from run card metrics / config."""
+    card = _load_json_file(run_dir / "run_card.json") or {}
+    metrics = card.get("metrics") if isinstance(card.get("metrics"), dict) else {}
+    config = _load_json_file(run_dir / "config.json") or {}
+    benchmark = config.get("benchmark")
+    label = metrics.get("benchmark_label")
+    if not label:
+        raw = str(benchmark or "").strip()
+        label = raw if raw else "equal-weight(universe)"
+    return {
+        "label": label,
+        "ticker": metrics.get("benchmark_ticker"),
+        "return": metrics.get("benchmark_return"),
+    }
+
+
 def _run_response_payload(response: Any) -> Dict[str, Any]:
     """Return a JSON-ready payload for opt-in run response variants."""
     return response.model_dump(mode="json")
@@ -305,6 +322,7 @@ def register_runs_routes(
             "run_id": run_id,
             "markdown": markdown_path.read_text(encoding="utf-8") if markdown_path.exists() else None,
             "status": _load_json_file(status_path),
+            "benchmark": _benchmark_summary(run_dir),
         }
 
     @app.get("/runs/{run_id}/analysis/charts", dependencies=[Depends(require_auth)])
@@ -325,6 +343,7 @@ def register_runs_routes(
             "charts": compute_chart_payload(digest),
             "pngs": list_pngs(run_dir),
             "available": True,
+            "benchmark_label": _benchmark_summary(run_dir).get("label"),
         }
 
     @app.get("/runs/{run_id}/analysis/charts/{name}.png", dependencies=[Depends(require_auth)])

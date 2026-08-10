@@ -137,6 +137,8 @@ def _infer_market(codes: list[str], source: str) -> str:
 
     if source in ("okx", "ccxt") or "-" in first or "/" in first:
         return "crypto"
+    if first.endswith((".SH", ".SZ", ".BJ")):
+        return "a_share"
     if first.endswith(".US"):
         return "us_equity"
     if first.endswith(".HK"):

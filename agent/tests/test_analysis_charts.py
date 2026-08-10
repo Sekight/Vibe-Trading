@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from backtest.analysis.charts import (
     CHART_KEYS,
     compute_chart_payload,
@@ -52,3 +54,21 @@ def test_generate_chart_artifacts_returns_payload_and_pngs(tmp_path: Path) -> No
     assert result["generated"] is True
     assert result["pngs"]
     assert "equity_return" in result["charts"]
+
+
+def test_compute_chart_payload_includes_benchmark_series(tmp_path: Path) -> None:
+    run_dir = write_run_dir(tmp_path, "20260811_333333_00_chartbench")
+    (run_dir / "artifacts" / "equity.csv").write_text(
+        "timestamp,equity,drawdown,benchmark_equity\n"
+        "2024-01-05,1000000,0,1000000\n"
+        "2024-01-20,1010000,-0.01,1010000\n"
+        "2024-02-15,1050000,0,990000\n",
+        encoding="utf-8",
+    )
+    digest = build_digest(run_dir)
+    payload = compute_chart_payload(digest)
+
+    assert payload["equity_return"][0]["benchmark"] == 0.0
+    assert payload["equity_return"][2]["benchmark"] == -1.0
+    assert payload["drawdown"][2]["benchmark"] == pytest.approx(-1.9802, abs=1e-4)
+    assert "benchmark" in payload["drawdown"][0]

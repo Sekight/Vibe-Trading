@@ -4,12 +4,20 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import json
+
+import pytest
+
 from backtest.analysis.digest import (
     add_mae_mfe,
     build_digest,
+    group_metrics,
     holding_buckets,
+    load_digest,
     monthly_pnl,
     pair_trades,
+    render_digest_for_llm,
+    write_digest_json,
 )
 
 from tests._analysis_fixtures import write_run_dir
@@ -145,3 +153,75 @@ def test_build_digest_reads_synthetic_run(tmp_path: Path) -> None:
     assert len(digest["monthly_pnl"]) == 2
     assert len(digest["buckets"]) == 6
     assert digest["reproducibility"]["config_hash"] == "cfg-abc"
+
+
+def test_build_digest_reads_benchmark_curve_and_validation(tmp_path: Path) -> None:
+    run_dir = write_run_dir(tmp_path, "20260811_000000_00_bench")
+    (run_dir / "artifacts" / "equity.csv").write_text(
+        "timestamp,equity,drawdown,benchmark_equity\n"
+        "2024-01-05,1000000,0,1000000\n"
+        "2024-01-20,1010000,-0.01,1010000\n"
+        "2024-02-15,1050000,0,990000\n",
+        encoding="utf-8",
+    )
+    (run_dir / "artifacts" / "validation.json").write_text(
+        json.dumps({"monte_carlo": {"p_value_sharpe": 0.123, "n_simulations": 1000}}),
+        encoding="utf-8",
+    )
+    digest = build_digest(run_dir)
+
+    assert digest["equity"][0]["benchmark_cum_return_pct"] == 0.0
+    assert digest["equity"][0]["benchmark_drawdown_pct"] == 0.0
+    assert digest["equity"][1]["benchmark_cum_return_pct"] == 1.0
+    assert digest["equity"][2]["benchmark_cum_return_pct"] == -1.0
+    assert digest["equity"][2]["benchmark_drawdown_pct"] == pytest.approx(-1.9802, abs=1e-4)
+    assert digest["validation"]["monte_carlo"]["p_value_sharpe"] == 0.123
+
+
+def test_write_and_load_digest_json_roundtrip(tmp_path: Path) -> None:
+    run_dir = write_run_dir(tmp_path, "20260811_111111_00_digest")
+    digest = write_digest_json(run_dir)
+    path = run_dir / "analysis.digest.json"
+    assert path.exists()
+    loaded = load_digest(run_dir)
+    assert loaded["run_id"] == run_dir.name
+    assert loaded["equity"] == digest["equity"]
+    assert loaded["metrics"] == digest["metrics"]
+
+
+def test_group_metrics_covers_all_scalars_and_keeps_benchmark_label() -> None:
+    metrics = {
+        "total_return": 0.05, "annual_return": 0.2, "final_value": 1050000.0,
+        "sharpe": 0.8, "sortino": 0.7, "calmar": 0.6, "max_drawdown": -0.1,
+        "win_rate": 0.5, "profit_factor": 2.0, "profit_loss_ratio": 2.5,
+        "trade_count": 20, "avg_holding_days": 10, "max_consecutive_loss": 3,
+        "benchmark_label": "000300.SH", "benchmark_ticker": "000300.SH",
+        "benchmark_return": 0.03, "benchmark_beta": 0.9,
+        "excess_return": 0.02, "information_ratio": 0.4, "tracking_error": 0.1,
+        "risk_xray_annualized_vol": 0.2, "risk_xray_avg_invested": 0.8,
+        "risk_xray_effective_n": 3, "risk_xray_hhi": 0.5,
+        "risk_xray_max_drawdown": -0.2, "beta_to_equal_weight": 0.95,
+        "monte_carlo_p_value_sharpe": 0.1, "monte_carlo_p_value_max_dd": 0.2,
+        "monte_carlo_n_simulations": 500,
+        "avg_position_weight": 0.5, "max_position_weight": 0.8,
+        "avg_turnover": 0.05, "total_turnover": 1.0,
+        "rebalance_turnover_mean": 0.1, "rebalance_turnover_max": 0.2,
+        "rebalance_count": 10,
+        "extra_scalar": 7,
+    }
+    groups = group_metrics(metrics)
+    labels = [label for label, _ in groups]
+    assert labels == ["性能", "基准相对", "风险", "仓位与换手", "再平衡", "其他"]
+    assigned = {key for _, items in groups for key, _ in items}
+    assert assigned == set(metrics)
+
+
+def test_render_digest_for_llm_includes_benchmark_and_grouped_metrics(tmp_path: Path) -> None:
+    run_dir = write_run_dir(tmp_path, "20260811_222222_00_render")
+    digest = build_digest(run_dir)
+    prompt = render_digest_for_llm(digest)
+
+    assert "## 指标解读（全量指标）" in prompt
+    assert "### 性能" in prompt
+    assert "equal-weight(universe)" in prompt
+    assert "## 核心指标" not in prompt

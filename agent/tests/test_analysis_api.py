@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -35,6 +36,7 @@ def test_analysis_route_returns_markdown_and_status(tmp_path: Path, monkeypatch)
     body = response.json()
     assert body["markdown"] == "> generated_by: runner\n\n结论"
     assert body["status"]["status"] == "ok"
+    assert body["benchmark"]["label"] == "equal-weight(universe)"
 
 
 def test_analysis_route_missing_files_returns_nulls(tmp_path: Path, monkeypatch) -> None:
@@ -46,6 +48,25 @@ def test_analysis_route_missing_files_returns_nulls(tmp_path: Path, monkeypatch)
     assert response.status_code == 200
     assert response.json()["markdown"] is None
     assert response.json()["status"] is None
+
+
+def test_analysis_route_returns_benchmark_metadata(tmp_path: Path, monkeypatch) -> None:
+    run_dir = write_run_dir(tmp_path, "20260811_000000_00_benchapi")
+    card_path = run_dir / "run_card.json"
+    card = json.loads(card_path.read_text(encoding="utf-8"))
+    card["metrics"]["benchmark_label"] = "000300.SH"
+    card["metrics"]["benchmark_ticker"] = "000300.SH"
+    card["metrics"]["benchmark_return"] = 0.03
+    card_path.write_text(json.dumps(card, ensure_ascii=False), encoding="utf-8")
+    client = _client(monkeypatch, tmp_path)
+
+    response = client.get(f"/runs/{run_dir.name}/analysis")
+
+    assert response.status_code == 200
+    benchmark = response.json()["benchmark"]
+    assert benchmark["label"] == "000300.SH"
+    assert benchmark["ticker"] == "000300.SH"
+    assert benchmark["return"] == 0.03
 
 
 def test_analysis_charts_route_returns_payloads(tmp_path: Path, monkeypatch) -> None:
@@ -61,6 +82,7 @@ def test_analysis_charts_route_returns_payloads(tmp_path: Path, monkeypatch) -> 
     assert "equity_return" in body["charts"]
     assert "holding_buckets" in body["charts"]
     assert len(body["pngs"]) == 7
+    assert body["benchmark_label"] == "equal-weight(universe)"
 
 
 def test_analysis_charts_route_missing_metrics_is_unavailable(tmp_path: Path, monkeypatch) -> None:

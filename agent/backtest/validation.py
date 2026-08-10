@@ -26,6 +26,17 @@ from backtest.models import TradeRecord
 # ─── Monte Carlo Permutation Test ───
 
 
+def default_monte_carlo_simulations(trade_count: int) -> int:
+    """Pick a simulation count that stays fast for large trade sets."""
+    if trade_count >= 1000:
+        return 100
+    if trade_count >= 300:
+        return 200
+    if trade_count >= 100:
+        return 500
+    return 1000
+
+
 def monte_carlo_test(
     trades: List[TradeRecord],
     initial_capital: float,

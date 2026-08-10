@@ -1054,7 +1054,7 @@ function AnalysisChartsTab({ runId }: { runId: string }) {
   return (
     <div className="grid gap-4 p-4 lg:grid-cols-2">
       {ANALYSIS_CHART_ORDER.map(({ key, titleKey }) => (
-        <AnalysisChartCard key={key} chartKey={key} title={i18n.t(titleKey as any)} payload={data.charts} pngUrl={pngUrls[key]} />
+        <AnalysisChartCard key={key} chartKey={key} title={i18n.t(titleKey as any)} payload={data.charts} pngUrl={pngUrls[key]} benchmarkLabel={data.benchmark_label ?? undefined} />
       ))}
     </div>
   );
@@ -1065,11 +1065,13 @@ function AnalysisChartCard({
   title,
   payload,
   pngUrl,
+  benchmarkLabel,
 }: {
   chartKey: keyof RunAnalysisCharts["charts"];
   title: string;
   payload: RunAnalysisCharts["charts"];
   pngUrl?: string;
+  benchmarkLabel?: string;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const dark = useThemeDark();
@@ -1104,28 +1106,46 @@ function AnalysisChartCard({
 
     let option: EChartsCoreOption = {};
     if (chartKey === "equity_return" && Array.isArray(points)) {
-      const rows = points as Array<{ date: string; value: number }>;
+      const rows = points as Array<{ date: string; value: number; benchmark?: number | null }>;
+      const hasBenchmark = rows.some((r) => r.benchmark != null);
+      const benchmarkName = benchmarkLabel || i18n.t("runDetail.chartBenchmark" as any);
       option = {
         grid, tooltip: { ...tooltip, trigger: "axis" },
+        legend: hasBenchmark ? { top: 0, textStyle: { color: t.textColor, fontSize: 10 } } : undefined,
         xAxis: { type: "category", name: i18n.t("runDetail.chartAxisDate" as any), data: rows.map((r) => r.date), ...axis, ...middleName },
         yAxis: { ...valueAxis, name: i18n.t("runDetail.chartAxisCumReturn" as any) },
-        series: [{
-          type: "line", data: rows.map((r) => r.value), showSymbol: false, smooth: true,
-          lineStyle: { color: t.infoColor, width: 2 },
-          areaStyle: { color: `${t.infoColor}22` },
-        }],
+        series: [
+          {
+            type: "line", name: i18n.t("runDetail.chartStrategy" as any), data: rows.map((r) => r.value), showSymbol: false, smooth: true,
+            lineStyle: { color: t.infoColor, width: 2 },
+            areaStyle: { color: `${t.infoColor}22` },
+          },
+          ...(hasBenchmark ? [{
+            type: "line", name: benchmarkName, data: rows.map((r) => r.benchmark ?? null), showSymbol: false, smooth: true,
+            lineStyle: { color: t.warningColor, width: 1.6 }, z: 3,
+          }] : []),
+        ],
       };
     } else if (chartKey === "drawdown" && Array.isArray(points)) {
-      const rows = points as Array<{ date: string; value: number }>;
+      const rows = points as Array<{ date: string; value: number; benchmark?: number | null }>;
+      const hasBenchmark = rows.some((r) => r.benchmark != null);
+      const benchmarkName = benchmarkLabel || i18n.t("runDetail.chartBenchmark" as any);
       option = {
         grid, tooltip: { ...tooltip, trigger: "axis" },
+        legend: hasBenchmark ? { top: 0, textStyle: { color: t.textColor, fontSize: 10 } } : undefined,
         xAxis: { type: "category", name: i18n.t("runDetail.chartAxisDate" as any), data: rows.map((r) => r.date), ...axis, ...middleName },
         yAxis: { ...valueAxis, name: i18n.t("runDetail.chartAxisDrawdown" as any), inverse: true, nameLocation: "start" },
-        series: [{
-          type: "line", data: rows.map((r) => r.value), showSymbol: false,
-          lineStyle: { color: ANALYSIS_RED, width: 1.4 },
-          areaStyle: { color: `${ANALYSIS_RED}44` },
-        }],
+        series: [
+          {
+            type: "line", name: i18n.t("runDetail.chartStrategy" as any), data: rows.map((r) => r.value), showSymbol: false,
+            lineStyle: { color: ANALYSIS_RED, width: 1.4 },
+            areaStyle: { color: `${ANALYSIS_RED}44` },
+          },
+          ...(hasBenchmark ? [{
+            type: "line", name: benchmarkName, data: rows.map((r) => r.benchmark ?? null), showSymbol: false,
+            lineStyle: { color: t.warningColor, width: 1.4 }, z: 3,
+          }] : []),
+        ],
       };
     } else if (chartKey === "pnl_scatter" && Array.isArray(points)) {
       const rows = points as Array<{ index: number; entry_ts?: string; code?: string; return_pct?: number; win: boolean }>;
@@ -1303,6 +1323,19 @@ function AnalysisTab({ runId }: { runId: string }) {
           {status.llm_usage && (
             <p className="mt-1"><b className="text-foreground">{i18n.t("runDetail.analysisUsage")}:</b> {JSON.stringify(status.llm_usage)}</p>
           )}
+        </div>
+      )}
+      {analysis.benchmark && (
+        <div className="rounded-md border border-border/60 bg-card p-3 text-xs text-muted-foreground">
+          <div className="flex flex-wrap gap-x-6 gap-y-1">
+            <span><b className="text-foreground">{i18n.t("runDetail.benchmarkLabel")}:</b> {analysis.benchmark.label || "-"}</span>
+            {analysis.benchmark.ticker && (
+              <span><b className="text-foreground">{i18n.t("runDetail.benchmarkTicker")}:</b> {analysis.benchmark.ticker}</span>
+            )}
+            {analysis.benchmark.return != null && (
+              <span><b className="text-foreground">{i18n.t("runDetail.benchmarkReturn")}:</b> {(Number(analysis.benchmark.return) * 100).toFixed(2)}%</span>
+            )}
+          </div>
         </div>
       )}
       <div className="rounded-md border border-border/60 bg-card p-4 [&_pre]:overflow-auto [&_pre]:rounded [&_pre]:bg-muted/40 [&_pre]:p-2 [&_table]:w-full [&_td]:border [&_td]:border-border/60 [&_td]:p-1 [&_th]:border [&_th]:border-border/60 [&_th]:p-1">

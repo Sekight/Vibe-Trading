@@ -574,19 +574,20 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 ├─ run_card.json / run_card.md 结果摘要：metrics、data_sources、hash、artifacts 清单
 ├─ analysis.md                 LLM 生成的策略分析报告（agent 自动写，或 --with-analysis 补生成）
 ├─ analysis.status.json        分析状态：ok / failed / skipped + generated_by / llm_usage
+├─ analysis.digest.json        回测成功后统一生成的结构化分析数据（全量指标分组 / 逐日基准序列 / 蒙特卡洛 / 交易与月度损益摘要），LLM 报告与前端图表都复用它
 ├─ analysis_charts/            自动生成的 7 张分析图 PNG
 ├─ llm_usage.json              agent 每轮迭代的 token 统计（input / output / total）
 ├─ trace.jsonl                 agent 步骤追踪日志（调试用）
 ├─ code/
 │  └─ signal_engine.py          本次策略生成的信号引擎代码
 ├─ artifacts/
-│  ├─ metrics.csv               指标一行：total_return / annual_return / max_drawdown / sharpe / win_rate / trade_count 等
+│  ├─ metrics.csv               指标一行：total_return / annual_return / max_drawdown / sharpe / win_rate / trade_count / benchmark_label / benchmark_return 等
 │  ├─ trades.csv                每笔交易明细
 │  ├─ equity.csv                每日权益曲线
 │  ├─ positions.csv             每日持仓
 │  ├─ ohlcv_<代码>.csv          回测实际使用的行情（可直接复制给 data-bridge 复用）
 │  ├─ rebalance_notes.json/.md  调仓记录
-│  ├─ validation.json           蒙特卡洛等稳健性结果（可选）
+│  ├─ validation.json           蒙特卡洛等稳健性结果（trade_count>=10 自动生成；显式 validation 配置优先）
 │  ├─ risk_xray.json/.md        风险透视（可选）
 │  └─ grounding_evidence.json   数据来源/证据
 └─ logs/
@@ -598,7 +599,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 - 中途失败/被中止的 run 可能只有 `req.json`、`trace.jsonl`、`state.json`，没有 `code/` 和 `artifacts/`。
 - 没有自动清理机制：新任务永远新建目录，旧 run 不会被覆盖也不会自动删除，需要自己手动清理。
 - 查看入口：`vibe-trading list` 列所有 run，`vibe-trading --show <run_id>` 看 run card 和指标。
-- 分析产物：`analysis_charts/` 的 7 张 PNG 在回测成功后自动生成；`analysis.md` / `analysis.status.json` 是 LLM 分析报告（agent 自动写，或 runner 加 `--with-analysis` 补生成），不存在不代表回测失败，见 8.36。
+- 分析产物：`analysis_charts/` 的 7 张 PNG 与 `analysis.digest.json` 在回测成功后自动生成；`analysis.md` / `analysis.status.json` 是 LLM 分析报告（agent 自动写，或 runner 加 `--with-analysis` 补生成），不存在不代表回测失败，见 8.36。
 
 ### 8.25 `source=local` 报 missing: ['local:600097.SH']，然后卡在 tushare token？
 
@@ -688,8 +689,8 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 > | `exit_mode` | 平仓成交时点：next_open / close / stop（止损价成交） | next_open |
 > | `optimizer` | 权重优化器名（如 risk_parity）；`optimizer_params` 传参数 | 无（不优化） |
 > | `constraints` | 组合约束（总仓位、单标的上限等），需配合 optimizer 才生效 | 无 |
-> | `validation` | 设为 true 时跑蒙特卡洛等稳健性验证，产出 artifacts/validation.json | false |
-> | `benchmark` | 基准标的，如 "000300.SH"；配 local 数据源才能拿到真实基准 | 无 |
+> | `validation` | 显式 true 时跑蒙特卡洛；不写时若 trade_count >= 10 也会自动跑（n_simulations 降档：<100→1000，100-299→500，300-999→200，>=1000→100），产出 artifacts/validation.json | 自动（按交易数） |
+> | `benchmark` | 基准标的，如 "000300.SH"；写 "auto" 时按代码后缀推断市场并取市场默认基准（A股=000300.SH、美股=SPY、港股=HK.03100、加密=BTC-USDT）；不写或写 null = 等权组合。取不到时一律降级为等权且不中断回测，标签会如实写成 equal-weight(universe)，并把失败原因写入 run_card 的 warnings（详见下方基准逻辑详解） | 无（等权组合） |
 > | `extra_fields` | 取数时额外字段（如 vwap / amount） | 无 |
 > | `fundamental_fields` / `event_feeds` | 进阶：给回测注入基本面或事件数据 | 无 |
 > | `leverage` | 杠杆倍数；A股引擎强制 1，写多少都被覆盖 | 1.0 |
@@ -708,6 +709,32 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 > - 止损价由 `signal_engine.py` 自己算：`SignalEngine.generate()` 返回权重的同时，把 `self.stop_prices = {代码: pd.Series(止损价, index=交易日)}` 带上。
 > - 只有 `exit_mode="stop"` 时引擎才读它；某天止损价为 NaN/缺失，当天出场退回收盘价成交。
 > - `config.json` 不需要也不能写 `stop_prices`。
+>
+> #### 基准（benchmark）逻辑详解
+>
+> `benchmark` 决定“拿什么序列当基准”来计算 `excess_return` / `information_ratio` / `tracking_error` / `benchmark_beta` / `benchmark_return`。配置只有三种写法：
+>
+> | config.json 写法 | 实际使用的基准 | 标签与字段 |
+> | --- | --- | --- |
+> | 不写 `benchmark`（或写 `null`） | 等权组合：策略池每日收益等权平均 | `benchmark_label=equal-weight(universe)`；不联网、最快 |
+> | `"benchmark": "auto"` | 按首标的代码后缀推断市场，取市场默认基准：A股（.SH/.SZ/.BJ）→ 000300.SH；美股（.US）→ SPY；港股（.HK）→ HK.03100；加密 → BTC-USDT | 取到：`benchmark_label=a_share` 等市场名 + `benchmark_ticker` + `benchmark_return`；取不到：降级为等权，`benchmark_label=equal-weight(universe)` |
+> | `"benchmark": "000300.SH"` 等显式代码 | 只取你写的那个标的 | 取到：`benchmark_label=000300.SH` + `benchmark_ticker` + `benchmark_return`；取不到：降级为等权，`benchmark_label=equal-weight(universe)` |
+>
+> 无论哪种写法，取数失败都不会中断回测，只是基准退回等权组合。`metrics.csv` / run_card 里不会单独记录“请求值”；一旦发生降级，run_card 的 `warnings` 会出现一条 `benchmark fetch failed (requested: ...); fell back to equal-weight(universe)`，同时 `benchmark_label` 会是 `equal-weight(universe)`。两者配合即可判断“请求了自动/指定基准但没取到”。
+>
+> 判断本次到底用了什么基准，看 run_card.json / artifacts/metrics.csv 的三个字段：
+> - `benchmark_label`：实际使用的基准描述；`equal-weight(universe)` = 等权组合，`a_share` 等 = 市场自动推断，具体代码 = 显式基准。
+> - `benchmark_ticker`：实际取到的基准代码（如 000300.SH）；降级时不存在。
+> - `benchmark_return`：该基准区间总收益；降级时就是等权组合收益，不是任何指数收益。
+> - `warnings`（run_card 顶层）：非空且含 `benchmark fetch failed` 就说明这次请求过外部基准但降级成了等权组合。
+>
+> 想改基准标的：
+> - 要等权：删掉 config.json 的 `benchmark` 字段（或写 `null`），重跑 runner。
+> - 要自动：写 `"benchmark": "auto"`。
+> - 要指定：写具体代码，如 `"benchmark": "000300.SH"`。
+> - 改完不会自动生效：`cd agent` 后 `..\.venv\Scripts\python.exe -m backtest.runner "<run_dir>"` 重跑，或让 agent `--continue` 续跑。
+>
+> 真实 A 股基准 000300.SH 的坑（见 8.26）：免费链路里 yfinance 经常拉不到 A 股指数；最稳做法是 data-bridge 放一条 000300.SH 日线 CSV，source 用 local，config 写 `"benchmark": "000300.SH"`，本地离线取基准。
 >
 >
 ### 8.35 loader 数据缓存（`VIBE_TRADING_DATA_CACHE`）要不要开？什么时候开？
@@ -736,9 +763,11 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 ### 8.36 回测分析报告（analysis.md）和 7 张分析图是什么？
 
 - 每次回测成功后，runner 都会自动生成 `analysis_charts/*.png`（7 张：净值曲线、回撤瀑布、单笔盈亏散点、月度损益热力图、盈亏 vs 持仓时长、MAE/MFE、持仓分桶），不需要额外参数、不烧 LLM token；单张图失败不阻塞回测。
+- 每次回测成功后，runner 还会自动生成 `analysis.digest.json`（不需要额外参数、不烧 LLM token），里面包含：全量指标按“性能 / 基准相对 / 风险 / 仓位与换手 / 再平衡 / 其他”分组、逐日权益与基准序列（`equity` 每行含 `benchmark_cum_return_pct` / `benchmark_drawdown_pct`）、`validation`（蒙特卡洛）、交易明细、月度损益、持仓分桶、MAE/MFE 摘要等。LLM 报告和前端“分析图”都从这份 digest 取数，保证口径一致；benchmark 未配置时统一记 `equal-weight(universe)`；`benchmark: "auto"` 按 `.SH/.SZ/.BJ` 后缀识别为 a_share 并尝试取市场默认基准（A股=000300.SH），失败时降级为等权基准，并在 run_card warnings 记录 `benchmark fetch failed`。
 - LLM 分析报告 `analysis.md` 是可选产物，由两条路径生成，行为一致（同一份 digest 同一套 prompt）：
   1. agent 路径：回测成功后 agent 自动调用 `write_run_analysis` 工具写 `analysis.md` + `analysis.status.json`，最终回复只引用文件路径，不再重复长篇归因（省 token）。
   2. runner 路径：在 `agent` 目录下执行 `..\.venv\Scripts\python.exe -m backtest.runner "C:\Users\mumu\.vibe-trading\runs\<run_id>" --with-analysis`（也支持 `--withAnalysis`），回测成功后会补生成同一份分析（会调用一次 LLM；`VIBE_TRADING_ANALYSIS_TIMEOUT` 可调超时，默认 120 秒）。
+- 分析 prompt 结构：一句话结论 → 结论详解 → 指标解读（全量、分组、逐项）→ 交易行为诊断 → 风险与改进建议，目标字数 800-1500 字。
 - `analysis.status.json` 记录 `status`（ok / failed / skipped）、`generated_by`（agent / runner）、`generated_at`、`llm_usage`（provider 上报时的真实 token 用量）。LLM 失败只把 status 记为 failed，不会让回测失败。
 - WebUI 的“分析图”标签从 `/runs/{id}/analysis/charts` 现算 ECharts 数据，PNG 只是兜底图片；数据不重复落库。
 
@@ -747,7 +776,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 - 原因：这个 CSV 正被 WPS 表格 / Excel 等程序打开，Windows 下文件被占用时无法覆盖写入；不是代码 bug，也不是路径问题。
 - 解决：先关掉打开 `trades.csv` 的 WPS / Excel 窗口（或退出 WPS），再重跑 `..\.venv\Scripts\python.exe -m backtest.runner "C:\Users\mumu\.vibe-trading\runs\<run_id>" --with-analysis`。
 - 只想补生成 `analysis.md`、不重跑回测时：`..\.venv\Scripts\python.exe -c "from backtest.analysis.report import generate_analysis_report; print(generate_analysis_report(r'C:\Users\mumu\.vibe-trading\runs\<run_id>', generated_by='runner'))"`（需要 `run_card.json` 和 `artifacts/metrics.csv` 已存在；不写 trades.csv，仍会调用一次 LLM）。
-- 为什么这条命令不用跑回测：`generate_analysis_report` 与回测引擎无关，只检查 `run_card.json` + `artifacts/metrics.csv` 是否存在，然后读已有 artifacts 算 digest（配对交易/月度损益/持仓分桶/MAE/MFE）→ 拼 prompt → 调一次 LLM → 写 `analysis.md` + `analysis.status.json`；不写 trades.csv，也不启动 loader/engine。`--with-analysis` 则是两段式：runner 先重跑回测（覆盖 artifacts），再调用同一个 `generate_analysis_report`，所以单独调它就是“只取第二段”。
+- 为什么这条命令不用跑回测：`generate_analysis_report` 与回测引擎无关，只检查 `run_card.json` + `artifacts/metrics.csv` 是否存在，然后优先复用 `analysis.digest.json`（缺失时才读已有 artifacts 现算：配对交易/月度损益/持仓分桶/MAE/MFE）→ 拼 prompt → 调一次 LLM → 写 `analysis.md` + `analysis.status.json`；不写 trades.csv，也不启动 loader/engine。`--with-analysis` 则是三段式：runner 先重跑回测（覆盖 artifacts）→ 写 `analysis.digest.json` 并生成图表 → 再调用同一个 `generate_analysis_report`，所以单独调它就是“只取最后一段”。
 - 注意：单独跑 `generate_analysis_report` 不会生成 `analysis_charts/*.png`（PNG 由回测 runner 自动生成）。如果只想补 PNG 而不重跑回测：`..\.venv\Scripts\python.exe -c "from backtest.analysis.charts import generate_chart_artifacts; import json; print(json.dumps(generate_chart_artifacts(r'C:\Users\mumu\.vibe-trading\runs\<run_id>'), ensure_ascii=False))"`。WebUI 的“分析图”标签从 API 现算 ECharts 数据，PNG 只是兜底，缺少 PNG 不影响图表显示。
 - 注意：重跑 runner 会覆盖 `artifacts/` 下全部文件，查看前最好先关掉相关编辑器。
 

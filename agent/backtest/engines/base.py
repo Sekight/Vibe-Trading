@@ -43,6 +43,9 @@ from backtest.metrics import (
 )
 
 
+from backtest.engines._market_hooks import _detect_market
+
+
 def _json_safe_scalar_metrics(metrics: Dict[str, Any]) -> Dict[str, Any]:
     """Scalar metrics for stdout JSON; non-finite floats become null."""
     return {
@@ -87,6 +90,33 @@ def _run_card_data_sources(config: Dict[str, Any], loader: Any) -> List[str]:
 
     source = config.get("source")
     return [str(source)] if source else []
+
+
+def _benchmark_label(codes: List[str], benchmark: Any) -> str:
+    """Human-readable benchmark label for metrics, run card and digest."""
+    raw = str(benchmark or "").strip()
+    if raw and raw != "auto":
+        return raw
+    if raw == "auto" and codes:
+        return _detect_market(codes[0])
+    return "equal-weight(universe)"
+
+
+def _validation_request(config: Dict[str, Any], trade_count: int) -> Optional[Dict[str, Any]]:
+    """Return the validation config to run; explicit config wins."""
+    validation_config = config.get("validation")
+    if isinstance(validation_config, dict):
+        return validation_config
+    if validation_config is True:
+        return {"monte_carlo": {}, "bootstrap": {}, "walk_forward": {}}
+    if trade_count >= 10:
+        from backtest.validation import default_monte_carlo_simulations
+        return {
+            "monte_carlo": {
+                "n_simulations": default_monte_carlo_simulations(trade_count),
+            }
+        }
+    return None
 
 
 # ─── Market detection (lightweight, for signal alignment only) ───
@@ -755,18 +785,20 @@ class BaseEngine(ABC):
         bench_ret = ret_df.mean(axis=1) if ret_df.shape[1] > 0 else pd.Series(0.0, index=dates)
         benchmark_metadata = {}
 
+        benchmark_metadata = {"benchmark_label": _benchmark_label(codes, config.get("benchmark"))}
         # ── External benchmark fetch ──────────────────────────────────────────
         bench_ticker = config.get("benchmark")
-        if bench_ticker and bench_ticker != "auto":
+        if bench_ticker:
             from backtest.benchmark import resolve_benchmark
             bench_source = config.get("source", "yfinance")
+            is_auto_benchmark = str(bench_ticker).strip().lower() == "auto"
             bench_result = resolve_benchmark(
                 strategy_codes=codes,
                 source=bench_source,
                 start_date=config.get("start_date", ""),
                 end_date=config.get("end_date", ""),
                 interval=interval,
-                explicit=bench_ticker,
+                explicit=None if is_auto_benchmark else bench_ticker,
                 # Explicit source: fetch the benchmark through its own loader
                 # (keeps e.g. source=local offline). Auto keeps the yfinance
                 # default — its loader only wraps the preloaded strategy data.
@@ -775,9 +807,18 @@ class BaseEngine(ABC):
             if bench_result is not None:
                 bench_ret = bench_result.ret_series.reindex(dates).fillna(0.0)
                 benchmark_metadata = {
+                    "benchmark_label": _benchmark_label(codes, "auto" if is_auto_benchmark else bench_ticker),
                     "benchmark_ticker": bench_result.ticker,
                     "benchmark_return": bench_result.total_ret,
                 }
+            else:
+                # Fetch failed: the effective series stays the equal-weight
+                # universe, so the label must say so instead of the requested one.
+                benchmark_metadata = {"benchmark_label": "equal-weight(universe)"}
+                config["_run_card_warnings"] = (config.get("_run_card_warnings") or []) + [
+                    f"benchmark fetch failed (requested: {bench_ticker}); fell back to equal-weight(universe)",
+                ]
+                print(json.dumps({"warning": "benchmark fetch failed", "requested": str(bench_ticker)}, ensure_ascii=False))
         # ── External benchmark fetch ──────────────────────────────────────────
 
         bench_equity = self.initial_capital * (1 + bench_ret).cumprod()
@@ -845,11 +886,15 @@ class BaseEngine(ABC):
             m["risk_xray_max_drawdown"] = risk_xray["drawdown"]["max_drawdown"]
             m["risk_xray_avg_invested"] = avg_invested
 
-        # 7. Validation (optional — triggered by config["validation"])
-        if config.get("validation"):
+        # 7. Validation (explicit config wins; else auto Monte Carlo when
+        #    trade_count >= 10, with simulation count scaled by trade count)
+        validation_request = _validation_request(config, len(self.trades))
+        if validation_request is not None:
             from backtest.validation import run_validation, write_validation_json
+            v_config = dict(config)
+            v_config["validation"] = validation_request
             v_results = run_validation(
-                config, equity_series, self.trades, self.initial_capital, bars_per_year,
+                v_config, equity_series, self.trades, self.initial_capital, bars_per_year,
             )
             m["validation"] = v_results
             # Write validation.json through the shared strict writer so a

@@ -14,6 +14,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+import math
+
+DIGEST_FILENAME = "analysis.digest.json"
+
+
 BUCKET_EDGES: List[tuple] = [
     (0, 3),
     (4, 7),
@@ -23,6 +28,54 @@ BUCKET_EDGES: List[tuple] = [
     (61, None),
 ]
 BUCKET_LABELS = ["≤3天", "4-7天", "8-15天", "16-30天", "31-60天", ">60天"]
+
+
+METRIC_GROUPS: List[tuple] = [
+    ("性能", [
+        "total_return", "annual_return", "final_value", "sharpe", "sortino",
+        "calmar", "max_drawdown", "win_rate", "profit_factor",
+        "profit_loss_ratio", "trade_count", "avg_holding_days",
+        "max_consecutive_loss",
+    ]),
+    ("基准相对", [
+        "benchmark_label", "benchmark_ticker", "benchmark_return",
+        "benchmark_beta", "excess_return", "information_ratio",
+        "tracking_error",
+    ]),
+    ("风险", [
+        "risk_xray_annualized_vol", "risk_xray_avg_invested",
+        "risk_xray_effective_n", "risk_xray_hhi", "risk_xray_max_drawdown",
+        "beta_to_equal_weight", "monte_carlo_p_value_sharpe",
+        "monte_carlo_p_value_max_dd", "monte_carlo_n_simulations",
+    ]),
+    ("仓位与换手", [
+        "avg_position_weight", "max_position_weight", "avg_turnover",
+        "total_turnover", "rebalance_turnover_mean", "rebalance_turnover_max",
+    ]),
+    ("再平衡", ["rebalance_count"]),
+]
+
+
+def _is_scalar_metric(value: Any) -> bool:
+    return value is None or isinstance(value, (str, int, float, bool))
+
+
+def group_metrics(metrics: Dict[str, Any]) -> List[tuple]:
+    """Split scalar metrics into prompt groups; leftovers stay visible."""
+    assigned: set = set()
+    groups: List[tuple] = []
+    for label, keys in METRIC_GROUPS:
+        items = [(key, metrics[key]) for key in keys if key in metrics]
+        if items:
+            assigned.update(key for key, _ in items)
+            groups.append((label, items))
+    leftovers = [
+        (key, value) for key, value in metrics.items()
+        if key not in assigned and _is_scalar_metric(value)
+    ]
+    if leftovers:
+        groups.append(("其他", leftovers))
+    return groups
 
 
 def load_json(path: Path) -> Optional[Dict[str, Any]]:
@@ -44,6 +97,41 @@ def load_csv(path: Path) -> List[Dict[str, Any]]:
             return [dict(row) for row in csv.DictReader(handle)]
     except Exception:
         return []
+
+
+def _json_safe_digest(value: Any) -> Any:
+    """Return a JSON-strict copy (non-finite floats become null)."""
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {str(key): _json_safe_digest(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe_digest(item) for item in value]
+    return value
+
+
+def write_digest_json(run_dir: Path) -> Dict[str, Any]:
+    """Build and persist the deterministic analysis digest as JSON."""
+    digest = build_digest(run_dir)
+    path = Path(run_dir) / DIGEST_FILENAME
+    path.write_text(
+        json.dumps(_json_safe_digest(digest), ensure_ascii=False, indent=2, allow_nan=False) + "\n",
+        encoding="utf-8",
+    )
+    return digest
+
+
+def load_digest(run_dir: Path) -> Dict[str, Any]:
+    """Return the persisted digest when present, else build on the fly."""
+    path = Path(run_dir) / DIGEST_FILENAME
+    if path.exists():
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict) and "equity" in loaded:
+                return loaded
+        except (OSError, ValueError):
+            pass
+    return build_digest(run_dir)
 
 
 def _float(row: Dict[str, Any], key: str, default: Optional[float] = None) -> Optional[float]:
@@ -314,15 +402,26 @@ def build_digest(run_dir: Path) -> Dict[str, Any]:
     equity_rows = load_csv(run_dir / "artifacts" / "equity.csv")
     initial_cash = float(config.get("initial_cash") or 1_000_000.0)
     equity_curve: List[Dict[str, Any]] = []
+    benchmark_peak: Optional[float] = None
     for row in equity_rows:
         ts = _date_prefix(row.get("timestamp") or row.get("time"))
         equity = _float(row, "equity")
         if not ts or equity is None:
             continue
+        bench_equity = _float(row, "benchmark_equity")
+        benchmark_cum_return_pct: Optional[float] = None
+        benchmark_drawdown_pct: Optional[float] = None
+        if bench_equity is not None:
+            benchmark_cum_return_pct = round((bench_equity / initial_cash - 1.0) * 100.0, 4)
+            benchmark_peak = bench_equity if benchmark_peak is None else max(benchmark_peak, bench_equity)
+            if benchmark_peak:
+                benchmark_drawdown_pct = round((bench_equity - benchmark_peak) / benchmark_peak * 100.0, 4)
         equity_curve.append({
             "date": ts,
             "cum_return_pct": round((equity / initial_cash - 1.0) * 100.0, 4),
             "drawdown_pct": round((_float(row, "drawdown", 0.0) or 0.0) * 100.0, 4),
+            "benchmark_cum_return_pct": benchmark_cum_return_pct,
+            "benchmark_drawdown_pct": benchmark_drawdown_pct,
         })
 
     metrics = _metrics_from_run(run_dir)
@@ -331,17 +430,19 @@ def build_digest(run_dir: Path) -> Dict[str, Any]:
     mfe_values = [t["mfe_pct"] for t in trades if t.get("mfe_pct") is not None]
     top_winners = sorted([t for t in trades if t["win"]], key=lambda t: t["pnl"], reverse=True)[:5]
     top_losers = sorted([t for t in trades if not t["win"]], key=lambda t: t["pnl"])[:5]
+    validation = load_json(run_dir / "artifacts" / "validation.json") or {}
 
     return {
         "run_id": run_dir.name,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "config": {
             key: config.get(key)
-            for key in ("codes", "start_date", "end_date", "interval", "source", "initial_cash", "engine", "commission")
+            for key in ("codes", "start_date", "end_date", "interval", "source", "initial_cash", "engine", "commission", "benchmark")
             if key in config
         },
         "metrics": metrics,
         "risk_xray": risk_xray,
+        "validation": validation,
         "equity": equity_curve,
         "trades": trades_sorted,
         "trade_summary": summary,
@@ -379,20 +480,31 @@ def render_digest_for_llm(digest: Dict[str, Any], max_trades: int = 20) -> str:
         f"- 区间: {config.get('start_date') or '-'} ~ {config.get('end_date') or '-'}",
         f"- 周期/数据源: {config.get('interval') or '-'} / {config.get('source') or '-'}",
         "",
-        "## 核心指标",
+        f"- 基准: {_markdown_cell(metrics.get('benchmark_label') or config.get('benchmark') or 'equal-weight(universe)')}",
+        "",
+        "## 指标解读（全量指标）",
     ]
-    metric_keys = [
-        "total_return", "annual_return", "max_drawdown", "sharpe", "sortino",
-        "calmar", "win_rate", "profit_factor", "profit_loss_ratio", "trade_count",
-        "final_value", "benchmark_return", "benchmark_beta", "avg_holding_days",
-    ]
-    metric_lines = [f"| {key} | {_markdown_cell(metrics.get(key))} |" for key in metric_keys if key in metrics]
-    if metric_lines:
-        lines.append("| 指标 | 值 |")
-        lines.append("|---|---|")
-        lines.extend(metric_lines)
-    else:
+    prompt_metrics = dict(metrics)
+    risk_xray = digest.get("risk_xray") or {}
+    corr = risk_xray.get("correlation") or {}
+    if corr.get("beta_to_equal_weight") is not None:
+        prompt_metrics["beta_to_equal_weight"] = corr["beta_to_equal_weight"]
+    validation = digest.get("validation") or {}
+    monte_carlo = validation.get("monte_carlo") or {}
+    derived_values = {
+        "monte_carlo_p_value_sharpe": monte_carlo.get("p_value_sharpe"),
+        "monte_carlo_p_value_max_dd": monte_carlo.get("p_value_max_dd"),
+        "monte_carlo_n_simulations": monte_carlo.get("n_simulations"),
+    }
+    for key, value in derived_values.items():
+        if value is not None:
+            prompt_metrics[key] = value
+    groups = group_metrics(prompt_metrics)
+    if not groups:
         lines.append("- 无指标数据")
+    for label, items in groups:
+        lines.extend(["", f"### {label}", "| 指标 | 值 |", "|---|---|"])
+        lines.extend(f"| {key} | {_markdown_cell(value)} |" for key, value in items)
 
     lines.extend([
         "",

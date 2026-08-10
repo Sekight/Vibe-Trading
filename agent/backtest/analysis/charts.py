@@ -10,13 +10,14 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List
 
-from backtest.analysis.digest import build_digest
+from backtest.analysis.digest import load_digest
 
 logger = logging.getLogger(__name__)
 
 RED = "#dc2626"
 GREEN = "#16a34a"
 BLUE = "#2563eb"
+ORANGE = "#f59e0b"
 
 CHART_SPECS: List[Dict[str, str]] = [
     {"key": "equity_return", "filename": "equity_return.png", "title": "净值曲线（累计收益率 %）"},
@@ -37,12 +38,20 @@ def compute_chart_payload(digest: Dict[str, Any]) -> Dict[str, Any]:
     ordered = sorted(trades, key=lambda t: (t.get("entry_ts") or "", t.get("exit_ts") or ""))
     return {
         "equity_return": [
-            {"date": point.get("date"), "value": point.get("cum_return_pct")}
+            {
+                "date": point.get("date"),
+                "value": point.get("cum_return_pct"),
+                "benchmark": point.get("benchmark_cum_return_pct"),
+            }
             for point in (digest.get("equity") or [])
             if point.get("date")
         ],
         "drawdown": [
-            {"date": point.get("date"), "value": point.get("drawdown_pct")}
+            {
+                "date": point.get("date"),
+                "value": point.get("drawdown_pct"),
+                "benchmark": point.get("benchmark_drawdown_pct"),
+            }
             for point in (digest.get("equity") or [])
             if point.get("date")
         ],
@@ -105,8 +114,19 @@ def _render_equity_return(plt: Any, payload: Dict[str, Any], path: Path) -> None
     points = payload.get("equity_return") or []
     fig, ax = plt.subplots(figsize=(10, 5), dpi=120)
     if points:
-        ax.plot([p["date"] for p in points], [p["value"] for p in points], color=BLUE, linewidth=1.4)
+        ax.plot([p["date"] for p in points], [p["value"] for p in points], color=BLUE, linewidth=1.4, label="策略")
         ax.axhline(0, color="#94a3b8", linewidth=0.8)
+    benchmark_points = [p for p in points if p.get("benchmark") is not None]
+    if benchmark_points:
+        ax.plot(
+            [p["date"] for p in benchmark_points],
+            [p["benchmark"] for p in benchmark_points],
+            color=ORANGE,
+            linewidth=1.2,
+            label="基准",
+        )
+    if points or benchmark_points:
+        ax.legend(loc="best")
     ax.set_title("净值曲线（累计收益率 %）")
     ax.set_xlabel("日期")
     ax.set_ylabel("累计收益率 %")
@@ -128,7 +148,19 @@ def _render_drawdown(plt: Any, payload: Dict[str, Any], path: Path) -> None:
             color=RED,
             alpha=0.55,
             linewidth=0,
+            label="策略",
         )
+    benchmark_points = [p for p in points if p.get("benchmark") is not None]
+    if benchmark_points:
+        ax.plot(
+            [p["date"] for p in benchmark_points],
+            [p["benchmark"] for p in benchmark_points],
+            color=ORANGE,
+            linewidth=1.2,
+            label="基准",
+        )
+    if points or benchmark_points:
+        ax.legend(loc="best")
     ax.set_title("回撤瀑布图（水下曲线 %）")
     ax.set_xlabel("日期")
     ax.set_ylabel("距历史高点的回撤 %")
@@ -328,7 +360,7 @@ def list_pngs(run_dir: Path) -> List[Dict[str, str]]:
 
 def generate_chart_artifacts(run_dir: Path) -> Dict[str, Any]:
     """Build chart payloads and generate PNGs for a completed run."""
-    digest = build_digest(run_dir)
+    digest = load_digest(run_dir)
     payload = compute_chart_payload(digest)
     pngs = generate_pngs(run_dir, payload)
     return {"charts": payload, "pngs": pngs, "generated": bool(pngs)}

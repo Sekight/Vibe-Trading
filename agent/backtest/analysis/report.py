@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
-from backtest.analysis.digest import build_digest, render_digest_for_llm
+from backtest.analysis.digest import load_digest, render_digest_for_llm
 
 ANALYSIS_MD_FILENAME = "analysis.md"
 ANALYSIS_STATUS_FILENAME = "analysis.status.json"
@@ -22,10 +22,13 @@ SYSTEM_PROMPT = """你是一名专业的量化交易策略审阅分析师。你�
 
 硬性要求：
 1. 只使用摘要中给出的数字，绝不编造或外推任何指标、交易或行情数据。
-2. 结构固定：## 一句话结论 / ## 核心指标解读 / ## 交易行为诊断 / ## 风险与改进建议。
-3. 用中文输出，数字保留摘要原值；表格用 Markdown 管道表。
-4. 如果摘要明确说某数据缺失，就在对应小节写“无数据”，不要补一个看似合理的值。
-5. 全文控制在 400-800 字，结论必须直接、可执行，不要空话。"""
+2. 结构固定：## 一句话结论 / ## 结论详解 / ## 指标解读 / ## 交易行为诊断 / ## 风险与改进建议。
+3. 结论详解要解释结论的依据和主要矛盾，不能只重复结论。
+4. 指标解读必须覆盖摘要中全部指标，按“性能 / 基准相对 / 风险 / 仓位与换手 / 再平衡”分组逐项解读，不得遗漏，也不要只挑好看的数字；结合分组说明指标之间的一致或矛盾。
+5. 交易行为诊断基于交易概览、持仓分桶、月度损益、MAE/MFE 等摘要数据；数据缺失时写“无数据”，不要补一个看似合理的值。
+6. 风险与改进建议要可执行，明确指出最需要监控或修改的规则。
+7. 用中文输出，数字保留摘要原值；表格用 Markdown 管道表。
+8. 全文控制在 800-1500 字，结论必须直接、可执行，不要空话。"""
 
 
 def _iso_now() -> str:
@@ -120,7 +123,7 @@ def generate_analysis_report(
         return {"status": "skipped", "meta": payload}
 
     try:
-        digest = build_digest(run_dir)
+        digest = load_digest(run_dir)
         prompt = render_digest_for_llm(digest)
         content, llm_usage = _coerce_llm_result((llm_call or _default_llm_call)(prompt))
         if not content or not content.strip():
