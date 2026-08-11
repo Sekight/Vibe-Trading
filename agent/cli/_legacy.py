@@ -2409,6 +2409,23 @@ def cmd_show(run_id: str) -> None:
     console.print(f"[dim]{run_dir}[/dim]")
 
 
+def _expected_analysis_chart_names() -> list[str]:
+    """Return the canonical analysis chart filenames for the check table."""
+    try:
+        from backtest.analysis.charts import CHART_SPECS
+        return [spec["filename"] for spec in CHART_SPECS]
+    except Exception:  # pragma: no cover - same fallback as the charts module
+        return [
+            "equity_return.png",
+            "drawdown.png",
+            "pnl_scatter.png",
+            "monthly_heatmap.png",
+            "pnl_vs_holding.png",
+            "mae_mfe.png",
+            "holding_buckets.png",
+        ]
+
+
 def cmd_check(run_id: Optional[str] = None) -> int:
     """Check whether a run actually produced a backtest report."""
     if run_id:
@@ -2440,13 +2457,37 @@ def cmd_check(run_id: Optional[str] = None) -> int:
     ]
     table = Table(title=f"Run health: {run_dir.name}", border_style="dim", box=box.SIMPLE_HEAVY)
     table.add_column("File", style="cyan", no_wrap=True)
-    table.add_column("Status", width=10)
+    table.add_column("Status", width=20)
     table.add_column("Size", width=10)
     for label, path in checks:
         if path.exists():
             table.add_row(label, "[green]OK[/green]", str(path.stat().st_size))
         else:
             table.add_row(label, "[red]missing[/red]", "-")
+
+    # LLM analysis report is opt-in (--with-analysis / write_run_analysis), so
+    # a missing file is informational rather than a backtest failure.
+    analysis_md = run_dir / "analysis.md"
+    if analysis_md.exists():
+        table.add_row("analysis.md", "[green]OK[/green]", str(analysis_md.stat().st_size))
+    else:
+        table.add_row("analysis.md", "[dim]n/a (optional)[/dim]", "-")
+
+    # Aggregate every expected chart PNG into one row; missing images are
+    # best-effort (matplotlib may be unavailable), so they warn but never fail.
+    charts_dir = run_dir / "analysis_charts"
+    expected_charts = _expected_analysis_chart_names()
+    chart_files = sorted(charts_dir.glob("*.png")) if charts_dir.is_dir() else []
+    present_names = {path.name for path in chart_files}
+    chart_count = sum(1 for name in expected_charts if name in present_names)
+    chart_bytes = sum(path.stat().st_size for path in chart_files if path.name in expected_charts)
+    if chart_count == len(expected_charts):
+        charts_status = f"[green]OK ({chart_count})[/green]" if chart_count else "[yellow]warning (0)[/yellow]"
+    else:
+        charts_status = f"[yellow]warning ({chart_count}/{len(expected_charts)})[/yellow]"
+    table.add_row(
+        "analysis_charts/*.png", charts_status, str(chart_bytes) if chart_files else "-"
+    )
     console.print(table)
 
     st = state.get("status", "unknown")

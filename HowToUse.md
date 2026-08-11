@@ -647,7 +647,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 > ### 8.31 显示 SUCCESS 但没有报告，`vibe-trading --show <id>` 又报 TypeError 是什么情况？
 > - SUCCESS 只代表 agent 那一轮跑完了，不代表回测产出报告。判断是否真跑完：看 run 目录有没有 `artifacts/metrics.csv` 和 `run_card.json`。如果只有 `code/signal_engine.py` + `config.json` + `grounding_evidence.json`，说明策略代码已生成但回测 runner 没被调用，指标和交易明细自然不存在。
 > - `vibe-trading show <id>` 的 TypeError 已修复（2026-08-08）：此前 `agent/cli/_legacy.py` 的 main 误用 `args.show`（`--show` 标志值）而不是 `args.run_id`，子命令方式下是 None，`RUNS_DIR / None` 抛错。现在 `vibe-trading --show <id>` 和子命令 `show <id>` 都能用，文档统一用 `--show`。
-> - 已新增两个提醒机制：① agent 达到迭代上限、或已生成 `config.json`/策略代码却没产出 `run_card.json` 时，状态不再写 success，而是写 warning；② `vibe-trading --check <run_id>` 一键列出 run 的关键产物（req/config/signal_engine/run_card/metrics/trades/logs）并给出 REPORT OK / NO REPORT 结论。
+> - 已新增两个提醒机制：① agent 达到迭代上限、或已生成 `config.json`/策略代码却没产出 `run_card.json` 时，状态不再写 success，而是写 warning；② `vibe-trading --check <run_id>` 一键列出 run 的关键产物（req/config/signal_engine/run_card/metrics/trades/logs，以及可选分析产物 analysis.md / analysis_charts/*.png）并给出 REPORT OK / NO REPORT 结论。
 > - 本次这类“SUCCESS 无报告”的直接原因：agent 迭代耗尽（最后被 forced_text_only 强制收尾，最后一条消息里是未执行的工具调用文本），它写完 config 和 signal_engine 后还没调用回测工具就结束了。补救：`vibe-trading --continue <id> "不要读 req.json 或 transcript，直接运行 python -m backtest.runner <run_dir> 并生成 run card"`，让它在已有代码基础上只做回测。
 
 > ### 8.32 我不知道 req.json、transcript 是什么，下次怎么自己写 `--continue` 的提示词？
@@ -664,7 +664,8 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 > - `artifacts/trades.csv`：逐笔交易明细，含入场/出场日期、价格、手数、持仓占比、出场原因、盈亏。
 > - `logs/runner_stdout.txt`：回测子进程的标准输出日志，排查回测内部报错用。
 > - 判定标准：`run_card.json` 和 `artifacts/metrics.csv` 同时存在 → REPORT OK；缺任一个 → NO REPORT，说明代码可能生成了但回测没真正跑完。
-> - `analysis.md` / `analysis.status.json`：可选分析产物（见 8.36），不存在不代表回测失败。
+> - `analysis.md` / `analysis.status.json`：可选分析产物（见 8.36），不存在时 check 显示 `n/a (optional)`，不代表回测失败。
+> - `analysis_charts/*.png`：分析图（净值/回撤/盈亏散点/月度热力图/MAE-MFE 等），多张统一显示为一行并给出 `OK (7)` 或 `warning (x/7)`；缺图只警告，不影响 REPORT OK 判定。
 
 > ### 8.34 run 目录下的 `config.json` 是什么？里面的字段都怎么用？
 >
@@ -781,6 +782,29 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 - 注意：单独跑 `generate_analysis_report` 不会生成 `analysis_charts/*.png`（PNG 由回测 runner 自动生成）。如果只想补 PNG 而不重跑回测：`..\.venv\Scripts\python.exe -c "from backtest.analysis.charts import generate_chart_artifacts; import json; print(json.dumps(generate_chart_artifacts(r'C:\Users\mumu\.vibe-trading\runs\<run_id>'), ensure_ascii=False))"`。WebUI 的“分析图”标签从 API 现算 ECharts 数据，PNG 只是兜底，缺少 PNG 不影响图表显示。
 - 注意：重跑 runner 会覆盖 `artifacts/` 下全部文件，查看前最好先关掉相关编辑器。
 
+### 8.38 已有策略想调参 / 微调，怎么探索最高效？
+
+核心原则：**参数探索不走 LLM**。回测本身是本地确定性代码，一次直接跑 runner 只要几秒、0 token；LLM 只用在“生成策略 / 写分析报告”这两步。
+
+1. 基线 run 准备：先正常跑一次，确认 run 目录里有 `code/signal_engine.py`、`config.json`、`artifacts/ohlcv_*.csv`。
+2. 数据固化（只做一次，二选一）：
+   - data-bridge（推荐）：把 `artifacts/ohlcv_*.csv` 拷到 `C:\Users\mumu\.vibe-trading\data-bridge\`，配好 `config.yaml`，之后用 `local:<symbol>`，完全离线。
+   - loader 缓存：`VIBE_TRADING_DATA_CACHE=1`，同一数据源 + 标的 + 周期 + 区间会命中缓存（坑见 8.35）。
+3. 一个变体 = 一个 run 目录副本：`Copy-Item "C:\Users\mumu\.vibe-trading\runs\<run_id>" "C:\Users\mumu\.vibe-trading\runs\exp_<名字>" -Recurse`；修改参数（具体见4）-改副本里的 `config.json`（参数）和/或 `code/signal_engine.py`（逻辑），然后 `cd agent` 跑 `..\.venv\Scripts\python.exe -m backtest.runner "<副本目录>"`。**不要直接改原 run 目录重跑**，会覆盖原 artifacts / run_card / analysis，也没法横向对比。
+4. 参数修改细节（依规模）：见下方“规模分档 / 参数改法”要点。
+5. 最后才烧 LLM：挑出 2-3 个候选后，再 `python -m backtest.runner "<候选目录>" --with-analysis` 补分析报告，或 `vibe-trading --continue <run_id> "..."` 继续精调。
+
+常见坑：改 `config.json` / `signal_engine.py` 后必须重跑 runner 才生效；`local:` 是 codes 前缀（`local:600097.SH`），不要写 `source: local`；runner 要在 `agent` 目录下跑；trades.csv 被 Excel/WPS 占用时会 PermissionError（8.37）。
+
+规模分档：1-5 组手动复制 + 改 `code/signal_engine.py` + 跑即可；6-20 组写简单循环脚本；几十上百组用网格脚本（复制模板目录 → 改参数 → 跑 runner → 汇总 metrics）。
+参数改法二选一：
+- 参数是顶部常量：脚本直接对副本 `code/signal_engine.py` 文本替换（如 `FAST = 20` → `FAST = 25`），不用改策略逻辑。
+- 参数分散 / 组合多：在 `SignalEngine.__init__` 里从 `config.json` 的 `strategy_params` 读，脚本只改 config；沙箱禁顶层可执行语句、禁写文件，动态路径读取用 `Path.read_text()`。
+筛选核心指标（先筛候选再详细对比）：
+- 硬过滤：trade_count 至少 10-20、max_drawdown 可接受、风控字段合规、换手可执行、蒙特卡洛 p 值不能太差。
+- 综合排序：calmar / sharpe / sortino / profit_factor；相邻参数结果平滑才算稳（尖峰多半是过拟合）。
+- 最后只对 top 3-5 个跑 --with-analysis 详细对比。
+
   ## 9. 命令速查表
 
 
@@ -806,6 +830,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 | 新增 Python 依赖 | `pip install -e . --timeout 1800` |
 | 新增前端依赖 | `vibe-trading setup` 或 `cd frontend; npm install` |
 | 直接重跑某个 run（无 LLM） | `cd agent; ..\.venv\Scripts\python.exe -m backtest.runner "<run_dir>"` |
+| 复制 run 做参数变体 | `Copy-Item "C:\Users\mumu\.vibe-trading\runs\<run_id>" "...\runs\exp_<名字>" -Recurse` |
 | 重跑并生成 LLM 分析报告 | 上一条命令加 `--with-analysis`（也支持 `--withAnalysis`） |
 | 查看 run 分析报告/图表 | WebUI 运行详情“分析图 / 分析”标签，或 API `/runs/<id>/analysis` |
 | 首次推送 | `git push -u origin mumu-main` |
