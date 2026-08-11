@@ -9,6 +9,7 @@ import json
 import pytest
 
 from backtest.analysis.digest import (
+    METRIC_MEANINGS,
     add_mae_mfe,
     build_digest,
     group_metrics,
@@ -223,10 +224,19 @@ def test_render_digest_for_llm_includes_benchmark_and_grouped_metrics(tmp_path: 
     assert "| 指标 | 含义 | 值 |" in prompt
     assert "| total_return | 累计总收益率 | 0.05 |" in prompt
     assert "| trade_count | 成交笔数（完成回合的交易数） | 2 |" in prompt
+    assert "平均持仓（自然日）" in prompt
+    assert "平均盈亏比（按单笔收益率）" in prompt
     assert "equal-weight(universe)" in prompt
     assert "## 核心指标" not in prompt
     assert "## Regime 摘要" in prompt
     assert "无数据" in prompt
+
+
+def test_metric_meanings_are_unambiguous() -> None:
+    assert "策略净值最大回撤" in METRIC_MEANINGS["max_drawdown"]
+    assert "平均持仓（交易日" in METRIC_MEANINGS["avg_holding_days"]
+    assert "平均持仓篮子最大回撤" in METRIC_MEANINGS["risk_xray_max_drawdown"]
+    assert "按盈亏金额" in METRIC_MEANINGS["profit_loss_ratio"]
 
 
 def test_build_digest_includes_regime_summary_for_two_assets(tmp_path: Path) -> None:

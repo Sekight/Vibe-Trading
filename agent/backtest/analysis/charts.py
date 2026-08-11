@@ -21,12 +21,12 @@ ORANGE = "#f59e0b"
 
 CHART_SPECS: List[Dict[str, str]] = [
     {"key": "equity_return", "filename": "equity_return.png", "title": "净值曲线（累计收益率 %）"},
-    {"key": "drawdown", "filename": "drawdown.png", "title": "回撤瀑布图（水下曲线 %）"},
+    {"key": "drawdown", "filename": "drawdown.png", "title": "策略净值回撤瀑布图（水下曲线 %）"},
     {"key": "pnl_scatter", "filename": "pnl_scatter.png", "title": "单笔盈亏散点（红赚绿亏）"},
     {"key": "monthly_heatmap", "filename": "monthly_heatmap.png", "title": "月度损益热力图（红赚绿亏）"},
-    {"key": "pnl_vs_holding", "filename": "pnl_vs_holding.png", "title": "盈亏 vs 持仓时长（天）"},
+    {"key": "pnl_vs_holding", "filename": "pnl_vs_holding.png", "title": "盈亏 vs 持仓时长（自然日）"},
     {"key": "mae_mfe", "filename": "mae_mfe.png", "title": "MAE/MFE 散点（金标准图）"},
-    {"key": "holding_buckets", "filename": "holding_buckets.png", "title": "持仓分桶盈亏与胜率"},
+    {"key": "holding_buckets", "filename": "holding_buckets.png", "title": "持仓分桶盈亏与胜率（自然日）"},
 ]
 
 CHART_KEYS = [spec["key"] for spec in CHART_SPECS]
@@ -161,7 +161,7 @@ def _render_drawdown(plt: Any, payload: Dict[str, Any], path: Path) -> None:
         )
     if points or benchmark_points:
         ax.legend(loc="best")
-    ax.set_title("回撤瀑布图（水下曲线 %）")
+    ax.set_title("策略净值回撤瀑布图（水下曲线 %）")
     ax.set_xlabel("日期")
     ax.set_ylabel("距历史高点的回撤 %")
     ax.grid(True, alpha=0.25)
@@ -244,8 +244,8 @@ def _render_pnl_vs_holding(plt: Any, payload: Dict[str, Any], path: Path) -> Non
             alpha=0.85,
         )
     ax.axhline(0, color="#94a3b8", linewidth=0.8)
-    ax.set_title("盈亏 vs 持仓时长（红=盈利，绿=亏损）")
-    ax.set_xlabel("持仓天数")
+    ax.set_title("盈亏 vs 持仓时长（自然日）（红=盈利，绿=亏损）")
+    ax.set_xlabel("持仓时长（自然日）")
     ax.set_ylabel("单笔收益率 %")
     ax.grid(True, alpha=0.25)
     fig.tight_layout()
@@ -297,11 +297,11 @@ def _render_holding_buckets(plt: Any, payload: Dict[str, Any], path: Path) -> No
         ax_twin.set_ylabel("胜率 %")
         ax_twin.set_ylim(0, 105)
         ax.set_xticks(x_positions, labels)
-        ax.set_xlabel("持仓天数分桶")
+        ax.set_xlabel("持仓天数分桶（自然日）")
         lines, line_labels = ax.get_legend_handles_labels()
         lines2, labels2 = ax_twin.get_legend_handles_labels()
         ax.legend(lines + lines2, line_labels + labels2, loc="upper right")
-    ax.set_title("持仓分桶：平均收益率与胜率（红=赚，绿=亏）")
+    ax.set_title("持仓分桶：平均收益率与胜率（自然日）")
     ax.grid(True, alpha=0.25, axis="y")
     fig.tight_layout()
     fig.savefig(path)

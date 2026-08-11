@@ -578,6 +578,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 ├─ run_card.json / run_card.md 结果摘要：metrics、data_sources、hash、artifacts 清单
 ├─ analysis.md                 LLM 生成的策略分析报告（agent 自动写，或 --with-analysis 补生成）
 ├─ analysis.status.json        分析状态：ok / failed / skipped + generated_by / llm_usage
+├─ analysis.prompt.md          发给 LLM 的摘要正文（2026-08-12 起分析时生成，便于审计，见 8.36）
 ├─ analysis.digest.json        （2026-08-11 起不再落库；digest 由前端/后端按需现场构建，见 8.36）
 ├─ analysis_charts/            自动生成的 7 张分析图 PNG
 ├─ llm_usage.json              agent 每轮迭代的 token 统计（input / output / total）
@@ -604,6 +605,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 - 没有自动清理机制：新任务永远新建目录，旧 run 不会被覆盖也不会自动删除，需要自己手动清理。
 - 查看入口：`vibe-trading list` 列所有 run，`vibe-trading --show <run_id>` 看 run card 和指标。
 - 分析产物：`analysis_charts/` 的 7 张 PNG 在回测成功后自动生成；digest 不落库，由前端/后端按需从 artifacts 现场构建；`analysis.md` / `analysis.status.json` 是 LLM 分析报告（agent 自动写，或 runner 加 `--with-analysis` 补生成），不存在不代表回测失败，见 8.36。
+- 分析 prompt：调 LLM 前会把 `render_digest_for_llm()` 的渲染结果写成 `analysis.prompt.md`，并在日志打印 digest sha256、prompt 字符/行数，便于审计 LLM 实际看到的内容；完整 digest 仍不落库。
 
 ### 8.25 `source=local` 报 missing: ['local:600097.SH']，然后卡在 tushare token？
 
@@ -775,6 +777,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 - 分析 prompt 结构：一句话结论 → 结论详解 → 指标解读（全量、分组、逐项，每个指标至少一句解读）→ 交易行为诊断（交易概览、持仓分桶、月度损益、MAE/MFE）→ 交易环境分析（Beta 回归、Regime 分析）→ 稳健性验证（蒙特卡洛）→ 风险与改进建议，目标字数 1000-2500 字；全篇列表逐条分行（建议用 Markdown 有序列表），不挤在同一段落。
 - 指标解读表格为“指标 | 含义 | 值”三列：含义由代码确定性生成（`METRIC_MEANINGS`，未知字段显示“自定义/派生指标，按字段名理解”），LLM 只解读、不得改写含义。
 - `analysis.status.json` 记录 `status`（ok / failed / skipped）、`generated_by`（agent / runner）、`generated_at`、`llm_usage`（provider 上报时的真实 token 用量）。LLM 失败只把 status 记为 failed，不会让回测失败。
+- 审计留痕：调 LLM 前会把 `render_digest_for_llm()` 的渲染结果写成 `analysis.prompt.md`（只含发给 LLM 的摘要正文，不含 system prompt），并在日志打印 digest sha256、prompt 字符/行数，便于确认 LLM 实际看到的内容；完整 digest 仍不落库。
 - WebUI 的“分析图”标签从 `/runs/{id}/analysis/charts` 现算 ECharts 数据，PNG 只是兜底图片；数据不重复落库。
 
 ### 8.37 直接跑 runner 报 `PermissionError: ... artifacts\trades.csv`？
@@ -809,6 +812,55 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 - 硬过滤：trade_count 至少 10-20、max_drawdown 可接受、风控字段合规、换手可执行、蒙特卡洛 p 值不能太差。
 - 综合排序：calmar / sharpe / sortino / profit_factor；相邻参数结果平滑才算稳（尖峰多半是过拟合）。
 - 最后只对 top 3-5 个跑 --with-analysis 详细对比。
+
+### 8.39 策略不变，怎么换一批标的 / 换数据源快速重跑？
+
+核心原则：换标的、换数据源、换日期都只是“数据层”变化，`code/signal_engine.py` 一行都不用改；不要重新发 agent 任务，直接建 run 副本、改 `config.json`、跑 runner，几秒出结果、0 token。
+
+1. 建新 run 目录（推荐只带 `code` + `config.json`，不复制旧 artifacts）：
+   - `Copy-Item "<原run>\code" "<新run>\code" -Recurse`，再新建 `<新run>\config.json`。
+   - 也可以直接复制整个原 run，runner 会覆盖 `artifacts/`，但旧 `analysis_charts/` 会残留，跑完手动清理。
+2. 改 `config.json` 三个字段即可，其余字段（佣金、滑点、入场/离场模式、initial_cash）照抄原 config：
+   - `codes`：换成新一批标的，A 股必须带交易所后缀，如 `"002133.SZ"`、`"600117.SH"`。
+   - `start_date` / `end_date`：改成目标回测区间。
+   - `source`：`tencent` / `eastmoney` 走联网，`local` 走 data-bridge（见 8.16）。
+3. 跑 runner（不加 `--with-analysis` 就不烧 LLM）：
+
+   ```powershell
+   $env:VIBE_TRADING_ALLOWED_RUN_ROOTS='C:\Users\mumu\.vibe-trading\runs'
+   cd E:\gitCloneProgram\vibe-trading-src\agent
+   ..\.venv\Scripts\python.exe -X utf8 -m backtest.runner "<新run目录>"
+   ```
+
+4. 验证数据真的换过来了：看 `artifacts/ohlcv_*.csv` 的代码、行数、首末日期；看 `run_card.json` 的 `data_sources` 和 `warnings`；最终指标看 `artifacts/metrics.csv`。
+
+数据源选择：
+- 新标的本地没有数据：最快是 `source: tencent` 直接跑一次；跑完把 `artifacts/ohlcv_*.csv` 拷到 `data-bridge` 并登记 `config.yaml`，之后同区间可改 `local` 完全离线重跑。
+- 新标的已有 CSV：直接配 data-bridge 后 `source: "local"` + `codes: ["local:002133.SZ", ...]`，完全不联网。
+- local 缺标的会 fail closed，不会自动联网补齐；目前没有“本地为主、缺的联网拉”这个开关，需要先把缺的标的补成 CSV。
+- 反复跑同一批标的 + 固定区间可以开 `VIBE_TRADING_DATA_CACHE=1` 命中 loader 缓存（8.35），但缓存不等于离线数据，最稳还是 data-bridge。
+
+### 8.40 股价复权：项目现在只有前复权，怎么跑后复权？
+
+现状（2026-08-12 实测）：
+- 腾讯 loader（`agent/backtest/loaders/tencent_loader.py`）请求行情接口时固定传 `qfq`，只返回前复权。
+- 东财 loader（`agent/backtest/loaders/eastmoney_loader.py`）固定 `fqt=1`，同样是前复权。
+- local loader（`agent/backtest/loaders/local_loader.py`）不做任何复权处理，CSV 文件是什么口径，回测就用什么口径。
+- 结论：在线数据源目前没有“后复权开关”，要后复权只能改代码或喂本地文件。
+
+为什么要注意：前/后复权不是简单常数缩放，同一起止日期的涨跌幅可能明显不同。实测 `002133.SZ` 2021-12-31 → 2024-12-31：qfq 收盘 2.911 → 2.501（-14.08%），hfq 收盘 10.32 → 9.336（-9.53%）。用户表格若写“后复权”，不能直接拿 qfq 数据核对。
+
+后复权两条路：
+1. 改 loader 源码（影响在线回测，需要测试）：
+   - 腾讯：给 `tencent_loader.py` 增加 `adjust` 配置，请求参数由 `qfq` 改成 `hfq`；腾讯返回的 key 是 `hfqday`。
+   - 东财：给 `eastmoney_loader.py` 增加配置，`fqt=1`（前复权）改成 `fqt=2`（后复权）。
+   - 建议默认仍走 qfq，把后复权做成可选参数并补回归测试，避免旧 run 结果口径被破坏。
+2. 不改代码，用 data-bridge 喂后复权 CSV（最快落地）：
+   - 用腾讯接口拉 `hfq` 或东财 `fqt=2` 的日线，保存成和 `artifacts/ohlcv_*.csv` 同结构的 CSV（`trade_date, open, high, low, close, volume`）。
+   - 登记到 `C:\Users\mumu\.vibe-trading\data-bridge\config.yaml`，回测里写 `local:<symbol>`。
+   - local loader 只按文件原样读取，所以文件是 hfq，跑出来就是后复权口径。
+
+注意：同一份策略用 qfq 和 hfq 的结果不可直接对比；切换口径后要重新评估参数和信号阈值。
 
   ## 9. 命令速查表
 

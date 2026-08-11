@@ -7,6 +7,7 @@ the status file records which writer produced the report (single-writer rule).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from datetime import datetime, timezone
@@ -17,6 +18,7 @@ from backtest.analysis.digest import load_digest, render_digest_for_llm
 
 ANALYSIS_MD_FILENAME = "analysis.md"
 ANALYSIS_STATUS_FILENAME = "analysis.status.json"
+ANALYSIS_PROMPT_FILENAME = "analysis.prompt.md"
 
 SYSTEM_PROMPT = """你是一名专业的量化交易策略审阅分析师。你会收到一份回测摘要（digest），任务是基于摘要写一份 Markdown 分析报告。
 
@@ -127,6 +129,18 @@ def generate_analysis_report(
     try:
         digest = load_digest(run_dir)
         prompt = render_digest_for_llm(digest)
+        digest_sha256 = hashlib.sha256(
+            json.dumps(digest, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()
+        (run_dir / ANALYSIS_PROMPT_FILENAME).write_text(prompt, encoding="utf-8")
+        print(json.dumps({
+            "analysis_prompt": {
+                "path": str(run_dir / ANALYSIS_PROMPT_FILENAME),
+                "digest_sha256": digest_sha256,
+                "prompt_chars": len(prompt),
+                "prompt_lines": prompt.count("\n") + 1,
+            }
+        }, ensure_ascii=False))
         content, llm_usage = _coerce_llm_result((llm_call or _default_llm_call)(prompt))
         if not content or not content.strip():
             raise RuntimeError("LLM returned an empty analysis")

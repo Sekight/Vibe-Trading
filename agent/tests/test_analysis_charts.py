@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from backtest.analysis.charts import (
+    CHART_SPECS,
     CHART_KEYS,
     compute_chart_payload,
     generate_chart_artifacts,
@@ -72,3 +73,10 @@ def test_compute_chart_payload_includes_benchmark_series(tmp_path: Path) -> None
     assert payload["equity_return"][2]["benchmark"] == -1.0
     assert payload["drawdown"][2]["benchmark"] == pytest.approx(-1.9802, abs=1e-4)
     assert "benchmark" in payload["drawdown"][0]
+
+
+def test_chart_spec_titles_clarify_units() -> None:
+    titles = {spec["key"]: spec["title"] for spec in CHART_SPECS}
+    assert "自然日" in titles["pnl_vs_holding"]
+    assert "自然日" in titles["holding_buckets"]
+    assert "策略净值" in titles["drawdown"]

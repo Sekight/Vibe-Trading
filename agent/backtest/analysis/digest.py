@@ -71,10 +71,10 @@ METRIC_MEANINGS: Dict[str, str] = {
     "final_value": "期末账户价值", "sharpe": "夏普比率（单位风险的超额收益）",
     "sortino": "索提诺比率（仅以下行波动衡量风险）",
     "calmar": "卡玛比率（年化收益 / 最大回撤绝对值）",
-    "max_drawdown": "最大回撤（峰值到谷底的最大跌幅）",
+    "max_drawdown": "策略净值最大回撤（实际资金曲线，含现金与交易成本）",
     "win_rate": "胜率（盈利交易占比）", "profit_factor": "盈亏因子（总盈利 / 总亏损）",
-    "profit_loss_ratio": "平均盈亏比（平均盈利 / 平均亏损）",
-    "trade_count": "成交笔数（完成回合的交易数）", "avg_holding_days": "平均持仓天数",
+    "profit_loss_ratio": "平均盈亏比（按盈亏金额计算）",
+    "trade_count": "成交笔数（完成回合的交易数）", "avg_holding_days": "平均持仓（交易日 / bar 数）",
     "max_consecutive_loss": "最大连续亏损笔数",
     # 基准相对
     "benchmark_label": "基准标签（本次对比基准的标识）",
@@ -88,7 +88,7 @@ METRIC_MEANINGS: Dict[str, str] = {
     "risk_xray_avg_invested": "风险透视：平均投入仓位",
     "risk_xray_effective_n": "风险透视：有效持仓数（分散度）",
     "risk_xray_hhi": "风险透视：HHI 集中度",
-    "risk_xray_max_drawdown": "风险透视：组合最大回撤",
+    "risk_xray_max_drawdown": "风险透视：平均持仓篮子最大回撤（权重归一化为满仓，不含现金与成本）",
     "beta_to_equal_weight": "相对等权组合的 Beta",
     "monte_carlo_p_value_sharpe": "蒙特卡洛：Sharpe 置换检验 p 值",
     "monte_carlo_p_value_max_dd": "蒙特卡洛：最大回撤置换检验 p 值",
@@ -647,8 +647,8 @@ def render_digest_for_llm(digest: Dict[str, Any], max_trades: int = 20) -> str:
         f"- 总盈亏: {_markdown_cell(summary.get('total_pnl'))}",
         f"- 平均单笔收益率: {_markdown_cell(summary.get('avg_return_pct'))}%",
         f"- 胜率: {_markdown_cell(summary.get('win_rate'))}",
-        f"- 平均盈亏比: {_markdown_cell(summary.get('profit_loss_ratio'))}",
-        f"- 平均持仓: {_markdown_cell(summary.get('avg_holding_days'))} 天",
+        f"- 平均盈亏比（按单笔收益率）: {_markdown_cell(summary.get('profit_loss_ratio'))}",
+        f"- 平均持仓（自然日）: {_markdown_cell(summary.get('avg_holding_days'))} 天",
         "",
         "## 持仓分桶（按平仓记录）",
         "| 桶 | 笔数 | 合计盈亏 | 平均收益率% | 胜率 | 平均盈亏比 |",
@@ -665,7 +665,7 @@ def render_digest_for_llm(digest: Dict[str, Any], max_trades: int = 20) -> str:
     for item in (digest.get("monthly_pnl") or [])[:24]:
         lines.append(f"| {item['year']}-{item['month']:02d} | {_markdown_cell(item['pnl'])} | {item['count']} |")
 
-    lines.extend(["", "## Top 盈利 / 亏损", "| 类型 | 平仓日 | 代码 | 方向 | 盈亏 | 收益率% | 持仓天 |", "|---|---|---|---|---|---|---|"])
+    lines.extend(["", "## Top 盈利 / 亏损", "| 类型 | 平仓日 | 代码 | 方向 | 盈亏 | 收益率% | 持仓（自然日） |", "|---|---|---|---|---|---|---|"])
     for label, trades in (("盈利", digest.get("top_winners") or []), ("亏损", digest.get("top_losers") or [])):
         for trade in trades[:5]:
             lines.append(

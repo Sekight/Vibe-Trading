@@ -83,3 +83,25 @@ def test_agent_and_runner_generated_by_are_distinct(tmp_path: Path) -> None:
 
     assert "generated_by: agent" in (agent_dir / "analysis.md").read_text(encoding="utf-8")
     assert "generated_by: runner" in (runner_dir / "analysis.md").read_text(encoding="utf-8")
+
+
+def test_ok_report_writes_prompt_file_and_logs_digest_sha(tmp_path: Path, capsys) -> None:
+    run_dir = write_run_dir(tmp_path, "20260808_999999_00_prompt")
+
+    def fake_llm(prompt: str):
+        return "# 分析\n\n结论：策略有效。", {"total_tokens": 9}
+
+    result = generate_analysis_report(run_dir, generated_by="runner", llm_call=fake_llm)
+    assert result["status"] == "ok"
+
+    from backtest.analysis.digest import load_digest, render_digest_for_llm
+
+    prompt_path = run_dir / "analysis.prompt.md"
+    assert prompt_path.exists()
+    assert prompt_path.read_text(encoding="utf-8") == render_digest_for_llm(load_digest(run_dir))
+
+    out = capsys.readouterr().out
+    assert '"analysis_prompt"' in out
+    assert '"digest_sha256"' in out
+    assert '"prompt_chars"' in out
+    assert '"prompt_lines"' in out
