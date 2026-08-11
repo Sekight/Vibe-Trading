@@ -18,6 +18,9 @@ const METRIC_LABELS_EN: Record<string, string> = {
   information_ratio: "IR",
   avg_position_weight: "Avg Position Weight",
   max_position_weight: "Max Position Weight",
+  avg_portfolio_weight: "Avg Portfolio Weight",
+  max_portfolio_weight: "Max Portfolio Weight",
+  max_single_weight: "Max Single Weight",
   risk_xray_avg_invested: "Avg Invested",
 };
 
@@ -39,6 +42,9 @@ const METRIC_LABELS_ZH: Record<string, string> = {
   information_ratio: "IR",
   avg_position_weight: "平均持仓占比",
   max_position_weight: "最大持仓占比",
+  avg_portfolio_weight: "平均组合仓位",
+  max_portfolio_weight: "最大组合仓位",
+  max_single_weight: "单票最大仓位",
   risk_xray_avg_invested: "平均仓位",
 };
 
@@ -52,7 +58,7 @@ export function getMetricLabel(k: string): string {
   return METRIC_LABELS_EN[k] || k;
 }
 
-const PCT_KEYS = ["total_return", "annual_return", "win_rate", "max_drawdown", "benchmark_return", "excess_return", "avg_position_weight", "max_position_weight", "risk_xray_avg_invested"];
+const PCT_KEYS = ["total_return", "annual_return", "win_rate", "max_drawdown", "benchmark_return", "excess_return", "avg_position_weight", "max_position_weight", "avg_portfolio_weight", "max_portfolio_weight", "max_single_weight", "risk_xray_avg_invested"];
 const RATIO_KEYS = ["sharpe", "calmar", "sortino", "profit_loss_ratio", "information_ratio"];
 const INT_KEYS = ["trade_count", "max_consecutive_loss"];
 const NEUTRAL_KEYS = new Set(["trade_count", "avg_holding_days", "final_value"]);
@@ -86,6 +92,7 @@ export const DISPLAY_ORDER = [
   "total_return", "annual_return", "sharpe", "max_drawdown", "win_rate", "trade_count",
   "calmar", "sortino", "profit_loss_ratio", "max_consecutive_loss",
   "benchmark_return", "excess_return", "information_ratio", "final_value", "avg_holding_days",
+  "avg_portfolio_weight", "max_portfolio_weight", "max_single_weight",
   "avg_position_weight", "max_position_weight", "risk_xray_avg_invested",
 ];
 

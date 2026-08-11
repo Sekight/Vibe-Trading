@@ -836,10 +836,15 @@ class BaseEngine(ABC):
         )
         m.update(benchmark_metadata)
         # Portfolio exposure: average and peak target invested weight.
+        # avg_portfolio_weight / max_portfolio_weight replaced the old
+        # avg_position_weight / max_position_weight names (2026-08-11). The old
+        # names are deprecated and intentionally no longer written; old runs
+        # keep their historical columns for backward compatibility.
         position_weight_series = target_pos.sum(axis=1)
         if len(position_weight_series):
-            m["avg_position_weight"] = float(position_weight_series.mean())
-            m["max_position_weight"] = float(position_weight_series.max())
+            m["avg_portfolio_weight"] = float(position_weight_series.mean())
+            m["max_portfolio_weight"] = float(position_weight_series.max())
+            m["max_single_weight"] = float(target_pos.max(axis=1).max())
         m["by_symbol"] = by_symbol_stats(self.trades)
         m["by_exit_reason"] = by_exit_reason_stats(self.trades)
 

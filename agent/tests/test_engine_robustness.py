@@ -732,6 +732,20 @@ class TestValidationArtifactDir:
 
         assert "validation" in metrics
         validation_path = run_dir / "artifacts" / "validation.json"
+        # First-day signals fill at the next bar's open, so average exposure
+        # is 2/3 while peak exposure is the full 1.0.
+        assert metrics["avg_portfolio_weight"] == pytest.approx(2 / 3)
+        assert metrics["max_portfolio_weight"] == 1.0
+        assert metrics["max_single_weight"] == 1.0
+        assert "avg_position_weight" not in metrics
+        assert "max_position_weight" not in metrics
+        metrics_path = run_dir / "artifacts" / "metrics.csv"
+        metrics_header = metrics_path.read_text(encoding="utf-8").splitlines()[0]
+        for key in ("avg_portfolio_weight", "max_portfolio_weight", "max_single_weight"):
+            assert key in metrics_header
+        run_card = json.loads((run_dir / "run_card.json").read_text(encoding="utf-8"))
+        for key in ("avg_portfolio_weight", "max_portfolio_weight", "max_single_weight"):
+            assert key in run_card["metrics"]
         parsed = json.loads(
             validation_path.read_text(encoding="utf-8"),
             parse_constant=lambda value: (_ for _ in ()).throw(

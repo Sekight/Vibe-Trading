@@ -17,8 +17,9 @@ from backtest.analysis.digest import (
     monthly_pnl,
     pair_trades,
     render_digest_for_llm,
-    write_digest_json,
 )
+
+import pandas as pd
 
 from tests._analysis_fixtures import write_run_dir
 
@@ -178,15 +179,11 @@ def test_build_digest_reads_benchmark_curve_and_validation(tmp_path: Path) -> No
     assert digest["validation"]["monte_carlo"]["p_value_sharpe"] == 0.123
 
 
-def test_write_and_load_digest_json_roundtrip(tmp_path: Path) -> None:
+def test_load_digest_builds_on_the_fly_without_persisting(tmp_path: Path) -> None:
     run_dir = write_run_dir(tmp_path, "20260811_111111_00_digest")
-    digest = write_digest_json(run_dir)
-    path = run_dir / "analysis.digest.json"
-    assert path.exists()
-    loaded = load_digest(run_dir)
-    assert loaded["run_id"] == run_dir.name
-    assert loaded["equity"] == digest["equity"]
-    assert loaded["metrics"] == digest["metrics"]
+    digest = load_digest(run_dir)
+    assert digest["run_id"] == run_dir.name
+    assert not (run_dir / "analysis.digest.json").exists()
 
 
 def test_group_metrics_covers_all_scalars_and_keeps_benchmark_label() -> None:
@@ -203,7 +200,7 @@ def test_group_metrics_covers_all_scalars_and_keeps_benchmark_label() -> None:
         "risk_xray_max_drawdown": -0.2, "beta_to_equal_weight": 0.95,
         "monte_carlo_p_value_sharpe": 0.1, "monte_carlo_p_value_max_dd": 0.2,
         "monte_carlo_n_simulations": 500,
-        "avg_position_weight": 0.5, "max_position_weight": 0.8,
+        "avg_portfolio_weight": 0.5, "max_portfolio_weight": 0.8, "max_single_weight": 0.4,
         "avg_turnover": 0.05, "total_turnover": 1.0,
         "rebalance_turnover_mean": 0.1, "rebalance_turnover_max": 0.2,
         "rebalance_count": 10,
@@ -223,5 +220,53 @@ def test_render_digest_for_llm_includes_benchmark_and_grouped_metrics(tmp_path: 
 
     assert "## 指标解读（全量指标）" in prompt
     assert "### 性能" in prompt
+    assert "| 指标 | 含义 | 值 |" in prompt
+    assert "| total_return | 累计总收益率 | 0.05 |" in prompt
+    assert "| trade_count | 成交笔数（完成回合的交易数） | 2 |" in prompt
     assert "equal-weight(universe)" in prompt
     assert "## 核心指标" not in prompt
+    assert "## Regime 摘要" in prompt
+    assert "无数据" in prompt
+
+
+def test_build_digest_includes_regime_summary_for_two_assets(tmp_path: Path) -> None:
+    run_dir = write_run_dir(tmp_path, "20260811_333333_00_regime")
+    artifacts = run_dir / "artifacts"
+    # write_run_dir ships one single-asset OHLCV file; drop it so the digest
+    # regime uses exactly the two assets this test constructs.
+    (artifacts / "ohlcv_600097.SH.csv").unlink()
+    dates = pd.bdate_range("2024-01-02", periods=120)
+    for idx, code in enumerate(["A.SH", "B.SH"]):
+        rows = []
+        drift = 0.0
+        for ts in dates:
+            drift += 0.05 + idx * 0.01
+            close = 10.0 + idx + drift + (ts.day % 3) * 0.1
+            rows.append({
+                "trade_date": ts.strftime("%Y-%m-%d"),
+                "open": close, "high": close + 0.2, "low": close - 0.2,
+                "close": close, "volume": 1000,
+            })
+        pd.DataFrame(rows).to_csv(
+            artifacts / f"ohlcv_{code}.csv", index=False, encoding="utf-8"
+        )
+    (run_dir / "config.json").write_text(
+        json.dumps({
+            "codes": ["A.SH", "B.SH"],
+            "regime": {"corr_window": 20, "smooth_window": 3},
+        }, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    digest = build_digest(run_dir)
+    regime = digest["regime"]
+    assert "skipped" not in regime
+    assert regime["labels"] == ["A.SH", "B.SH"]
+    assert len(regime["dates"]) == len(regime["fused"])
+    assert regime["fused_pct"] is not None
+    assert isinstance(regime["episodes"], list)
+    assert set(regime["trade_summary"]) == {"fused", "defused", "unknown"}
+
+    prompt = render_digest_for_llm(digest)
+    assert "## Regime 摘要" in prompt
+    assert "FUSED 时间占比" in prompt

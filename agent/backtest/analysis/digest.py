@@ -16,7 +16,13 @@ from typing import Any, Dict, List, Optional
 
 import math
 
-DIGEST_FILENAME = "analysis.digest.json"
+import pandas as pd
+
+# Digest persistence is intentionally disabled (2026-08-11): the digest is
+# always built on the fly from run artifacts. If very large runs need a JSON
+# cache again, re-enable by uncommenting DIGEST_FILENAME / write_digest_json
+# and restoring the file-read branch in load_digest below.
+# DIGEST_FILENAME = "analysis.digest.json"
 
 
 BUCKET_EDGES: List[tuple] = [
@@ -49,11 +55,61 @@ METRIC_GROUPS: List[tuple] = [
         "monte_carlo_p_value_max_dd", "monte_carlo_n_simulations",
     ]),
     ("仓位与换手", [
-        "avg_position_weight", "max_position_weight", "avg_turnover",
+        # avg_position_weight / max_position_weight are deprecated (2026-08-11);
+        # old runs keep those keys, new runs write the portfolio/single names.
+        "avg_portfolio_weight", "max_portfolio_weight", "max_single_weight",
+        "avg_turnover",
         "total_turnover", "rebalance_turnover_mean", "rebalance_turnover_max",
     ]),
     ("再平衡", ["rebalance_count"]),
 ]
+
+
+METRIC_MEANINGS: Dict[str, str] = {
+    # 性能
+    "total_return": "累计总收益率", "annual_return": "年化收益率",
+    "final_value": "期末账户价值", "sharpe": "夏普比率（单位风险的超额收益）",
+    "sortino": "索提诺比率（仅以下行波动衡量风险）",
+    "calmar": "卡玛比率（年化收益 / 最大回撤绝对值）",
+    "max_drawdown": "最大回撤（峰值到谷底的最大跌幅）",
+    "win_rate": "胜率（盈利交易占比）", "profit_factor": "盈亏因子（总盈利 / 总亏损）",
+    "profit_loss_ratio": "平均盈亏比（平均盈利 / 平均亏损）",
+    "trade_count": "成交笔数（完成回合的交易数）", "avg_holding_days": "平均持仓天数",
+    "max_consecutive_loss": "最大连续亏损笔数",
+    # 基准相对
+    "benchmark_label": "基准标签（本次对比基准的标识）",
+    "benchmark_ticker": "基准标的代码", "benchmark_return": "基准区间收益率",
+    "benchmark_beta": "对基准的 Beta（组合随基准波动的程度）",
+    "excess_return": "超额收益（策略收益 - 基准收益）",
+    "information_ratio": "信息比率（超额收益 / 跟踪误差）",
+    "tracking_error": "跟踪误差（超额收益的波动）",
+    # 风险
+    "risk_xray_annualized_vol": "风险透视：年化波动率",
+    "risk_xray_avg_invested": "风险透视：平均投入仓位",
+    "risk_xray_effective_n": "风险透视：有效持仓数（分散度）",
+    "risk_xray_hhi": "风险透视：HHI 集中度",
+    "risk_xray_max_drawdown": "风险透视：组合最大回撤",
+    "beta_to_equal_weight": "相对等权组合的 Beta",
+    "monte_carlo_p_value_sharpe": "蒙特卡洛：Sharpe 置换检验 p 值",
+    "monte_carlo_p_value_max_dd": "蒙特卡洛：最大回撤置换检验 p 值",
+    "monte_carlo_n_simulations": "蒙特卡洛：模拟次数",
+    # 仓位与换手
+    "avg_portfolio_weight": "平均组合仓位（全组合目标仓位均值）",
+    "max_portfolio_weight": "最大组合仓位（全组合目标仓位峰值）",
+    "max_single_weight": "单票最大目标仓位",
+    "avg_turnover": "平均换手率", "total_turnover": "累计换手率",
+    "rebalance_turnover_mean": "再平衡平均换手", "rebalance_turnover_max": "再平衡最大换手",
+    # 再平衡
+    "rebalance_count": "再平衡次数",
+    # 旧字段（2026-08-11 弃用，旧 run 仍可能出现）
+    "avg_position_weight": "平均组合仓位（旧字段名，已弃用）",
+    "max_position_weight": "最大组合仓位（旧字段名，已弃用）",
+}
+
+
+def _metric_meaning(key: str) -> str:
+    """Return a concise Chinese explanation for a metric key."""
+    return METRIC_MEANINGS.get(key, "自定义/派生指标，按字段名理解")
 
 
 def _is_scalar_metric(value: Any) -> bool:
@@ -110,27 +166,30 @@ def _json_safe_digest(value: Any) -> Any:
     return value
 
 
-def write_digest_json(run_dir: Path) -> Dict[str, Any]:
-    """Build and persist the deterministic analysis digest as JSON."""
-    digest = build_digest(run_dir)
-    path = Path(run_dir) / DIGEST_FILENAME
-    path.write_text(
-        json.dumps(_json_safe_digest(digest), ensure_ascii=False, indent=2, allow_nan=False) + "\n",
-        encoding="utf-8",
-    )
-    return digest
+# def write_digest_json(run_dir: Path) -> Dict[str, Any]:
+#     """Build and persist the deterministic analysis digest as JSON (disabled)."""
+#     digest = build_digest(run_dir)
+#     path = Path(run_dir) / DIGEST_FILENAME
+#     path.write_text(
+#         json.dumps(_json_safe_digest(digest), ensure_ascii=False, indent=2, allow_nan=False) + "\n",
+#         encoding="utf-8",
+#     )
+#     return digest
 
 
 def load_digest(run_dir: Path) -> Dict[str, Any]:
-    """Return the persisted digest when present, else build on the fly."""
-    path = Path(run_dir) / DIGEST_FILENAME
-    if path.exists():
-        try:
-            loaded = json.loads(path.read_text(encoding="utf-8"))
-            if isinstance(loaded, dict) and "equity" in loaded:
-                return loaded
-        except (OSError, ValueError):
-            pass
+    """Build the deterministic analysis digest on the fly from run artifacts."""
+    # Persisted-file branch removed on purpose: digest is never written to
+    # disk (see the commented-out persistence helpers above). Re-enable the
+    # file read here if a JSON cache is brought back for large runs.
+    # path = Path(run_dir) / DIGEST_FILENAME
+    # if path.exists():
+    #     try:
+    #         loaded = json.loads(path.read_text(encoding="utf-8"))
+    #         if isinstance(loaded, dict) and "equity" in loaded:
+    #             return loaded
+    #     except (OSError, ValueError):
+    #         pass
     return build_digest(run_dir)
 
 
@@ -372,6 +431,72 @@ def ohlcv_summary(run_dir: Path) -> List[Dict[str, Any]]:
     return summary
 
 
+def _load_close_prices(run_dir: Path) -> Dict[str, pd.Series]:
+    """Load per-symbol close series from run OHLCV artifacts."""
+    artifacts = run_dir / "artifacts"
+    series: Dict[str, pd.Series] = {}
+    if not artifacts.is_dir():
+        return series
+    for path in sorted(artifacts.glob("ohlcv_*.csv")):
+        code = path.stem.removeprefix("ohlcv_")
+        dates: List[str] = []
+        closes: List[float] = []
+        for row in load_csv(path):
+            ts = _date_prefix(row.get("trade_date") or row.get("timestamp") or row.get("time"))
+            close = _float(row, "close")
+            if ts and close is not None and close > 0:
+                dates.append(ts)
+                closes.append(close)
+        if len(dates) >= 2:
+            series[code] = pd.Series(closes, index=pd.Index(dates, name="date"), dtype=float)
+    return series
+
+
+def _regime_from_run(run_dir: Path, config: Dict[str, Any]) -> Dict[str, Any]:
+    """Compute a compact correlation-regime summary from run artifacts."""
+    close_prices = _load_close_prices(run_dir)
+    if len(close_prices) < 2:
+        return {"skipped": "needs at least 2 assets with OHLCV artifacts"}
+    items = [(code, close_prices[code].sort_index()) for code in sorted(close_prices)]
+    aligned = pd.concat([series for _, series in items], axis=1).dropna()
+    aligned.columns = [code for code, _ in items]
+    returns = aligned.pct_change(fill_method=None).dropna()
+    if len(returns) < 2:
+        return {"skipped": "insufficient return observations"}
+    try:
+        from backtest.regime import compute_regime_analysis
+        params = config.get("regime") or {}
+        return compute_regime_analysis(returns, **params)
+    except (ValueError, TypeError) as exc:
+        return {"skipped": str(exc)}
+
+
+def _regime_trade_summary(trades: List[Dict[str, Any]], fused_by_date: Dict[str, int]) -> Dict[str, Any]:
+    """Aggregate round-trip trades by the entry date's FUSED state."""
+    groups: Dict[str, List[Dict[str, Any]]] = {"fused": [], "defused": [], "unknown": []}
+    for trade in trades:
+        state = fused_by_date.get(str(trade.get("entry_ts") or ""))
+        if state is None:
+            groups["unknown"].append(trade)
+        elif state:
+            groups["fused"].append(trade)
+        else:
+            groups["defused"].append(trade)
+    out: Dict[str, Any] = {}
+    for label, items in groups.items():
+        count = len(items)
+        if count == 0:
+            out[label] = {"count": 0, "pnl": 0.0, "win_rate": None}
+            continue
+        wins = sum(1 for trade in items if trade.get("win"))
+        out[label] = {
+            "count": count,
+            "pnl": round(sum(trade.get("pnl") or 0.0 for trade in items), 4),
+            "win_rate": round(wins / count, 4),
+        }
+    return out
+
+
 def _metrics_from_run(run_dir: Path) -> Dict[str, Any]:
     rows = load_csv(run_dir / "artifacts" / "metrics.csv")
     if rows:
@@ -432,6 +557,11 @@ def build_digest(run_dir: Path) -> Dict[str, Any]:
     top_losers = sorted([t for t in trades if not t["win"]], key=lambda t: t["pnl"])[:5]
     validation = load_json(run_dir / "artifacts" / "validation.json") or {}
 
+    regime = _regime_from_run(run_dir, config)
+    if regime and not regime.get("skipped"):
+        fused_by_date = dict(zip(regime.get("dates") or [], regime.get("fused") or []))
+        regime["trade_summary"] = _regime_trade_summary(trades_sorted, fused_by_date)
+
     return {
         "run_id": run_dir.name,
         "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -457,6 +587,7 @@ def build_digest(run_dir: Path) -> Dict[str, Any]:
         "top_losers": top_losers,
         "ohlcv_summary": ohlcv_summary(run_dir),
         "reproducibility": run_card.get("reproducibility") or {},
+        "regime": regime,
     }
 
 
@@ -503,8 +634,11 @@ def render_digest_for_llm(digest: Dict[str, Any], max_trades: int = 20) -> str:
     if not groups:
         lines.append("- 无指标数据")
     for label, items in groups:
-        lines.extend(["", f"### {label}", "| 指标 | 值 |", "|---|---|"])
-        lines.extend(f"| {key} | {_markdown_cell(value)} |" for key, value in items)
+        lines.extend(["", f"### {label}", "| 指标 | 含义 | 值 |", "|---|---|---|"])
+        lines.extend(
+            f"| {key} | {_metric_meaning(key)} | {_markdown_cell(value)} |"
+            for key, value in items
+        )
 
     lines.extend([
         "",
@@ -568,6 +702,21 @@ def render_digest_for_llm(digest: Dict[str, Any], max_trades: int = 20) -> str:
         lines.append(
             f"| {item['code']} | {item['rows']} | {item.get('first_date') or '-'} ~ {item.get('last_date') or '-'} |"
         )
+
+    regime = digest.get("regime") or {}
+    lines.extend(["", "## Regime 摘要"])
+    if regime.get("skipped"):
+        lines.append(f"- 无数据: {regime['skipped']}")
+    else:
+        lines.append(f"- FUSED 时间占比: {_markdown_cell(regime.get('fused_pct'))}")
+        lines.append(f"- FUSED 段数: {len(regime.get('episodes') or [])}")
+        trade_regime = regime.get("trade_summary") or {}
+        for label in ("fused", "defused", "unknown"):
+            item = trade_regime.get(label) or {}
+            lines.append(
+                f"- {label}: {item.get('count', 0)} 笔 / 盈亏 {_markdown_cell(item.get('pnl'))} "
+                f"/ 胜率 {_markdown_cell(item.get('win_rate'))}"
+            )
 
     lines.append("")
     if len(digest.get("trades") or []) > max_trades:

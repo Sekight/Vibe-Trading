@@ -998,11 +998,12 @@ def main(run_dir: Path, with_analysis: bool = False) -> None:
 
 
 def _finalize_run_analysis(run_dir: Path, *, with_analysis: bool = False) -> None:
-    """Generate the persisted digest, deterministic charts, and optional LLM report."""
+    """Generate deterministic charts and optional LLM report after a run."""
+    # Digest is intentionally not persisted (2026-08-11): frontend/backend
+    # rebuild it on demand from artifacts via backtest.analysis.digest.
+    # If very large runs need a JSON cache later, restore write_digest_json.
     try:
-        from backtest.analysis.digest import write_digest_json
-        write_digest_json(run_dir)
-        print(json.dumps({"analysis_digest": "ok"}, ensure_ascii=False))
+        print(json.dumps({"analysis_digest": "on-the-fly"}, ensure_ascii=False))
     except Exception as exc:  # noqa: BLE001 - digest is best-effort
         print(json.dumps({"warning": "analysis digest failed", "details": str(exc)[:500]}, ensure_ascii=False))
     try:

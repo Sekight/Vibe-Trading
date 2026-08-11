@@ -122,6 +122,67 @@ def _aligned_returns(price_series: Dict[str, pd.DataFrame]) -> pd.DataFrame:
     return aligned
 
 
+def compute_regime_analysis(
+    returns: pd.DataFrame,
+    corr_window: int = 60,
+    edge_threshold: float = 0.5,
+    smooth_window: int = 5,
+    enter_threshold: float = 0.65,
+    exit_threshold: float = 0.45,
+) -> dict:
+    """Compute a compact regime summary from an aligned return matrix.
+
+    Shared by the /correlation/regime API and the run analysis digest so both
+    use the same edge-density + hysteresis algorithm without duplicated code.
+    The caller is responsible for fetching/aligning price data; this function
+    never touches the network.
+    """
+    if returns.shape[1] < 2:
+        raise ValueError("needs at least 2 assets")
+    if len(returns) < 2:
+        raise ValueError("insufficient return observations")
+    density = compute_edge_density(
+        returns, corr_window=corr_window, edge_threshold=edge_threshold
+    )
+    regimes = detect_regimes(
+        density,
+        smooth_window=smooth_window,
+        enter_threshold=enter_threshold,
+        exit_threshold=exit_threshold,
+    )
+    dates = [
+        d.strftime("%Y-%m-%d") if hasattr(d, "strftime") else str(d)
+        for d in regimes.index
+    ]
+    fused = [int(value) for value in regimes["fused"]]
+    density_out = [
+        None if pd.isna(value) else round(float(value), 4)
+        for value in regimes["density"]
+    ]
+    smoothed_out = [
+        None if pd.isna(value) else round(float(value), 4)
+        for value in regimes["smoothed"]
+    ]
+    valid = [state for state, density_value in zip(fused, density_out) if density_value is not None]
+    fused_pct = round(sum(valid) / len(valid), 4) if valid else None
+    return {
+        "labels": [str(code) for code in returns.columns],
+        "dates": dates,
+        "density": density_out,
+        "smoothed": smoothed_out,
+        "fused": fused,
+        "fused_pct": fused_pct,
+        "episodes": _fused_episodes(dates, fused),
+        "params": {
+            "corr_window": corr_window,
+            "edge_threshold": edge_threshold,
+            "smooth_window": smooth_window,
+            "enter_threshold": enter_threshold,
+            "exit_threshold": exit_threshold,
+        },
+    }
+
+
 def _fused_episodes(dates: list[str], fused: list[int]) -> list[Dict[str, Optional[str]]]:
     """Contiguous FUSED intervals within the returned window.
 
