@@ -173,3 +173,13 @@ class TestBenchmarkLoaderForwarding:
 
         assert result is not None
         assert fallback.fetched == ["SPY"]
+
+
+def test_benchmark_loader_selection_routes_local_to_data_bridge() -> None:
+    from backtest.engines.base import _benchmark_loader
+    from backtest.loaders.local_loader import DataLoader as LocalDataLoader
+
+    strategy_loader = object()
+    assert isinstance(_benchmark_loader("local", strategy_loader), LocalDataLoader)
+    assert _benchmark_loader("tencent", strategy_loader) is strategy_loader
+    assert _benchmark_loader("auto", strategy_loader) is None

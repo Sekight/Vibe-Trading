@@ -420,8 +420,12 @@ git push origin mumu-main
 
 - 必须至少提供 `open/high/low/close`，volume 可选；Parquet 用 `type: parquet` + `path`，DuckDB 用 `type: duckdb` + `db_path` + `query`。
 - 对话/CLI 里要用 `local:` 前缀指定，例如“用本地数据回测 `local:600519.SH`，2024 年全年，日线”。agent 会调用 `get_market_data(codes=["local:600519.SH"], source="auto")`；`get_market_data` 的 source 枚举里没有 local，所以不要写 `source: local`。
+- 多标的写法：一个 prompt 里列出多个 `local:` 前缀即可，例如“用本地数据回测 `local:600348.SH`、`local:601298.SH`、… 共 10 只，2023-01-01 ~ 2025-12-31，日线”。所有标的都必须登记在 data-bridge 的 `config.yaml`，缺一只会 fail closed，不会自动联网补齐。
+- 直接跑 runner 的写法（与 agent 工具路径相反）：在 run 目录的 `config.json` 里写 `"source": "local"` 且 `"codes": ["local:600348.SH", ...]`，然后 `cd agent` 执行 `..\.venv\Scripts\python.exe -m backtest.runner "<run_dir>"`；此时可以也应当写 `source: local`，缺标的同样直接报 `incomplete data`，不会走网络兜底。
 - 文件可以是任意粒度：请求更粗周期会自动聚合 OHLCV；请求比文件更细的周期无法造数据，会原样返回并警告。
+- 日期范围按请求过滤：local loader 对本地文件做 `[start_date, end_date]` 闭区间截取，文件里多出的日期不会参与回测。本地数据完整覆盖请求区间时正常跑；只覆盖一部分时（例如文件到 2023-12-31，回测请求到 2024-01-31）不会报错，但回测实际只用到文件最后一天，且目前 runner 只校验“数据起点晚于请求起点 10 天以上”并告警，不校验终点。跑完建议看 `artifacts/ohlcv_*.csv` 最后一行 `trade_date`，或 run_card / metrics 确认实际区间。
 - Windows 兼容（2026-08-07 已修）：回测子进程用临时 HOME 隔离，原来靠符号链接暴露 `data-bridge`，无开发者模式时链接失败会读不到配置；现在 `agent/src/core/runner.py` 在链接失败时复制 data-bridge/qveris.json 小配置文件（cache 不复制），`tests/test_runner_env.py` 新增回归测试，`12 passed`。
+- 复权口径（2026-08-12 实测）：现有 tencent/eastmoney loader 固定返回前复权（qfq），腾讯接口本身可传 `hfq` 返回后复权；两者对同一区间的涨跌幅可能不同（例：002133.SZ 2021-12-31 → 2024-12-31，qfq -14.08%，hfq -9.53%）。用户表格写“后复权”时要用 hfq 口径核对，别拿 qfq 直接对表。
 
 ### 8.17 改完 Python 源码后，Web UI 直接发任务会生效吗？
 
@@ -795,6 +799,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 5. 最后才烧 LLM：挑出 2-3 个候选后，再 `python -m backtest.runner "<候选目录>" --with-analysis` 补分析报告，或 `vibe-trading --continue <run_id> "..."` 继续精调。
 
 常见坑：改 `config.json` / `signal_engine.py` 后必须重跑 runner 才生效；`local:` 是 codes 前缀（`local:600097.SH`），不要写 `source: local`；runner 要在 `agent` 目录下跑；trades.csv 被 Excel/WPS 占用时会 PermissionError（8.37）。
+调参产物清理：每次回测都会在副本里自动生成 `analysis_charts/*.png` 和完整 `artifacts/`（含行情快照 `ohlcv_*.csv`、equity、trades、metrics、validation 等）；即使数据来自本地 data-bridge，`ohlcv_*.csv` 也会把内存里的行情快照再落一份到每个副本，10 标的 × 10 组约 3MB。批量调参后建议手动清理：删除 `exp_*/analysis_charts` 和 `exp_*/artifacts/ohlcv_*.csv`，保留 `metrics.csv` / `trades.csv` / `equity.csv` 等；删除行情快照后，digest 的 ohlcv 概览、MAE/MFE、regime 会缺失，回测指标和 run card 不受影响。另外 `VIBE_TRADING_DATA_CACHE=1` 时 local 数据还会在 `C:\Users\mumu\.vibe-trading\cache\loaders\local` 落 parquet，不需要可去掉该环境变量。
 
 规模分档：1-5 组手动复制 + 改 `code/signal_engine.py` + 跑即可；6-20 组写简单循环脚本；几十上百组用网格脚本（复制模板目录 → 改参数 → 跑 runner → 汇总 metrics）。
 参数改法二选一：

@@ -102,6 +102,16 @@ def _benchmark_label(codes: List[str], benchmark: Any) -> str:
     return "equal-weight(universe)"
 
 
+def _benchmark_loader(source: str, strategy_loader: Any) -> Any:
+    """Pick the loader used to fetch the benchmark series."""
+    if source == "local":
+        from backtest.loaders.local_loader import DataLoader as LocalDataLoader
+        return LocalDataLoader()
+    if source != "auto":
+        return strategy_loader
+    return None
+
+
 def _validation_request(config: Dict[str, Any], trade_count: int) -> Optional[Dict[str, Any]]:
     """Return the validation config to run; explicit config wins."""
     validation_config = config.get("validation")
@@ -792,6 +802,10 @@ class BaseEngine(ABC):
             from backtest.benchmark import resolve_benchmark
             bench_source = config.get("source", "yfinance")
             is_auto_benchmark = str(bench_ticker).strip().lower() == "auto"
+            # The engine only receives the preloaded strategy loader, which
+            # cannot serve benchmark symbols. source=local must read the
+            # benchmark from data-bridge and stay fully offline.
+            bench_loader = _benchmark_loader(bench_source, loader)
             bench_result = resolve_benchmark(
                 strategy_codes=codes,
                 source=bench_source,
@@ -799,10 +813,7 @@ class BaseEngine(ABC):
                 end_date=config.get("end_date", ""),
                 interval=interval,
                 explicit=None if is_auto_benchmark else bench_ticker,
-                # Explicit source: fetch the benchmark through its own loader
-                # (keeps e.g. source=local offline). Auto keeps the yfinance
-                # default — its loader only wraps the preloaded strategy data.
-                loader=loader if bench_source != "auto" else None,
+                loader=bench_loader,
             )
             if bench_result is not None:
                 bench_ret = bench_result.ret_series.reindex(dates).fillna(0.0)
