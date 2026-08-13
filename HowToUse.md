@@ -931,7 +931,9 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 
 - 使用问题 / 坑：追加到本文档 FAQ，不删历史。
 - 项目迭代“为什么”：追加到 [`ITERATION_LOG.md`](ITERATION_LOG.md)，一条迭代一条记录。
-- 查找顺序：`ITERATION_LOG.md`（为什么）→ 本文档（怎么用）→ `git log/show`（改了什么）→ 代码（细节）。
+- 项目规则：见 [AGENTS.md](AGENTS.md)，本项目专属规则与文档体系。
+- 开工前计划：见 E:\document\project_implementation_plan\vibe-trading，先写计划、讨论到“已确认”再实现。
+- 查找规则：新任务先看计划目录；回顾过去先查 `ITERATION_LOG.md`（为什么）→ 按“参考”找计划文档（怎么做）→ 本文档（怎么用）→ `git log/show` → 代码（最终裁决）。
 
 近期迭代索引（完整见 ITERATION_LOG.md）：
 
@@ -946,3 +948,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 | V007 | 2026-08-10 | 本地部署与源码仓库切换 | pip 安装转 git clone 源码，editable 复用依赖并删除 pip 版 |
 | V008 | 2026-08-11~12 | 参数调优、local 数据与基准 | 1~10 参数扫描；local 快照/缺标的行为；沪深300 基准离线化 |
 | V009 | 2026-08-12 | A股负收益样本筛选 | 只取两个交易日 hfq 收盘价比较，4.4 秒命中 10 只 |
+| V010 | 2026-08-13 | Pylance 导入提示修复 | run 脚本 lib 导入加 pyright ignore，消除 reportMissingImports |
+| V011 | 2026-08-13 | rb 主连 5m 期货回测 | 心忆 1m→5m local 聚合，方向感知止损+跳点滑点，2% 风险仓位 |
+| V012 | 2026-08-14 | 项目 AGENTS.md 与计划文档工作流 | 项目工作台 + E:\document 计划目录，先计划、确认后实现 |
+| V013 | 2026-08-14 | 查找规则分场景与双向索引 | 分场景查找；状态归档防断链 |
