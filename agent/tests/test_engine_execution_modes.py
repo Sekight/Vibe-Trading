@@ -7,12 +7,14 @@ exits (min(open, stop) on a gap day), and invalid mode combinations.
 from __future__ import annotations
 
 from typing import Dict
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
 import pytest
 
 from backtest.engines.china_a import ChinaAEngine
+from backtest.engines.china_futures import ChinaFuturesEngine
 
 
 def _bar(open_px: float = 10.0, high: float = 11.0,
@@ -79,6 +81,40 @@ class TestExecutionModeFills:
         engine._stop_arr = np.array([[10.0]])
         bar = _bar(open_px=9.0, low=8.8, close=9.1)
         assert engine._close_fill_price(bar, pd.Timestamp("2026-01-02"), "X") == 9.0
+
+    def test_close_stop_short_fills_at_max_open_stop_when_stop_touched(self) -> None:
+        engine = ChinaAEngine({
+            "initial_cash": 1_000_000,
+            "entry_mode": "close",
+            "exit_mode": "stop",
+        })
+        engine._bar_idx = 0
+        engine._code_to_col = {"X": 0}
+        engine._stop_arr = np.array([[10.0]])
+        engine.positions["X"] = SimpleNamespace(direction=-1)
+        bar = _bar(open_px=11.0, high=11.2, low=9.8, close=10.5)
+        assert engine._close_fill_price(bar, pd.Timestamp("2026-01-02"), "X") == 11.0
+
+    def test_close_stop_short_uses_close_when_stop_not_touched(self) -> None:
+        engine = ChinaAEngine({
+            "initial_cash": 1_000_000,
+            "entry_mode": "close",
+            "exit_mode": "stop",
+        })
+        engine._bar_idx = 0
+        engine._code_to_col = {"X": 0}
+        engine._stop_arr = np.array([[10.5]])
+        engine.positions["X"] = SimpleNamespace(direction=-1)
+        bar = _bar(open_px=10.0, high=9.9, low=9.5, close=10.2)
+        assert engine._close_fill_price(bar, pd.Timestamp("2026-01-02"), "X") == 10.2
+
+    def test_china_futures_slippage_points(self) -> None:
+        engine = ChinaFuturesEngine({
+            "initial_cash": 100_000,
+            "slippage_points": 1.0,
+        })
+        assert engine.apply_slippage(3000.0, 1) == 3001.0
+        assert engine.apply_slippage(3000.0, -1) == 2999.0
 
     @pytest.mark.parametrize(
         "entry_mode,exit_mode",

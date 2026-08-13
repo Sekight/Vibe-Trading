@@ -649,11 +649,21 @@ class BaseEngine(ABC):
             return self.execution_open(bar)
         stop = self._stop_price(ts, symbol)
         low = bar.get("low")
-        if stop is not None and low is not None and pd.notna(low) and float(low) <= stop:
-            open_px = bar.get("open")
-            if open_px is not None and pd.notna(open_px):
-                return min(float(open_px), stop)
-            return stop
+
+        # Stops are direction-aware: longs stop below, shorts stop above.
+        high = bar.get("high")
+        open_px = bar.get("open")
+        if stop is not None and pd.notna(stop):
+            pos = self.positions.get(symbol)
+            direction = pos.direction if pos is not None else 1
+            if direction == 1 and low is not None and pd.notna(low) and float(low) <= stop:
+                if open_px is not None and pd.notna(open_px):
+                    return min(float(open_px), stop)
+                return stop
+            if direction == -1 and high is not None and pd.notna(high) and float(high) >= stop:
+                if open_px is not None and pd.notna(open_px):
+                    return max(float(open_px), stop)
+                return stop
         return float(bar.get("close", bar.get("open", 0)))
 
     def _stop_price(self, ts: pd.Timestamp, symbol: str) -> Optional[float]:

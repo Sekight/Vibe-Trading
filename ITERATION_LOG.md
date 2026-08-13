@@ -48,6 +48,7 @@
 | V008 | 2026-08-11~12 | 参数调优、local 数据与基准 | 1~10 参数扫描；local 快照/缺标的行为；沪深300 基准离线化 |
 | V009 | 2026-08-12 | A股负收益样本筛选 | 只取两个交易日 hfq 收盘价比较，4.4 秒命中 10 只 |
 | V010 | 2026-08-13 | Pylance 导入提示修复 | run 脚本两行 lib 导入加 pyright ignore，消除 reportMissingImports |
+| V011 | 2026-08-13 | rb 主连 5m 期货多空镜像回测 | 心忆 1m→5m local 聚合，引擎方向感知止损+跳点滑点，2% 风险仓位 13 笔 9 月回测 |
 
 > 补录说明：V001-V009 为补录条目，依据 git 历史、HowToUse、全局复利与踩坑日志、`C:\Users\mumu\.codex\sessions` 会话记录回溯整理；当时未留痕的字段标“待补”。从下一条起，每次迭代收尾直接写正文。
 
@@ -181,3 +182,13 @@
 - 验证：`python -m py_compile agent/scripts/run/run_fetch_csi300_kline.py` 通过；脚本实际运行逻辑未改。
 - 影响/注意：VSCode 重载窗口后 Pylance 波浪线应消失；不影响任何命令与数据层。
 - 参考：会话 08-13；无 commit / run_id。
+
+### V011 · rb 主连 5m 期货多空镜像回测（2026-08-13）
+- 需求/背景：用户要用 Vibe-Trading 跑国内期货回测：rb 螺纹钢主连，数据源心忆 `.min` 1m（E:\application\心忆交易导师(期货版)\Data\rb），策略同款 run `20260808_032625_05_e9f25e`，针对期货加入做空镜像；反弹窗口改为 3 根（含）以内，反弹日不算第 1 根；仓位按每笔风险 = 原始本金 2%（初始 10 万）；回测 2025-09-01~09-29，数据往前多取用于指标预热。
+- 实现：①心忆 1m 主连转 `work/xinyi_rb/rb_1m.csv`（85530 根），data-bridge 注册 `rb0000.SHFE`，local loader 现场聚合 5m（5841 根）；②引擎 `base.py` 止损成交价改方向感知（多单 low≤stop 按 min(open,stop)，空单 high≥stop 按 max(open,stop)），`china_futures.py` 新增 `slippage_points` 绝对跳点滑点；③策略 `rb_futures_5m_20250901_29_v1/code/signal_engine.py`：3 根反弹窗口、多空镜像、反向信号只平不开、同向不重复开仓、2% 风险整数手、权重上限 40%；④`config.json`：source=local、interval=5m、start 2025-06-01、end 2025-09-29、initial_cash=100000、margin_rate_override=0.08、slippage_points=1、entry/exit=close/stop。
+- 反复讨论点：用户拍板 5m 周期；同一标的只持一个方向，反向信号只平不开；止盈镜像为多单 close≥上轨后 low≤中轨、空单 close≤下轨后 high≥中轨；反弹日不算第 1 根；手续费开平各万 1（rb 内置 commission 即万 1，不用 commission_override）、滑点 1 跳；预热不改引擎，只把 start_date 往前取，metrics 会覆盖预热段。Codex 执行中踩坑：顶层非字面量赋值和 @staticmethod 被 runner AST 门禁拒绝（E064）。
+- 关键细节：`local:` 是 codes 前缀；rb 乘数 10、保证金 8% 对应杠杆 12.5；策略权重 = 手数×价格×乘数/(初始本金×杠杆)，cap 0.4 时实际单笔风险略低于 2%（09-03 16 手约 1.86%）；trades.csv 只输出日期、avg_holding_days 实为持仓 bar 数、trades.pnl 不含手续费，9 月绩效需从 equity.csv 截取（E065）。
+- 为什么这样做：保持原 run 的布林+MACD+ATR 出入场语义，只做方向镜像与期货仓位/费用口径；数据只存 1m 主数据，周期由 local loader 聚合，后续 1h/20m 改 interval 即可复用。
+- 验证：`pytest tests/test_engine_execution_modes.py tests/test_china_futures_engine.py -q` 52 passed；runner 复现 `final_value 99482.98`，13 笔交易全部落在 2025-09，做空 3 笔（09-04/09-16/09-19），止损 2 笔成交价方向对拍通过；9 月 return -0.5170%、max_drawdown -9.9383%（09-24 10:45 逐 bar 浮亏极值）、win_rate 7/13、手续费差额 = 期末权益 − trades.pnl 合计。
+- 影响/注意：引擎改动影响所有期货回测（做空止损从旧实现方向修正），已有相关单测覆盖；run 目录 `rb_futures_5m_20250901_29_v1` 可直接换 interval 重跑 1h/20m；metrics 全窗口含 6-8 月空仓预热段，正式看 9 月请用截取口径。
+- 参考：run_id `rb_futures_5m_20250901_29_v1`；全局日志 E064/E065；引擎改动 `agent/backtest/engines/base.py`、`china_futures.py`、`agent/tests/test_engine_execution_modes.py`。

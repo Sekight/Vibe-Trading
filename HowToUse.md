@@ -692,6 +692,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 > | `transfer_fee` | 过户费（A股万0.1=0.00001，双边） | 0.00001 |
 > | `slippage` | 滑点比例（买价×1.001、卖价×0.999） | 0.001 |
 > | `engine` | 回测引擎：daily / options | daily |
+> | `slippage_points` | 绝对跳点滑点：买价+n跳、卖价-n跳；配置后优先于 `slippage` 比例 | 无（用 `slippage`） |
 > | `entry_mode` | 开仓成交时点：next_open（次日开盘）或 close（信号日收盘） | next_open |
 > | `exit_mode` | 平仓成交时点：next_open / close / stop（止损价成交） | next_open |
 > | `optimizer` | 权重优化器名（如 risk_parity）；`optimizer_params` 传参数 | 无（不优化） |
@@ -703,6 +704,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 > | `leverage` | 杠杆倍数；A股引擎强制 1，写多少都被覆盖 | 1.0 |
 >
 > 注意：`_run_card_effective_sources`、`_run_card_warnings` 是 runner 运行后写入的内部字段，不要手动编辑。
+> - 滑点优先级：配置 `slippage_points` 时按绝对跳点计算（`price + direction * slippage_points`，rb 1 跳 = 1 点；开多/平空为 +，开空/平多为 -），不配置时回退到 `slippage` 比例滑点。目前由国内期货引擎（ChinaFuturesEngine）读取，其他引擎仍只认 `slippage`。
 >
 > #### 成交时点 `entry_mode` / `exit_mode`（重点）
 >

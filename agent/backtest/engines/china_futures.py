@@ -155,6 +155,7 @@ class ChinaFuturesEngine(FuturesBaseEngine):
         # Futures bands come off the previous settlement, not the previous close.
         self.base_price_fields = ("pre_settle", "pre_close")
         self.slippage_rate: float = config.get("slippage", 0.0005)
+        self.slippage_points: float | None = config.get("slippage_points")
         self._margin_rate_override = margin_override if margin_override else None
         self._commission_override = config.get("commission_override")
 
@@ -224,6 +225,8 @@ class ChinaFuturesEngine(FuturesBaseEngine):
 
     def apply_slippage(self, price: float, direction: int) -> float:
         """Futures slippage."""
+        if self.slippage_points is not None:
+            return float(price) + direction * float(self.slippage_points)
         return price * (1 + direction * self.slippage_rate)
 
     def get_contract_multiplier(self, symbol: str) -> float:
@@ -251,4 +254,3 @@ class ChinaFuturesEngine(FuturesBaseEngine):
 
 
 # ── Helpers ──
-
