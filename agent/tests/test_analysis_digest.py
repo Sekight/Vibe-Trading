@@ -18,6 +18,7 @@ from backtest.analysis.digest import (
     monthly_pnl,
     pair_trades,
     render_digest_for_llm,
+    write_digest_json,
 )
 
 import pandas as pd
@@ -180,11 +181,48 @@ def test_build_digest_reads_benchmark_curve_and_validation(tmp_path: Path) -> No
     assert digest["validation"]["monte_carlo"]["p_value_sharpe"] == 0.123
 
 
-def test_load_digest_builds_on_the_fly_without_persisting(tmp_path: Path) -> None:
+
+
+def test_load_digest_builds_and_persists_when_file_missing(tmp_path: Path) -> None:
     run_dir = write_run_dir(tmp_path, "20260811_111111_00_digest")
     digest = load_digest(run_dir)
     assert digest["run_id"] == run_dir.name
-    assert not (run_dir / "analysis.digest.json").exists()
+    payload = json.loads((run_dir / "analysis.digest.json").read_text(encoding="utf-8"))
+    assert payload["schema_version"] == 2
+    assert payload["digest"]["run_id"] == run_dir.name
+    assert payload["sources"]["artifacts/trades.csv"]["size"] > 0
+
+
+def test_write_digest_json_persists_schema_sources_and_digest(tmp_path: Path) -> None:
+    run_dir = write_run_dir(tmp_path, "20260811_111111_00_digest")
+    write_digest_json(run_dir)
+    payload = json.loads((run_dir / "analysis.digest.json").read_text(encoding="utf-8"))
+    assert payload["schema_version"] == 2
+    assert payload["digest"]["metrics"]["total_return"] == 0.05
+    assert payload["sources"]["artifacts/equity.csv"]["size"] > 0
+
+
+def test_load_digest_reads_a_fresh_persisted_copy(tmp_path: Path) -> None:
+    run_dir = write_run_dir(tmp_path, "20260811_111111_00_digest")
+    write_digest_json(run_dir)
+    digest_path = run_dir / "analysis.digest.json"
+    payload = json.loads(digest_path.read_text(encoding="utf-8"))
+    payload["digest"]["run_id"] = "tampered-cached-run"
+    digest_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    assert load_digest(run_dir)["run_id"] == "tampered-cached-run"
+
+
+def test_load_digest_rebuilds_when_an_artifact_changes(tmp_path: Path) -> None:
+    run_dir = write_run_dir(tmp_path, "20260811_111111_00_digest")
+    write_digest_json(run_dir)
+    trades_path = run_dir / "artifacts" / "trades.csv"
+    trades_path.write_text(trades_path.read_text(encoding="utf-8") + "extra\n", encoding="utf-8")
+
+    digest = load_digest(run_dir)
+    assert digest["run_id"] == run_dir.name
+    payload = json.loads((run_dir / "analysis.digest.json").read_text(encoding="utf-8"))
+    assert payload["sources"]["artifacts/trades.csv"]["size"] == trades_path.stat().st_size
 
 
 def test_group_metrics_covers_all_scalars_and_keeps_benchmark_label() -> None:

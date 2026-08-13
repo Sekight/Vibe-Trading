@@ -18,11 +18,23 @@ import math
 
 import pandas as pd
 
-# Digest persistence is intentionally disabled (2026-08-11): the digest is
-# always built on the fly from run artifacts. If very large runs need a JSON
-# cache again, re-enable by uncommenting DIGEST_FILENAME / write_digest_json
-# and restoring the file-read branch in load_digest below.
-# DIGEST_FILENAME = "analysis.digest.json"
+# The digest is persisted after a successful backtest and read back when its
+# source-artifact fingerprint still matches. A stale or schema-old file is
+# rebuilt on demand so charts/reports never show data out of sync with
+# artifacts. The fingerprint uses size + mtime for every source, so validating
+# a cache stays cheap even when a run holds hundreds of OHLCV files.
+DIGEST_FILENAME = "analysis.digest.json"
+DIGEST_SCHEMA_VERSION = 2
+_DIGEST_SOURCE_FILES = (
+    "config.json",
+    "run_card.json",
+    "artifacts/metrics.csv",
+    "artifacts/trades.csv",
+    "artifacts/equity.csv",
+    "artifacts/validation.json",
+    "artifacts/risk_xray.json",
+    "artifacts/rebalance_notes.json",
+)
 
 
 BUCKET_EDGES: List[tuple] = [
@@ -166,31 +178,65 @@ def _json_safe_digest(value: Any) -> Any:
     return value
 
 
-# def write_digest_json(run_dir: Path) -> Dict[str, Any]:
-#     """Build and persist the deterministic analysis digest as JSON (disabled)."""
-#     digest = build_digest(run_dir)
-#     path = Path(run_dir) / DIGEST_FILENAME
-#     path.write_text(
-#         json.dumps(_json_safe_digest(digest), ensure_ascii=False, indent=2, allow_nan=False) + "\n",
-#         encoding="utf-8",
-#     )
-#     return digest
+def _artifact_fingerprint(run_dir: Path) -> Dict[str, Any]:
+    """Cheap fingerprint of the artifacts a digest is derived from."""
+    def stat_sig(path: Path) -> Optional[Dict[str, int]]:
+        if not path.is_file():
+            return None
+        st = path.stat()
+        return {"size": st.st_size, "mtime_ns": st.st_mtime_ns}
+
+    fingerprint = {name: stat_sig(Path(run_dir) / name) for name in _DIGEST_SOURCE_FILES}
+    artifacts = Path(run_dir) / "artifacts"
+    ohlcv = sorted(artifacts.glob("ohlcv_*.csv")) if artifacts.is_dir() else []
+    fingerprint["ohlcv"] = {
+        "count": len(ohlcv),
+        "total_size": sum(p.stat().st_size for p in ohlcv),
+        "latest_mtime_ns": max((p.stat().st_mtime_ns for p in ohlcv), default=0),
+    }
+    return fingerprint
+
+
+def write_digest_json(
+    run_dir: Path, digest: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """Persist the deterministic analysis digest as JSON."""
+    if digest is None:
+        digest = build_digest(run_dir)
+    path = Path(run_dir) / DIGEST_FILENAME
+    payload = {
+        "schema_version": DIGEST_SCHEMA_VERSION,
+        "sources": _artifact_fingerprint(run_dir),
+        "digest": _json_safe_digest(digest),
+    }
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, separators=(",", ":"), allow_nan=False) + "\n",
+        encoding="utf-8",
+    )
+    return digest
 
 
 def load_digest(run_dir: Path) -> Dict[str, Any]:
-    """Build the deterministic analysis digest on the fly from run artifacts."""
-    # Persisted-file branch removed on purpose: digest is never written to
-    # disk (see the commented-out persistence helpers above). Re-enable the
-    # file read here if a JSON cache is brought back for large runs.
-    # path = Path(run_dir) / DIGEST_FILENAME
-    # if path.exists():
-    #     try:
-    #         loaded = json.loads(path.read_text(encoding="utf-8"))
-    #         if isinstance(loaded, dict) and "equity" in loaded:
-    #             return loaded
-    #     except (OSError, ValueError):
-    #         pass
-    return build_digest(run_dir)
+    """Return a digest, preferring a fresh persisted copy when available."""
+    path = Path(run_dir) / DIGEST_FILENAME
+    if path.is_file():
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            if (
+                isinstance(payload, dict)
+                and payload.get("schema_version") == DIGEST_SCHEMA_VERSION
+                and isinstance(payload.get("digest"), dict)
+                and payload.get("sources") == _artifact_fingerprint(run_dir)
+            ):
+                return payload["digest"]
+        except (OSError, ValueError):
+            pass
+    digest = build_digest(run_dir)
+    try:
+        write_digest_json(run_dir, digest)
+    except (OSError, ValueError):  # pragma: no cover - cache write is best-effort
+        pass
+    return digest
 
 
 def _float(row: Dict[str, Any], key: str, default: Optional[float] = None) -> Optional[float]:

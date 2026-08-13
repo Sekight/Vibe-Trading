@@ -336,8 +336,8 @@ def register_runs_routes(
         if not metrics_path.exists():
             return {"run_id": run_id, "charts": {}, "pngs": [], "available": False}
         from backtest.analysis.charts import compute_chart_payload, list_pngs  # noqa: PLC0415
-        from backtest.analysis.digest import build_digest  # noqa: PLC0415
-        digest = build_digest(run_dir)
+        from backtest.analysis.digest import load_digest  # noqa: PLC0415
+        digest = load_digest(run_dir)
         return {
             "run_id": run_id,
             "charts": compute_chart_payload(digest),
