@@ -256,7 +256,7 @@
 - 为什么这样做：数据窗口负责指标预热，回测窗口负责执行与展示；前端聚合避免后端接口改造，隐藏后端指标避免周期切换后时间错位；trade_date 保证期货夜盘归次日。
 - 验证：后端回归 `pytest tests/test_analysis_digest.py tests/test_analysis_charts.py tests/test_analysis_api.py tests/test_analysis_runner_hook.py tests/test_base_engine.py tests/test_engine_execution_modes.py tests/test_china_futures_engine.py tests/test_metrics.py tests/test_metrics_calc_integer_index.py tests/test_metrics_tracking_error.py tests/test_local_loader.py tests/test_local_loader_interval_case.py tests/test_ui_services.py tests/test_backtest_runner_security.py tests/test_runner_coverage.py tests/test_runner_env.py -q` 243 passed；前端 `npm run build` 通过、vitest 401 passed；Chrome 截图确认 rb 5m run 与日线 run `daily_regression_10stocks` 的周期按钮、时间格式、净值起点正常。
 - 影响/注意：旧 run 的 analysis.digest.json 需要重建（schema v3）；config 新增 backtest_start/end 后 metrics 口径变为回测窗口；K 线周期切换后后端 indicator_series 暂时隐藏；1m 行情显示留待后续迭代。
-- 参考：计划 P-20260814-timeline_charts_fix；run `rb_futures_5m_20250901_29_v1`、`daily_regression_10stocks`；全局日志 E064/E065/E066；commit 待补。
+- 参考：计划 P-20260814-timeline_charts_fix；run `rb_futures_5m_20250901_29_v1`、`daily_regression_10stocks`；全局日志 E064/E065/E066；commit `544ff45`。
 - 回归补充（2026-08-14）：按用户要求跑回归与日线 run 副本；发现并修复两处：①日线 trades 时间输出 `2023-03-08 00:00:00`，base.py 按 interval 自适应为纯日期；②ChartTab 残留旧 CandlestickChart 行导致重复渲染两个 K 线图、日线页面出现全部周期按钮，删除旧行。
 
 ### V019 · K 线 tooltip OHLC 错位修复（2026-08-14）
@@ -267,7 +267,7 @@
 - 为什么这样做：展示层修复不碰回测/数据；自检能拦截未来任何 OHLC 错位，避免继续显示离谱涨幅。
 - 验证：前端 vitest 413 passed（新增 candleOhlc/resample 单测）、npm build 通过；后端相关 pytest 160 passed；Chrome CDP 实际悬停 1D K 线，2025-09-01 显示 `O:3150 H:3161 L:3094 C:3115 -1.11%`，O 不再递增。
 - 影响/注意：仅前端展示；主连切换规则差异保持原样，待后续单独讨论；旧 WebUI 页面需刷新/重启后端进程加载新 dist。
-- 参考：无计划文档；run `rb_futures_5m_20250901_29_v1`；commit 待补。
+- 参考：无计划文档；run `rb_futures_5m_20250901_29_v1`；commit `544ff45`。
 
 ### V020 · 交易方向与开平动作展示（2026-08-14）
 - 需求/背景：K 线标记把平多显示成 S、平空显示成 B；交易表把平仓显示成卖出/买入，无法区分开平与多空。用户希望图表用 B/S/CB/CS 四类，交易表用多开/空开/多平/空平四类。
@@ -277,7 +277,7 @@
 - 为什么这样做：开平与多空是交易语义基础信息，展示层统一模型避免图表和交易表各算一套。
 - 验证：前端 vitest 全量 418 passed（2 个无关用例并发超时单独重跑通过，新增 tradeActions 19 passed）、npm build 通过；后端 `pytest tests/test_ui_services.py tests/test_analysis_digest.py tests/test_analysis_charts.py -q` 33 passed；Chrome CDP 验证交易表四分类文本与筛选（空开筛选只显示空开）、API markers 输出 open/close + long/short。
 - 影响/注意：交易表筛选 chips 从买入/卖出改为四类，属于用户可见行为变化；旧 WebUI 需刷新/重启后端加载新 dist。
-- 参考：计划 P-20260814-trade_action_ui；run `rb_futures_5m_20250901_29_v1`；commit 待补。
+- 参考：计划 P-20260814-trade_action_ui；run `rb_futures_5m_20250901_29_v1`；commit `544ff45`。
 
 ### V021 · K 线多笔交易标记合并（2026-08-14）
 - 需求/背景：同一根 K 线上有多笔交易时 B/S/CB/CS 标记重叠，影响观看体验；希望同 bar 多笔合并显示。
@@ -287,7 +287,7 @@
 - 为什么这样做：展示层按 bar 聚合，减少遮挡同时保留逐笔信息。
 - 验证：前端 vitest 431 passed、npm build 通过；后端相关 pytest 33 passed；Chrome 截图确认 1D 周期下同 bar 多笔交易显示灰色 T。
 - 影响/注意：仅 K 线图展示；WebUI 刷新/重启后端加载新 dist。
-- 参考：无计划文档；run `rb_futures_5m_20250901_29_v1`；commit 待补。
+- 参考：无计划文档；run `rb_futures_5m_20250901_29_v1`；commit `544ff45`。
 - 回归补充（2026-08-14）：按用户要求回归股票日 K run `daily_regression_10stocks`；前端全量 421 passed（4 个无关用例并发超时单独重跑 18 passed）、npm build 通过、后端相关 pytest 39 passed；Chrome 验证日线 K 线图正常渲染（B/CB 标记、日期轴、无报错），交易表四分类与筛选正常。
 
 ### V022 · 状态同步与索引维护规则补齐（2026-08-14）
@@ -301,4 +301,4 @@
 - 为什么：要支持其他电脑 / 其他 agent 协同开发，仓库内规则与计划必须 clone 可得，且不能依赖本机 `E:\document`、`C:\Users\mumu` 等路径。
 - 关键细节：`.gitignore` 增加 `!AGENTS.md` 使 AGENTS 进入 git；AGENTS 全局规则改为“环境存在则遵守，否则本项目自治”；HowToUse 42 处硬编码路径替换为占位符；旧 `E:\document` 计划目录保留但不再活跃；历史迭代记录中的绝对路径保留。
 - 验证：rg 确认 AGENTS / HowToUse / documents/plans 无本机绝对路径；git ls-files 确认 AGENTS 与计划文件被跟踪。
-- 关联：计划目录 `documents/plans/`；无 commit（待提交）。
+- 关联：计划目录 `documents/plans/`；commit `9979031`、`37c0f0a`。
