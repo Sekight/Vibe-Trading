@@ -30,8 +30,8 @@
 
 - **窗口捕获与回写（统一机制）**：CandlestickChart 内维护可视窗口（`viewWindow` = dataZoom start/end 百分比，或时间区间）；监听 ECharts `datazoom` 事件同步最新窗口；每次 setOption 前读取当前窗口（`chart.getOption().dataZoom[0]`）回写 start/end，替代硬编码 defaultStart。首次渲染 / 无窗口时用 defaultStart 兜底。
 - **行为 1/2（指标/副图）**：数据长度不变，窗口以百分比原样保留，改动最小。
-- **行为 3（标签切换）**：把 `sub`/`overlays`/`period`/`viewWindow` 状态提升到 RunDetail（或 ChartTab 保持挂载），组件重挂载后恢复；按 run_id 归属状态，run_id 变化时重置。
-- **run 隔离**：提升后的状态以 run_id 为 key（或 run_id 变化时显式重置），保证新 run / 切换 run 不携带旧状态。
+- **行为 3（标签切换）**：ChartTab 保持挂载，非「图表」标签时用 CSS 隐藏（替代状态提升，代码更少）；组件不卸载则 sub/overlays/period/窗口自然保留。
+- **run 隔离（无需额外编码）**：runId 变化时 RunDetail 现有 effect 已执行 `setSelectedSymbols([])` 清空标的（RunDetail.tsx:151-160）→ 各标的 CandlestickChart 卸载 → 内部 state 与 ECharts 实例全销毁；保持挂载不破坏该链路，run 隔离天然成立。
 - **多图联动**：connectCharts 已同步用户缩放；回写时以同一时间窗口应用到各图即可（保持联动语义）。
 - 行为 4（周期切换，跨周期时间窗口映射）本轮不做，列为后续迭代。
 
@@ -39,8 +39,8 @@
 
 1. CandlestickChart：新增 viewWindow 捕获（datazoom 事件）+ setOption 前回写。
 2. 验证行为 1/2：调 indicators / 副图不重置窗口。
-3. 行为 3：状态提升（sub/overlays/period/viewWindow 到 RunDetail 或 keep-mounted），run_id 变化时重置。
-4. 验证 run 隔离：新 run / 切换不同 run 报告，图表恢复默认、不携带旧状态。
+3. 行为 3：ChartTab 保持挂载 + 非图表标签 CSS 隐藏。
+4. 验证 run 隔离：新 run / 切换不同 run 报告，图表恢复默认、不携带旧状态（现有 runId effect 清空标的保证，回归确认）。
 5. 单测 / 前端测试 + 交互验证。
 6. 收尾：ITERATION_LOG、计划状态、README 索引。
 
@@ -71,10 +71,11 @@
 - 2026-08-16，Codex 调研：根因 = setOption(notMerge) 每次硬覆盖 dataZoom.start（最后 250 根），缩放状态仅存 ECharts 实例内；标签切换条件渲染卸载组件；周期切换为前端 resample 后重算窗口。多图经 connect 联动共享窗口。复杂度：1/2 低、3 中（状态提升）、4 中高（时间窗口跨周期映射）。
 - 2026-08-16，Codex 建议：3 建议实现（状态提升后边际成本低、切走不丢上下文是基本预期，TradingView 等专业软件均如此）；4 建议实现但可单独第二阶段（TradingView 切换周期保持时间范围是行业标准习惯，但实现最复杂、与 1/2/3 正交）。待用户拍板 3/4 范围与阶段划分。
 - 2026-08-16，用户拍板：1/2/3 全做，4（周期切换）本轮不做；验证补充三场景——①新 run 不携带旧 run 数据 ②切换不同 run 报告不串数据 ③回归。
+- 2026-08-16，用户问：①run 隔离含义、现有实现是否已隔离（less is more）②多标的切标的是否会重置。Codex 核查：runId 变化时 RunDetail 现有 effect 已清空 selectedSymbols → 图表卸载 → run 隔离天然成立，无需额外编码；多标的 per-chart 状态独立、窗口经 echarts.connect 组内联动，增删标的不影响已有图。实现方案相应简化：行为 3 用保持挂载 + CSS 隐藏，不做状态提升。
 
 ## 风险 / 注意
 
 - connectCharts 联动：回写窗口时多图一致性（保持同步是期望行为）。
-- 状态提升会改 ChartTab props 结构，需回归多标的图表页。
-- run 隔离是硬性要求：窗口/指标/副图状态按 run_id 归属，新 run / 切换 run 必须重置，靠状态提升处的 run_id key 保证。
+- 行为 3 采用保持挂载：ECharts 实例在非图表标签时保持存活（内存占用可接受），重新显示时依赖现有 ResizeObserver 触发 resize。
+- run 隔离无需新增代码：现有 runId effect 清空 selectedSymbols 即卸载图表，换 run 自动重置（验证场景 1/2 回归确认）。
 - 行为 4（周期切换）本轮不做，跨周期时间窗口映射列后续迭代。
