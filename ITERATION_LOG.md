@@ -36,6 +36,7 @@
 | V021 | 2026-08-14 | K 线多笔交易标记合并 | 同 bar 多笔交易合并为单字母，混合类型显示灰色 T，tooltip 保留逐笔摘要 |
 | V022 | 2026-08-14 | 状态同步与索引维护规则补齐 | 确认后同步 README；日志同步索引；编号写后校验不补号 |
 | V023 | 2026-08-15 | 计划目录迁入仓库与路径可移植化 | documents/plans 随源码管理；规则文档用占位符替换本机路径 |
+| V024 | 2026-08-15 | 总手续费与单边手续费落盘展示 | trades.csv 每行单边 commission、total_commission 进 metrics/run_card/digest/WebUI，新建交易成本分组 |
 > 补录说明：V001-V009 为补录条目，依据 git 历史、HowToUse、全局复利与踩坑日志、`C:\Users\mumu\.codex\sessions` 会话记录回溯整理；当时未留痕的字段标“待补”。从下一条起，每次迭代收尾直接写正文。
 
 ## 模板
@@ -302,3 +303,11 @@
 - 关键细节：`.gitignore` 增加 `!AGENTS.md` 使 AGENTS 进入 git；AGENTS 全局规则改为“环境存在则遵守，否则本项目自治”；HowToUse 42 处硬编码路径替换为占位符；旧 `E:\document` 计划目录保留但不再活跃；历史迭代记录中的绝对路径保留。
 - 验证：rg 确认 AGENTS / HowToUse / documents/plans 无本机绝对路径；git ls-files 确认 AGENTS 与计划文件被跟踪。
 - 关联：计划目录 `documents/plans/`；commit `9979031`、`37c0f0a`。
+
+### V024 · 总手续费与单边手续费落盘展示（2026-08-15）
+- 一句话总结：trades.csv 每行记录单边手续费（开仓行=entry_commission、平仓行=exit_commission）；metrics/run_card 新增 `total_commission`；digest LLM 报告新建「交易成本」分组；WebUI 顶部指标展示总手续费。
+- 为什么：手续费原先只体现在期末权益差额里，用户看不到总手续费与逐笔单边费用，跨市场对比（期货 vs A 股）口径也无处核对。
+- 关键细节：TradeRecord 新增 `entry_commission`（默认 0.0，兼容旧构造）；trades.csv 事件式两行/回合，`commission` 列放 `pnl` 后；`total_commission` = Σ TradeRecord.commission = Σ trades.csv 行 commission，run_card 由 metrics 全量自动携带；digest 按 METRIC_GROUPS 自动渲染，用户拍板方案 A 新建「交易成本」分组（不并入「仓位与换手」）；旧 run 缺字段时前端/digest 按缺失容忍；顺带清理 V018 遗留重复行（trade_cols 双写、_empty_metrics 重复 key、DISPLAY_ORDER 重复项、digest 重复持仓行、_fmt_ts ("1d","1d") 笔误）。
+- 验证：后端 165 passed（新增 metrics total_commission、digest 交易成本分组/渲染、base_engine trades.csv 单边落盘、futures 全周期手续费流）；前端 vitest 432 passed、npm build 通过；重跑 A 股日线 run `20260808_032625_05_e9f25e`：trades.csv 70 行（35 开 + 35 平）commission 合计 16125.2623，与 metrics.csv/run_card/digest 完全一致，买入侧抽查公式吻合（佣金 max(万2.5,5) + 过户费万0.1，卖出加印花税万5），LLM 报告含「交易成本 | total_commission | 总手续费」。
+- 影响/注意：rb run `rb_futures_5m_20250901_29_v1` 的 code/signal_engine.py 今日被外部进程置零损坏（全 0 字节，daily 备份亦已置零，E:\CodexWorkSpace 无源码），无法重跑核对其预期合计 1155.31；rb 1m 数据与 data-bridge 配置完好，恢复策略文件后可直接重跑复验。期货手续费路径已由新增全周期单测覆盖（rb 万1 × 乘数 10）。
+- 关联：计划 P-20260814-total_commission；commit `4d9bdb1`、`c8f36b1`；run `20260808_032625_05_e9f25e`。
