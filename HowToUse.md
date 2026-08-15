@@ -1,19 +1,21 @@
 # Vibe-Trading 本地使用手册（HowToUse）
 
-> 适用环境：Windows 11 + Python 3.13 + 源码目录 `E:\gitCloneProgram\vibe-trading-src`
+> 适用环境：Windows 11 + Python 3.13 + 源码目录 `<repo_root>`
 > 当前版本：vibe-trading-ai 0.1.13（editable 源码安装）
 > 官方参考：`README.md` / `README_zh.md` / `wiki/` / `vibe-trading --help`
+
+> 路径约定：<repo_root> = 本仓库根目录；<vibe_home> = %USERPROFILE%\.vibe-trading（Windows）或 ~/.vibe-trading（其他系统）。文中占位符使用前替换为实际路径。
 
 ---
 
  ## 1. 两个重要概念：短命令 vs 完整路径
 
 - 激活 venv 后，`vibe-trading` 短命令会由 PATH 自动解析到：
-  `E:\gitCloneProgram\vibe-trading-src\.venv\Scripts\vibe-trading.exe`
+  `<repo_root>\.venv\Scripts\vibe-trading.exe`
 - 所以 `vibe-trading ...` 和 `vibe-trading.exe ...` 是**同一个程序**，不是两个版本。
 - 没激活时，PowerShell/cmd 找不到短命令，只能用完整路径：
   ```powershell
-  E:\gitCloneProgram\vibe-trading-src\.venv\Scripts\vibe-trading.exe --version
+  <repo_root>\.venv\Scripts\vibe-trading.exe --version
   ```
 - 完整路径后面接什么参数，就有什么功能（`init` / `run` / `list` / `--show` / `serve` 都在）。
 
@@ -24,7 +26,7 @@
 ### 2.1 PowerShell（推荐）
 
 ```powershell
-cd E:\gitCloneProgram\vibe-trading-src
+cd <repo_root>
 .\.venv\Scripts\Activate.ps1
 ```
 
@@ -44,7 +46,7 @@ Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned
 ### 2.2 cmd
 
 ```cmd
-cd /d E:\gitCloneProgram\vibe-trading-src
+cd /d <repo_root>
 .\.venv\Scripts\activate.bat
 ```
 
@@ -53,7 +55,7 @@ cd /d E:\gitCloneProgram\vibe-trading-src
 直接用完整路径，不用设置执行策略：
 
 ```powershell
-E:\gitCloneProgram\vibe-trading-src\.venv\Scripts\vibe-trading.exe --version
+<repo_root>\.venv\Scripts\vibe-trading.exe --version
 ```
 
 ### 2.4 验证
@@ -122,8 +124,8 @@ vibe-trading --list                                 # 等同 vibe-trading list
 - 直接重跑某个已完成的 run（代码和数据都已就绪，不经过 agent、不烧 LLM token）：在 `agent` 目录下执行
 
   ```powershell
-  cd E:\gitCloneProgram\vibe-trading-src\agent
-  ..\.venv\Scripts\python.exe -m backtest.runner "C:\Users\mumu\.vibe-trading\runs\<run_id>"
+  cd <repo_root>\agent
+  ..\.venv\Scripts\python.exe -m backtest.runner "<vibe_home>\runs\<run_id>"
   ```
 
   后面加 `--with-analysis` 会在回测成功后补生成 LLM 分析报告 `analysis.md`（会调用一次 LLM，见 8.36）。
@@ -158,7 +160,7 @@ vibe-trading dev       # 后端 8899 + 前端 Vite 5899
 vibe-trading serve --port 8899
 
 # 终端 2：前端 dev server
-cd E:\gitCloneProgram\vibe-trading-src\frontend
+cd <repo_root>\frontend
 npm install
 npm run dev
 ```
@@ -238,7 +240,7 @@ vibe-trading setup
 或手动：
 
 ```powershell
-cd E:\gitCloneProgram\vibe-trading-src\frontend
+cd <repo_root>\frontend
 npm install
 ```
 
@@ -316,7 +318,7 @@ git push origin mumu-main
 
 - `init` 的 “Select default model” 提示可以自由输入，直接回车才使用括号里的默认模型。
 - DeepSeek 官方 provider 选 3 后输入 `deepseek-v4-flash`；OpenRouter 则输入 `deepseek/deepseek-v4-flash`。
-- 也可以直接编辑 `C:\Users\mumu\.vibe-trading\.env`，把 `LANGCHAIN_MODEL_NAME` 改成 `deepseek-v4-flash`。
+- 也可以直接编辑 `<vibe_home>\.env`，把 `LANGCHAIN_MODEL_NAME` 改成 `deepseek-v4-flash`。
 
 ### 8.8 之前加的 VirtualTerminalLevel 注册表要删吗？
 
@@ -351,18 +353,18 @@ git push origin mumu-main
 ### 8.13 `run_dir ... outside allowed run roots` 报错是什么？
 
 - 这是生成代码的安全校验：回测脚本只能在允许的 run 目录里写文件。
-- 本机根因：沙箱子进程把 HOME 指到临时目录，默认 run root 被解析到 temp；而实际 run 目录是 `C:\Users\mumu\.vibe-trading\runs`，不在允许列表里。
+- 本机根因：沙箱子进程把 HOME 指到临时目录，默认 run root 被解析到 temp；而实际 run 目录是 `<vibe_home>\runs`，不在允许列表里。
 - 为什么以前能跑：旧 pip 版没有“临时 HOME 沙箱”；切换到源码版后，回测子进程新增了临时 HOME 重定向（VT-001），默认 run root 就解析到了 temp，从而触发拦截。
-- 临时修复（cmd）：`set VIBE_TRADING_ALLOWED_RUN_ROOTS=C:\Users\mumu\.vibe-trading\runs`，再运行 `vibe-trading run`。
-- 临时修复（PowerShell）：`$env:VIBE_TRADING_ALLOWED_RUN_ROOTS="C:\Users\mumu\.vibe-trading\runs"`。
-- 永久修复：在 `C:\Users\mumu\.vibe-trading\.env` 加一行 `VIBE_TRADING_ALLOWED_RUN_ROOTS=C:\Users\mumu\.vibe-trading\runs`；或 `setx VIBE_TRADING_ALLOWED_RUN_ROOTS "C:\Users\mumu\.vibe-trading\runs"` 后新开窗口。
-- 已执行（2026-08-07）：该行已追加到 `C:\Users\mumu\.vibe-trading\.env`，新 run 直接生效。
+- 临时修复（cmd）：`set VIBE_TRADING_ALLOWED_RUN_ROOTS=<vibe_home>\runs`，再运行 `vibe-trading run`。
+- 临时修复（PowerShell）：`$env:VIBE_TRADING_ALLOWED_RUN_ROOTS="<vibe_home>\runs"`。
+- 永久修复：在 `<vibe_home>\.env` 加一行 `VIBE_TRADING_ALLOWED_RUN_ROOTS=<vibe_home>\runs`；或 `setx VIBE_TRADING_ALLOWED_RUN_ROOTS "<vibe_home>\runs"` 后新开窗口。
+- 已执行（本机 2026-08-07）：该行已追加到 `<vibe_home>\.env`；其他机器按需设置。
 - 该变量只加目录白名单，不影响 API key 和其他配置。
 
 ### 8.14 OpenCode Go 套餐的 API key 能用于 Vibe-Trading 吗？
 
 - 可以。OpenCode Go 提供 OpenAI 兼容端点，Vibe-Trading 已内置 `opencode-go` provider（`agent/src/providers/capabilities.py`）。
-- 配置写入 `C:\Users\mumu\.vibe-trading\.env`：
+- 配置写入 `<vibe_home>\.env`：
   ```ini
   LANGCHAIN_PROVIDER=opencode-go
   OPENAI_API_KEY=你的Go key
@@ -401,7 +403,7 @@ git push origin mumu-main
 ### 8.16 怎么用自带 local loader（CSV / Parquet / DuckDB）？
 
 - WebUI 没有数据源选择器，local loader 是“配置文件 + 对话里指定”，不是页面开关。
-- 配置放在 `C:\Users\mumu\.vibe-trading\data-bridge\config.yaml`（对应源码 `agent/backtest/loaders/local_loader.py`）。示例：
+- 配置放在 `<vibe_home>\data-bridge\config.yaml`（对应源码 `agent/backtest/loaders/local_loader.py`）。示例：
 
   ```yaml
   sources:
@@ -448,14 +450,14 @@ git push origin mumu-main
 
 - 典型过程：agent 生成 `code/signal_engine.py` 后，被回测沙箱 AST 校验打回（如 `Decorators are not allowed`、`Writing files via open(mode='w') ... not allowed`），于是反复“改代码→重跑回测→再改”，一次任务可跑 15+ 轮、烧 90 万+ token；前端则因 `VIBE_TRADING_SSE_TIMEOUT`（默认 90s）内收不到 SSE 事件而显示“等待 X 后已停止”，但后端可能仍在后台跑完。
 - 已预防（2026-08-07）：`agent/src/skills/strategy-dev-manager/SKILL.md` 的 SignalEngine Contract 新增 Runner AST safety constraints：禁止一切装饰器、禁止 `open(mode='w'...)`/文件写入、禁止网络/子进程/eval/exec、禁止模块顶层与类体内可执行语句；诊断信息用 `print(...)` 输出即可。生成代码前先对照这份清单，能避免校验打回循环。
-- 若仍然出现：改 `C:\Users\mumu\.vibe-trading\.env` 把 `VIBE_TRADING_SSE_TIMEOUT` 调大（如 600），重启后端，前端就不会在长任务中途断开等待。
+- 若仍然出现：改 `<vibe_home>\.env` 把 `VIBE_TRADING_SSE_TIMEOUT` 调大（如 600），重启后端，前端就不会在长任务中途断开等待。
 - 策略“0 笔交易”不一定错：可能是入场条件在回测区间从未满足。可用已保存的 `artifacts/ohlcv_*.csv` 直接复算条件统计（触轨次数/突破次数/窗口分布），再决定放宽条件或换标的，不必整段重跑 agent。
 
 ### 8.20 怎么让任务跑得更快、更省 token？
 
 - 已内置两项源码优化（2026-08-07）：
   1. `agent/src/skills/strategy-generate/SKILL.md` 与 `strategy-dev-manager/SKILL.md` 都新增 Runner AST safety constraints，并在生成策略后增加本地 AST 预检步骤，让 agent 在跑回测前先自查装饰器/写文件/网络/顶层语句，避免“生成→打回→重写”循环。
-  2. 新增环境变量 `AGENT_MAX_ITERATIONS`（默认 50）：WebUI 会话的 AgentLoop 会读取它。建议在 `C:\Users\mumu\.vibe-trading\.env` 里设 `AGENT_MAX_ITERATIONS=12`，一般策略任务 8-12 轮足够，能封顶异常长跑并省 token。
+  2. 新增环境变量 `AGENT_MAX_ITERATIONS`（默认 50）：WebUI 会话的 AgentLoop 会读取它。建议在 `<vibe_home>\.env` 里设 `AGENT_MAX_ITERATIONS=12`，一般策略任务 8-12 轮足够，能封顶异常长跑并省 token。
 - 同时建议设 `VIBE_TRADING_SSE_TIMEOUT=600`，避免前端在中途断开等待；设完重启后端。
 - 工作流建议：①把“3 根窗口 / ATR×0.3 / 5% 风险 / 尾盘 14:55”等数字写死在 prompt 里，减少 agent 猜测；②同一只股票反复调参时，先离线跑一次拿到 `artifacts/ohlcv_*.csv`，之后用 local loader（`local:600097.SH`）或直接改已生成代码本地回测，完全不走 LLM；③策略信号数很少时，先看条件频次统计再决定放宽/换标的；④想保留已有 run 的上下文继续改，用 `vibe-trading --continue <run_id> "把窗口改成 5"`（见 4.5），不要从零重开。
 - 数据缓存：固定标的 + 固定区间反复调参时，可开 loader 数据缓存 `VIBE_TRADING_DATA_CACHE=1` 复用已下载行情；是否值得开、怎么开、有哪些坑见 8.35。
@@ -463,14 +465,14 @@ git push origin mumu-main
 ### 8.21 data-bridge 是什么？怎么配置？
 
 - 概念：data-bridge 是 Vibe-Trading 的“自带数据桥”，源码实现是 `agent/backtest/loaders/local_loader.py`。它让你把自己本地的 CSV / Parquet / DuckDB 行情文件喂给回测，不联网、不依赖东财/腾讯等在线数据源，也不会因为网络问题反复失败。
-- WebUI 没有“本地数据”开关，data-bridge 是“配置文件 + 对话里指定”：配置文件放在 `C:\Users\mumu\.vibe-trading\data-bridge\config.yaml`，对话里写 `local:600097.SH` 触发。
+- WebUI 没有“本地数据”开关，data-bridge 是“配置文件 + 对话里指定”：配置文件放在 `<vibe_home>\data-bridge\config.yaml`，对话里写 `local:600097.SH` 触发。
 - 本机当前还没有这个目录和文件（`vibe-trading init` 不会自动生成），需要自己创建。
 
 配置步骤：
 
 ```powershell
-New-Item -ItemType Directory -Force C:\Users\mumu\.vibe-trading\data-bridge
-notepad C:\Users\mumu\.vibe-trading\data-bridge\config.yaml   # 粘贴 8.22 示例后保存（UTF-8）
+New-Item -ItemType Directory -Force <vibe_home>\data-bridge
+notepad <vibe_home>\data-bridge\config.yaml   # 粘贴 8.22 示例后保存（UTF-8）
 ```
 编码要求：`config.yaml` 必须是纯文本 UTF-8（无 BOM）。不要从 Office/旧式“另存为”创建，否则会生成 OLE 二进制文件（文件头 `D0 CF 11 E0`），VSCode 会提示二进制、记事本显示乱码；本机 2026-08-08 踩过此坑，坏文件已备份为 `config.yaml.bad`。
 检查方法：用 VSCode 打开后看右下角编码是否为 UTF-8；若想转换，VSCode 右下角点编码 → “Save with Encoding” → UTF-8。
@@ -548,7 +550,7 @@ sources:
 config.yaml 里不写周期，周期由你文件的原始粒度决定。判断方法：
 
 1. 最快：用 VSCode/Excel 打开 CSV，看相邻两行日期差。相邻差 1 天是日线（1D），差 1 小时是 1H，差 15 分钟是 15m，差 1 分钟是 1m。
-2. 本机现成例子：`C:\Users\mumu\.vibe-trading\runs\bb_macd_600097_20240403_20250307\artifacts\ohlcv_600097.SH.csv` 共 223 条，日期 2024-04-03 到 2025-03-07，逐日一条，即日线。
+2. 本机现成例子：`<vibe_home>\runs\bb_macd_600097_20240403_20250307\artifacts\ohlcv_600097.SH.csv` 共 223 条，日期 2024-04-03 到 2025-03-07，逐日一条，即日线。
 3. 命令行算中位间隔（在项目根目录用 venv 的 python）：
 
 ```powershell
@@ -563,8 +565,8 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 ### 8.24 run 目录在哪里，里面都是什么
 
 位置：
-- 当前默认：`C:\Users\mumu\.vibe-trading\runs\<run_id>`（CLI 和 WebUI 都是这里）。
-- 早期/其他版本也可能出现在 `E:\gitCloneProgram\vibe-trading-src\agent\runs\<run_id>`；`run_card.json` 的 `run_dir` 字段会记录本次实际目录。
+- 当前默认：`<vibe_home>\runs\<run_id>`（CLI 和 WebUI 都是这里）。
+- 早期/其他版本也可能出现在 `<repo_root>\agent\runs\<run_id>`；`run_card.json` 的 `run_dir` 字段会记录本次实际目录。
 - 注意：`vibe-trading serve` / `vibe-trading dev` 启动时会自动把旧版 `agent/runs`（及 sessions/uploads）迁移到 `~/.vibe-trading` 下，迁移后 `agent/runs` 目录会被清空移除；已迁移的 run 仍在 run 列表里，只是物理位置变了，无需手动处理。
 - 允许的 run roots 由 `VIBE_TRADING_ALLOWED_RUN_ROOTS` 控制，见 8.13。
 
@@ -630,7 +632,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
   ---
 
 > ### 8.28 prompt 有换行，`run -p "..."` 会被 shell 当回车执行怎么办？
-> - 把长 prompt 保存为 UTF-8 文本文件（项目里建议放 `E:\gitCloneProgram\vibe-trading-src\prompts\`，已有一份 `bb_macd_10stocks_2023_2025.txt` 可直接用），然后执行 `vibe-trading run -f prompts\bb_macd_10stocks_2023_2025.txt`（激活 venv 后在项目根目录）。
+> - 把长 prompt 保存为 UTF-8 文本文件（项目里建议放 `<repo_root>\prompts\`，已有一份 `bb_macd_10stocks_2023_2025.txt` 可直接用），然后执行 `vibe-trading run -f prompts\bb_macd_10stocks_2023_2025.txt`（激活 venv 后在项目根目录）。
 > - 原理：`-p "..."` 的多行文本在 cmd/PowerShell 交互式输入时，回车可能被当成命令结束；`-f` 让 CLI 自己读文件，换行、中文、引号、`<=` 都原样保留。
 > - 用记事本/VSCode 编辑 prompt 文件时注意保存为 UTF-8（无 BOM），不要用 Word/Office 另存，否则会变二进制或乱码（同 8.2 的编码坑）。
 > - 不想用文件时：① WebUI 输入框直接粘贴多行最省事；② 交互式 `vibe-trading chat` 里直接粘贴多行；③ PowerShell 用 here-string 变量再传：`$prompt = @'...多行...'@` 然后 `vibe-trading run -p $prompt`。cmd 没有可靠的命令行换行方式，仍建议文件或 WebUI。
@@ -657,7 +659,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 > - 本次这类“SUCCESS 无报告”的直接原因：agent 迭代耗尽（最后被 forced_text_only 强制收尾，最后一条消息里是未执行的工具调用文本），它写完 config 和 signal_engine 后还没调用回测工具就结束了。补救：`vibe-trading --continue <id> "不要读 req.json 或 transcript，直接运行 python -m backtest.runner <run_dir> 并生成 run card"`，让它在已有代码基础上只做回测。
 
 > ### 8.32 我不知道 req.json、transcript 是什么，下次怎么自己写 `--continue` 的提示词？
-> - `req.json` 是 run 目录里保存你原始 prompt 的请求文件；`transcript_*.jsonl` 是那次 run 的完整对话日志，都存放在 `C:\Users\mumu\.vibe-trading\runs\<run_id>\` 和 `sessions\` 下。它们只是内部记录，你正常使用时不需要看懂，更不需要自己操作。
+> - `req.json` 是 run 目录里保存你原始 prompt 的请求文件；`transcript_*.jsonl` 是那次 run 的完整对话日志，都存放在 `<vibe_home>\runs\<run_id>\` 和 `sessions\` 下。它们只是内部记录，你正常使用时不需要看懂，更不需要自己操作。
 > - 写不出专业提示词没关系，`--continue` 只需要说人话：`vibe-trading --continue <run_id> "配置和策略代码已经生成好了，不要再重写代码，直接把回测跑完并生成 run card 和指标"`。`python -m backtest.runner <run_dir>` 是内部回测入口，agent 自己知道，不用你拼。
 > - 如果上次 agent 又跑去翻历史文件浪费时间，可以加一句：`不要读 req.json、transcript、历史 run 的文件，只做回测`。
 
@@ -751,7 +753,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 结论先说：你现在主要用 WebUI / `vibe-trading run` 发任务，这个缓存帮助不大（原因见下），更推荐直接用 data-bridge；只有当你改用 `python -m backtest.runner <run_dir>` 直接反复调同一批标的 + 固定区间时，才值得开。
 
 - 是什么：回测 loader 的“可选本地行情缓存”。开启后，各数据源（tencent / tushare / akshare / mootdx / eastmoney / yfinance / ccxt / okx / futu / finnhub / tiingo / fmp / baostock / local 等）把“已完全结算的历史 K 线”按 key 存成 parquet；下次同一请求直接读本地，不联网。
-- 怎么开：在 `C:\Users\mumu\.vibe-trading\.env` 加 `VIBE_TRADING_DATA_CACHE=1`（`true/yes/on` 也行），默认关闭，不设或写 `0` 即关。默认目录是 `C:\Users\mumu\.vibe-trading\cache\loaders`；想换位置再加 `VIBE_TRADING_DATA_CACHE_ROOT=E:\...\loader-cache`。改完重启 `serve` / `dev` 后端，或新开 CLI 进程。
+- 怎么开：在 `<vibe_home>\.env` 加 `VIBE_TRADING_DATA_CACHE=1`（`true/yes/on` 也行），默认关闭，不设或写 `0` 即关。默认目录是 `<vibe_home>\cache\loaders`；想换位置再加 `VIBE_TRADING_DATA_CACHE_ROOT=E:\...\loader-cache`。改完重启 `serve` / `dev` 后端，或新开 CLI 进程。
 - 缓存了什么：只有 loader 返回的行情 DataFrame（OHLCV + 你请求的 `extra_fields`）。不缓存 run card、策略代码、LLM 分析、token 用量，也不含 API key。目录结构为 `cache\loaders\<source>\<sha256>.parquet` + 同名 `.parquet.json` 元数据。
 - key 怎么算：`缓存版本 + source + symbol + timeframe + start_date + end_date + fields`。所以只有“同一数据源 + 同一标的 + 同一周期 + 同一区间 + 同一字段”才会命中。
 - 增量吗：不做增量。区间从 2023-01-01~2023-12-28 改成 ~2023-12-31 时，key 变了，会全量重拉并写一个新文件，旧文件仍留在磁盘，不会只补 3 天。
@@ -766,7 +768,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
   - 已经用 data-bridge 本地 CSV 时没必要：数据本来就在本地，再缓存一份是重复占盘。
   - 缓存没有自动过期：数据源后续修正复权、除权或历史数据时，旧缓存不会自己失效；2026-08-10 腾讯 500 根截断 bug 就是靠把缓存版本 3 升到 4 才让旧坏条目失效的。
   - 若在数据源出 bug 或网络半截期间开着缓存，坏数据也会被缓存并反复命中；遇到可疑结果先清缓存再重跑。
-- 怎么清：回测没在跑时删除 `C:\Users\mumu\.vibe-trading\cache\loaders` 整个目录，或只删对应 `<source>` 子目录即可，程序下次会自动重建。
+- 怎么清：回测没在跑时删除 `<vibe_home>\cache\loaders` 整个目录，或只删对应 `<source>` 子目录即可，程序下次会自动重建。
 - 替代方案：需要“确定且可长期复用”的数据，直接用 data-bridge（8.21）：把 `artifacts/ohlcv_*.csv` 复制到 data-bridge 目录，对话里用 `local:<symbol>` 回测，比缓存更透明、可控、可跨项目复用。
 
 ### 8.36 回测分析报告（analysis.md）和 7 张分析图是什么？
@@ -775,7 +777,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 - 每次回测成功后，runner 会生成 `analysis.digest.json`（2026-08-12 起恢复落库，解决大 run 分析图加载慢）：digest 由回测现场构建并持久化；前端/后端读取时先校验 artifacts 指纹（config/run_card/metrics/trades/equity/validation/risk_xray/OHLCV 统计），一致则直接用缓存，不一致才重建。里面包含：全量指标按“性能 / 基准相对 / 风险 / 仓位与换手 / 再平衡 / 其他”分组、逐日权益与基准序列（`equity` 每行含 `benchmark_cum_return_pct` / `benchmark_drawdown_pct`）、`validation`（蒙特卡洛）、交易明细、月度损益、持仓分桶、MAE/MFE 摘要、Regime 摘要（至少 2 个标的时：FUSED 时间占比 / episodes / 按入场日归因的交易盈亏）等。LLM 报告和前端“分析图”都从这份 digest 取数（优先缓存），保证口径一致；benchmark 未配置时统一记 `equal-weight(universe)`；`benchmark: "auto"` 按 `.SH/.SZ/.BJ` 后缀识别为 a_share 并尝试取市场默认基准（A股=000300.SH），失败时降级为等权基准，并在 run_card warnings 记录 `benchmark fetch failed`。
 - LLM 分析报告 `analysis.md` 是可选产物，由两条路径生成，行为一致（同一份 digest 同一套 prompt）：
   1. agent 路径：回测成功后 agent 自动调用 `write_run_analysis` 工具写 `analysis.md` + `analysis.status.json`，最终回复只引用文件路径，不再重复长篇归因（省 token）。
-  2. runner 路径：在 `agent` 目录下执行 `..\.venv\Scripts\python.exe -m backtest.runner "C:\Users\mumu\.vibe-trading\runs\<run_id>" --with-analysis`（也支持 `--withAnalysis`），回测成功后会补生成同一份分析（会调用一次 LLM；`VIBE_TRADING_ANALYSIS_TIMEOUT` 可调超时，默认 120 秒）。
+  2. runner 路径：在 `agent` 目录下执行 `..\.venv\Scripts\python.exe -m backtest.runner "<vibe_home>\runs\<run_id>" --with-analysis`（也支持 `--withAnalysis`），回测成功后会补生成同一份分析（会调用一次 LLM；`VIBE_TRADING_ANALYSIS_TIMEOUT` 可调超时，默认 120 秒）。
 - 分析 prompt 结构：一句话结论 → 结论详解 → 指标解读（全量、分组、逐项，每个指标至少一句解读）→ 交易行为诊断（交易概览、持仓分桶、月度损益、MAE/MFE）→ 交易环境分析（Beta 回归、Regime 分析）→ 稳健性验证（蒙特卡洛）→ 风险与改进建议，目标字数 1000-2500 字；全篇列表逐条分行（建议用 Markdown 有序列表），不挤在同一段落。
 - 指标解读表格为“指标 | 含义 | 值”三列：含义由代码确定性生成（`METRIC_MEANINGS`，未知字段显示“自定义/派生指标，按字段名理解”），LLM 只解读、不得改写含义。
 - `analysis.status.json` 记录 `status`（ok / failed / skipped）、`generated_by`（agent / runner）、`generated_at`、`llm_usage`（provider 上报时的真实 token 用量）。LLM 失败只把 status 记为 failed，不会让回测失败。
@@ -785,10 +787,10 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 ### 8.37 直接跑 runner 报 `PermissionError: ... artifacts\trades.csv`？
 
 - 原因：这个 CSV 正被 WPS 表格 / Excel 等程序打开，Windows 下文件被占用时无法覆盖写入；不是代码 bug，也不是路径问题。
-- 解决：先关掉打开 `trades.csv` 的 WPS / Excel 窗口（或退出 WPS），再重跑 `..\.venv\Scripts\python.exe -m backtest.runner "C:\Users\mumu\.vibe-trading\runs\<run_id>" --with-analysis`。
-- 只想补生成 `analysis.md`、不重跑回测时：`..\.venv\Scripts\python.exe -c "from backtest.analysis.report import generate_analysis_report; print(generate_analysis_report(r'C:\Users\mumu\.vibe-trading\runs\<run_id>', generated_by='runner'))"`（需要 `run_card.json` 和 `artifacts/metrics.csv` 已存在；不写 trades.csv，仍会调用一次 LLM）。
+- 解决：先关掉打开 `trades.csv` 的 WPS / Excel 窗口（或退出 WPS），再重跑 `..\.venv\Scripts\python.exe -m backtest.runner "<vibe_home>\runs\<run_id>" --with-analysis`。
+- 只想补生成 `analysis.md`、不重跑回测时：`..\.venv\Scripts\python.exe -c "from backtest.analysis.report import generate_analysis_report; print(generate_analysis_report(r'<vibe_home>\runs\<run_id>', generated_by='runner'))"`（需要 `run_card.json` 和 `artifacts/metrics.csv` 已存在；不写 trades.csv，仍会调用一次 LLM）。
 - 为什么这条命令不用跑回测：`generate_analysis_report` 与回测引擎无关，只检查 `run_card.json` + `artifacts/metrics.csv` 是否存在，然后读取/构建 digest（优先读 `analysis.digest.json` 缓存，指纹过期才重建）→ 拼 prompt → 调一次 LLM → 写 `analysis.md` + `analysis.status.json`；不写 trades.csv，也不启动 loader/engine。`--with-analysis` 则是三段式：runner 先重跑回测（覆盖 artifacts）→ 落库 digest 并生成 `analysis_charts/*.png` → 再调用同一个 `generate_analysis_report`，所以单独调它就是“只取最后一段”。
-- 注意：单独跑 `generate_analysis_report` 不会生成 `analysis_charts/*.png`（PNG 由回测 runner 自动生成）。如果只想补 PNG 而不重跑回测：`..\.venv\Scripts\python.exe -c "from backtest.analysis.charts import generate_chart_artifacts; import json; print(json.dumps(generate_chart_artifacts(r'C:\Users\mumu\.vibe-trading\runs\<run_id>'), ensure_ascii=False))"`。WebUI 的“分析图”标签从 API 读缓存 digest 后现算 ECharts 数据，PNG 只是兜底，缺少 PNG 不影响图表显示。
+- 注意：单独跑 `generate_analysis_report` 不会生成 `analysis_charts/*.png`（PNG 由回测 runner 自动生成）。如果只想补 PNG 而不重跑回测：`..\.venv\Scripts\python.exe -c "from backtest.analysis.charts import generate_chart_artifacts; import json; print(json.dumps(generate_chart_artifacts(r'<vibe_home>\runs\<run_id>'), ensure_ascii=False))"`。WebUI 的“分析图”标签从 API 读缓存 digest 后现算 ECharts 数据，PNG 只是兜底，缺少 PNG 不影响图表显示。
 - 注意：重跑 runner 会覆盖 `artifacts/` 下全部文件，查看前最好先关掉相关编辑器。
 
 ### 8.38 已有策略想调参 / 微调，怎么探索最高效？
@@ -797,14 +799,14 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 
 1. 基线 run 准备：先正常跑一次，确认 run 目录里有 `code/signal_engine.py`、`config.json`、`artifacts/ohlcv_*.csv`。
 2. 数据固化（只做一次，二选一）：
-   - data-bridge（推荐）：把 `artifacts/ohlcv_*.csv` 拷到 `C:\Users\mumu\.vibe-trading\data-bridge\`，配好 `config.yaml`，之后用 `local:<symbol>`，完全离线。
+   - data-bridge（推荐）：把 `artifacts/ohlcv_*.csv` 拷到 `<vibe_home>\data-bridge\`，配好 `config.yaml`，之后用 `local:<symbol>`，完全离线。
    - loader 缓存：`VIBE_TRADING_DATA_CACHE=1`，同一数据源 + 标的 + 周期 + 区间会命中缓存（坑见 8.35）。
-3. 一个变体 = 一个 run 目录副本：`Copy-Item "C:\Users\mumu\.vibe-trading\runs\<run_id>" "C:\Users\mumu\.vibe-trading\runs\exp_<名字>" -Recurse`；修改参数（具体见4）-改副本里的 `config.json`（参数）和/或 `code/signal_engine.py`（逻辑），然后 `cd agent` 跑 `..\.venv\Scripts\python.exe -m backtest.runner "<副本目录>"`。**不要直接改原 run 目录重跑**，会覆盖原 artifacts / run_card / analysis，也没法横向对比。
+3. 一个变体 = 一个 run 目录副本：`Copy-Item "<vibe_home>\runs\<run_id>" "<vibe_home>\runs\exp_<名字>" -Recurse`；修改参数（具体见4）-改副本里的 `config.json`（参数）和/或 `code/signal_engine.py`（逻辑），然后 `cd agent` 跑 `..\.venv\Scripts\python.exe -m backtest.runner "<副本目录>"`。**不要直接改原 run 目录重跑**，会覆盖原 artifacts / run_card / analysis，也没法横向对比。
 4. 参数修改细节（依规模）：见下方“规模分档 / 参数改法”要点。
 5. 最后才烧 LLM：挑出 2-3 个候选后，再 `python -m backtest.runner "<候选目录>" --with-analysis` 补分析报告，或 `vibe-trading --continue <run_id> "..."` 继续精调。
 
 常见坑：改 `config.json` / `signal_engine.py` 后必须重跑 runner 才生效；`local:` 是 codes 前缀（`local:600097.SH`），不要写 `source: local`；runner 要在 `agent` 目录下跑；trades.csv 被 Excel/WPS 占用时会 PermissionError（8.37）。
-调参产物清理：每次回测都会在副本里自动生成 `analysis_charts/*.png` 和完整 `artifacts/`（含行情快照 `ohlcv_*.csv`、equity、trades、metrics、validation 等）；即使数据来自本地 data-bridge，`ohlcv_*.csv` 也会把内存里的行情快照再落一份到每个副本，10 标的 × 10 组约 3MB。批量调参后建议手动清理：删除 `exp_*/analysis_charts` 和 `exp_*/artifacts/ohlcv_*.csv`，保留 `metrics.csv` / `trades.csv` / `equity.csv` 等；删除行情快照后，digest 的 ohlcv 概览、MAE/MFE、regime 会缺失，回测指标和 run card 不受影响。另外 `VIBE_TRADING_DATA_CACHE=1` 时 local 数据还会在 `C:\Users\mumu\.vibe-trading\cache\loaders\local` 落 parquet，不需要可去掉该环境变量。
+调参产物清理：每次回测都会在副本里自动生成 `analysis_charts/*.png` 和完整 `artifacts/`（含行情快照 `ohlcv_*.csv`、equity、trades、metrics、validation 等）；即使数据来自本地 data-bridge，`ohlcv_*.csv` 也会把内存里的行情快照再落一份到每个副本，10 标的 × 10 组约 3MB。批量调参后建议手动清理：删除 `exp_*/analysis_charts` 和 `exp_*/artifacts/ohlcv_*.csv`，保留 `metrics.csv` / `trades.csv` / `equity.csv` 等；删除行情快照后，digest 的 ohlcv 概览、MAE/MFE、regime 会缺失，回测指标和 run card 不受影响。另外 `VIBE_TRADING_DATA_CACHE=1` 时 local 数据还会在 `<vibe_home>\cache\loaders\local` 落 parquet，不需要可去掉该环境变量。
 
 规模分档：1-5 组手动复制 + 改 `code/signal_engine.py` + 跑即可；6-20 组写简单循环脚本；几十上百组用网格脚本（复制模板目录 → 改参数 → 跑 runner → 汇总 metrics）。
 参数改法二选一：
@@ -829,8 +831,8 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 3. 跑 runner（不加 `--with-analysis` 就不烧 LLM）：
 
    ```powershell
-   $env:VIBE_TRADING_ALLOWED_RUN_ROOTS='C:\Users\mumu\.vibe-trading\runs'
-   cd E:\gitCloneProgram\vibe-trading-src\agent
+   $env:VIBE_TRADING_ALLOWED_RUN_ROOTS='<vibe_home>\runs'
+   cd <repo_root>\agent
    ..\.venv\Scripts\python.exe -X utf8 -m backtest.runner "<新run目录>"
    ```
 
@@ -859,7 +861,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
    - 建议默认仍走 qfq，把后复权做成可选参数并补回归测试，避免旧 run 结果口径被破坏。
 2. 不改代码，用 data-bridge 喂后复权 CSV（最快落地）：
    - 用腾讯接口拉 `hfq` 或东财 `fqt=2` 的日线，保存成和 `artifacts/ohlcv_*.csv` 同结构的 CSV（`trade_date, open, high, low, close, volume`）。
-   - 登记到 `C:\Users\mumu\.vibe-trading\data-bridge\config.yaml`，回测里写 `local:<symbol>`。
+   - 登记到 `<vibe_home>\data-bridge\config.yaml`，回测里写 `local:<symbol>`。
    - local loader 只按文件原样读取，所以文件是 hfq，跑出来就是后复权口径。
 
 注意：同一份策略用 qfq 和 hfq 的结果不可直接对比；切换口径后要重新评估参数和信号阈值。
@@ -884,7 +886,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 - 实测（2026-08-13，rb 最近 10 个交易日）：同一份心忆 1m，local loader 现场聚合 5m 与 xinyi-kline skill 直接生成 5m 完全一致（690/690 根，OHLCV 全字段 0 差异）；用 `source: local` + `codes: ["local:rb0000.SHFE"]` + `interval: "5m"` 直接跑 runner 成功，走 ChinaFuturesEngine。
 - 推荐工作流：
   1. 用 xinyi-kline skill 把每个品种/合约变体解析成 1m CSV，主连用默认 main-only + `--cache-dir`；具体合约用 `--all-contracts` 再筛。
-  2. 注册进 `C:\Users\mumu\.vibe-trading\data-bridge\config.yaml`，`columns.date: datetime`、`date_format: "%Y-%m-%d %H:%M:%S"`。
+  2. 注册进 `<vibe_home>\data-bridge\config.yaml`，`columns.date: datetime`、`date_format: "%Y-%m-%d %H:%M:%S"`。
   3. 主连 symbol 建议写成引擎能识别的形式，如 `rb0000.SHFE`；具体合约写 `rb2510.SHFE`，这样 ChinaFuturesEngine 能正确取乘数和保证金。
   4. 换周期 = 改 config 的 `interval`；换品种/换主连 vs 具体合约 = 改 `codes`，策略代码不动。
 - 三个必须注意的边界：
@@ -917,7 +919,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 | 新增 Python 依赖 | `pip install -e . --timeout 1800` |
 | 新增前端依赖 | `vibe-trading setup` 或 `cd frontend; npm install` |
 | 直接重跑某个 run（无 LLM） | `cd agent; ..\.venv\Scripts\python.exe -m backtest.runner "<run_dir>"` |
-| 复制 run 做参数变体 | `Copy-Item "C:\Users\mumu\.vibe-trading\runs\<run_id>" "...\runs\exp_<名字>" -Recurse` |
+| 复制 run 做参数变体 | `Copy-Item "<vibe_home>\runs\<run_id>" "...\runs\exp_<名字>" -Recurse` |
 | 重跑并生成 LLM 分析报告 | 上一条命令加 `--with-analysis`（也支持 `--withAnalysis`） |
 | 查看 run 分析报告/图表 | WebUI 运行详情“分析图 / 分析”标签，或 API `/runs/<id>/analysis` |
 | 首次推送 | `git push -u origin mumu-main` |
@@ -925,30 +927,18 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 
 ---
 
-## 11. 文档维护与迭代记录
+## 11. 文档与迭代记录
 
-本文档随使用过程中的问答持续更新。遇到新的使用问题后，会在此追加对应章节，不删除历史说明。
+- 项目规则：见 [AGENTS.md](AGENTS.md)
+- 迭代记忆：见 [ITERATION_LOG.md](ITERATION_LOG.md)
+- 开工前计划：见 documents/plans/
 
-- 使用问题 / 坑：追加到本文档 FAQ，不删历史。
-- 项目迭代“为什么”：追加到 [`ITERATION_LOG.md`](ITERATION_LOG.md)，一条迭代一条记录。
-- 项目规则：见 [AGENTS.md](AGENTS.md)，本项目专属规则与文档体系。
-- 开工前计划：见 E:\document\project_implementation_plan\vibe-trading，先写计划、讨论到“已确认”再实现。
-- 查找规则：新任务先看计划目录；回顾过去先查 `ITERATION_LOG.md`（为什么）→ 按“参考”找计划文档（怎么做）→ 本文档（怎么用）→ `git log/show` → 代码（最终裁决）。
+## 12. 小周期回测分析口径（2026-08-14 起）
 
-近期迭代索引（完整见 ITERATION_LOG.md）：
-
-| 编号 | 日期 | 主题 | 一句话摘要 |
-|---|---|---|---|
-| V001 | 2026-08-07 | 建立 HowToUse 与 cmd 兼容 | 本地手册落地；cmd Rich 乱码用 Win32 API 根治 |
-| V002 | 2026-08-10 | 持仓手数与 local 加载修复 | 补录，细节待补 |
-| V003 | 2026-08-10 | 腾讯分页/A股路由/成交模式 | 500 根分页；A 股走 A 股引擎；支持收盘成交与止损出场 |
-| V004 | 2026-08-10~11 | 分析报告与图表 | 分析图/LLM 报告/蒙特卡洛/基准落库并进 WebUI |
-| V005 | 2026-08-12 | digest 落库与调参文档 | digest 现场构建缓存；指标解释；快速调参流程 |
-| V006 | 2026-08-12~13 | 数据落库脚本与策略复刻 | 沪深300 落库脚本；《趋势永存》复刻修复 |
-| V007 | 2026-08-10 | 本地部署与源码仓库切换 | pip 安装转 git clone 源码，editable 复用依赖并删除 pip 版 |
-| V008 | 2026-08-11~12 | 参数调优、local 数据与基准 | 1~10 参数扫描；local 快照/缺标的行为；沪深300 基准离线化 |
-| V009 | 2026-08-12 | A股负收益样本筛选 | 只取两个交易日 hfq 收盘价比较，4.4 秒命中 10 只 |
-| V010 | 2026-08-13 | Pylance 导入提示修复 | run 脚本 lib 导入加 pyright ignore，消除 reportMissingImports |
-| V011 | 2026-08-13 | rb 主连 5m 期货回测 | 心忆 1m→5m local 聚合，方向感知止损+跳点滑点，2% 风险仓位 |
-| V012 | 2026-08-14 | 项目 AGENTS.md 与计划文档工作流 | 项目工作台 + E:\document 计划目录，先计划、确认后实现 |
-| V013 | 2026-08-14 | 查找规则分场景与双向索引 | 分场景查找；状态归档防断链 |
+- `config.json` 可新增 `backtest_start` / `backtest_end`：`start_date` / `end_date` 只负责数据加载与指标预热，回测执行、净值、回撤、metrics 从 `backtest_start` 开始，到 `backtest_end`（纯日期包含整天）结束。不配置时行为不变。
+- `trades.csv` 的 `timestamp`：日内 run 显示完整 `YYYY-MM-DD HH:MM:SS`，日线 run 只显示 `YYYY-MM-DD`；新增 `holding_bars` 列，WebUI 交易表同步显示。
+- 指标口径：`avg_holding_bars` 是平均持仓 bar 数；`avg_holding_days` 是按每交易日 bar 数换算的天数，两个值以引擎 metrics 为准。
+- 行情 K 线左上角是周期按钮（5m/15m/20m/1h/2h/1D/1W/1M/1Y，按基础周期动态显示），切换由前端聚合；1D/1W/1M/1Y 按 `trade_date` 分桶，期货夜盘归下一交易日。周期切换后只显示前端重算指标，后端 indicator_series 隐藏。
+- 分析图：热力图支持日/周/月切换（默认按回测长度自动选）；净值/回撤从回测窗口开始；盈亏 vs 持仓、持仓分桶改用 bar 数。
+- 旧 run 的 `analysis.digest.json` 是缓存，升级后需要重建（schema v3）才会显示新口径；重建方式是重新跑 `backtest.runner` 或删除该文件后刷新 WebUI。
+- 1m 行情显示暂未开放：单标的约 8.5 万根会拖垮前端；后续按“区间/数量切片接口 + 懒加载”方案再补。

@@ -1,41 +1,16 @@
 # Vibe-Trading 项目迭代记录（ITERATION_LOG）
 
-> 用途：解决“只记得大概、忘了当初为什么”的问题。一条记录 = 一次迭代（一轮需求 / 修复 / 优化）。
-> 定位：`HowToUse.md` 讲“怎么用”，本文件讲“每次改了什么需求、怎么实现、反复讨论过什么、有哪些细节、为什么这么做”。
-> 与 git 的关系：本文件给 git 历史补充“动机与取舍”；commit hash / run_id 负责还原代码与复现结果。
+> 定位：过去做了什么、为什么、关键结论、去哪找细节；怎么用看 HowToUse，怎么做看计划文档。
+> 项目规则唯一源：`AGENTS.md`（仓库根）。
 
----
+## 写前须知
 
-## 一、使用规则
+1. 满足 AGENTS.md“收尾留痕”条件才写；一条一个主题；纯机械/纯文档小改不写。
+2. 编号：写前重读本文件，取当前最大编号 + 1；写后复读校验，撞号则改为当前最大 + 1；已删除编号不补号；不预填、不凭记忆。
+3. 不改历史；结论废弃在旧条目内标注“结论已废弃，以 V0XX 为准”。
+4. 追加正文时，同步在索引表加一行。
 
-1. **写入时机**：每次迭代收尾（测试通过、交付完成）时追加，当日事当日毕；不积攒、不补写流水账。
-2. **一条一个主题**：一次迭代写一条；多个独立改动就写多条，不要“一揽子”混写。
-3. **字段完整**：需求/背景、实现、反复讨论点、关键细节、为什么这样做、验证、影响/注意、参考 八项；没有就写“无”或“待补”。
-4. **协作讨论留痕**：`反复讨论点` 必须同时写“用户 ↔ Codex 双方讨论”（谁提出、怎么定）和“Codex 执行中关注的技术点”；补录条目注明来源（会话记录 / commit / 全局日志）。
-5. **可复现**：每条尽量带 commit hash、run_id、测试命令与结果，保证几个月后能一键复现。
-6. **查找规则**：新需求 / 新迭代先看计划目录；回顾过去先查本文件，再按条目“参考”中的计划编号定位计划文档；使用问题查 HowToUse.md；文档与代码冲突以代码为准。
-7. **不改历史**：新条目只追加；旧结论被推翻时，在旧条目内部标注“结论已废弃，以 V0XX 为准”，保留原文。
-
----
-
-## 二、条目模板
-
-```markdown
-### V0XX · 简短标题（日期）
-- 需求/背景：为什么做这次迭代（用户诉求、bug、新数据需求……）
-- 实现：改了哪些文件/模块/配置，核心逻辑一句话
-- 反复讨论点：用户 ↔ Codex 双方讨论的问题与最终结论（谁提出、怎么定）；再列 Codex 执行中反复确认的技术点
-- 关键细节：容易再踩的细节，例如夜盘跨日、单次条数上限、默认值兼容
-- 为什么这样做：当时考虑过的备选方案与取舍
-- 验证：测试命令/结果、run_id、指标前后对比
-- 影响/注意：会影响谁、需要怎么回归、相关 HowToUse 章节
-- 参考：commit hash / run_id / 全局日志编号 / 计划编号 P-...（收尾时填）
-```
-
----
-
-## 三、索引
-
+## 索引
 | 编号 | 日期 | 主题 | 一句话摘要 |
 |---|---|---|---|
 | V001 | 2026-08-07 | 建立 HowToUse 与 cmd 显示兼容 | 本地手册落地；cmd Rich 乱码用 Win32 控制台 API 根治 |
@@ -51,13 +26,37 @@
 | V011 | 2026-08-13 | rb 主连 5m 期货多空镜像回测 | 心忆 1m→5m local 聚合，引擎方向感知止损+跳点滑点，2% 风险仓位 13 笔 9 月回测 |
 | V012 | 2026-08-14 | 项目 AGENTS.md 与计划文档工作流 | 项目工作台 + E:\document 计划目录，先计划、确认后实现 |
 | V013 | 2026-08-14 | 查找规则分场景与计划双向索引 | ITERATION_LOG 管过去、计划文档管怎么做；状态归档防断链 |
-
+| V015 | 2026-08-14 | 迭代日志写入阈值 | 大/中与含决策/坑/行为变化的改动必记；纯机械小改靠 git 留痕 |
+| V016 | 2026-08-14 | 开工前核对闸门 | 确认前必过核对清单；“不做哪些”改为范围/边界 |
+| V017 | 2026-08-14 | 规则补齐：进度恢复/废弃出口/核对展示 | git 为准恢复进度；已废弃状态；核对结果逐项展示 |
+| V018 | 2026-08-14 | 回测分析时间精度与小周期图表修复 | 完整时间/trade_date、backtest 窗口、持仓单位、K线周期前端聚合、日/周/月热力图 |
+| V019 | 2026-08-14 | K 线 tooltip OHLC 错位修复 | tooltip 改用 p.data/末尾 4 值并做 OHLC 自检，O 不再显示递增索引 |
+| V020 | 2026-08-14 | 交易方向与开平动作展示 | K 线 B/S/CB/CS 与交易表多开/空开/多平/空平四分类，颜色按原始 side 语义 |
+| V021 | 2026-08-14 | K 线多笔交易标记合并 | 同 bar 多笔交易合并为单字母，混合类型显示灰色 T，tooltip 保留逐笔摘要 |
+| V022 | 2026-08-14 | 状态同步与索引维护规则补齐 | 确认后同步 README；日志同步索引；编号写后校验不补号 |
+| V023 | 2026-08-15 | 计划目录迁入仓库与路径可移植化 | documents/plans 随源码管理；规则文档用占位符替换本机路径 |
 > 补录说明：V001-V009 为补录条目，依据 git 历史、HowToUse、全局复利与踩坑日志、`C:\Users\mumu\.codex\sessions` 会话记录回溯整理；当时未留痕的字段标“待补”。从下一条起，每次迭代收尾直接写正文。
+
+## 模板
+
+```markdown
+### V0XX · 简短标题（日期）
+- 一句话总结：本次迭代做了什么
+- 为什么：核心原因 / 最终拍板（至少一句）
+- 关键细节：实现要点 / 坑 / 注意（有计划文档时可写“详见计划 P-...”，无计划文档时必写实现要点和坑）
+- 验证：测试命令或 run 结果（没有写“无”）
+- 关联：计划 P-...（无则不写）/ commit / run / HowToUse 章节
+```
+
+填写规则：
+- 5 个字段固定，没有的内容写“无”，不允许缺字段。
+- 有计划文档：关键细节可写“详见计划 P-...”，或只补计划里没有的新坑。
+- 无计划文档：关键细节必须写实现要点和坑。
+- 为什么必填；关联至少填 commit。
 
 ---
 
-## 四、迭代正文
-
+## 迭代正文
 ### V001 · 建立 HowToUse 与 cmd 显示兼容（2026-08-07）
 - 需求/背景：本地使用需要一份持续更新的中文手册；cmd 下 Rich 转义 `[36m` 等乱码影响阅读。
 - 实现：新建 `HowToUse.md`；输出主题配置 `legacy_windows=True`，走 Win32 控制台 API。
@@ -194,7 +193,6 @@
 - 验证：`pytest tests/test_engine_execution_modes.py tests/test_china_futures_engine.py -q` 52 passed；runner 复现 `final_value 99482.98`，13 笔交易全部落在 2025-09，做空 3 笔（09-04/09-16/09-19），止损 2 笔成交价方向对拍通过；9 月 return -0.5170%、max_drawdown -9.9383%（09-24 10:45 逐 bar 浮亏极值）、win_rate 7/13、手续费差额 = 期末权益 − trades.pnl 合计。
 - 影响/注意：引擎改动影响所有期货回测（做空止损从旧实现方向修正），已有相关单测覆盖；run 目录 `rb_futures_5m_20250901_29_v1` 可直接换 interval 重跑 1h/20m；metrics 全窗口含 6-8 月空仓预热段，正式看 9 月请用截取口径。
 - 参考：run_id `rb_futures_5m_20250901_29_v1`；全局日志 E064/E065；引擎改动 `agent/backtest/engines/base.py`、`china_futures.py`、`agent/tests/test_engine_execution_modes.py`。
-
 ### V012 · 项目 AGENTS.md 与计划文档工作流（2026-08-14）
 - 需求/背景：用户要为 Vibe-Trading 建立项目级全局工作台（AGENTS.md），并增加“开工前计划文档”工作流：实现需求/迭代前先写计划、讨论到确认再写码，缓解细节遗忘与上下文压缩导致的工作混乱。
 - 实现：新建 `AGENTS.md`（项目文档体系 + 7 条项目规则 + 计划分级）；新建 `E:\document\project_implementation_plan\vibe-trading`（git init、README 索引、`_template.md`、archive）；全局工作台 Vibe-Trading 规则改为移动+指针（v7.0）；HowToUse 第 11 节补 AGENTS/计划目录；全局日志补 E064-E066 索引与 E066 可复用方法。
@@ -224,3 +222,82 @@
 - 验证：AGENTS.md / 计划 README / 模板 / ITERATION_LOG / HowToUse 五处读回核对，旧链式表述无残留。
 - 影响/注意：后续收尾必须三处同步（ITERATION_LOG、计划状态与关联、README 索引）；V012 的 archive 设计以本条目为准。
 - 参考：本条目；计划仓库 commit（见 git log）。
+
+### V015 · 迭代日志写入阈值（2026-08-14）
+- 需求/背景：用户认为纯文档修改、随手小 bug 修复不值得每次都写迭代日志，避免噪音。
+- 实现：项目 AGENTS.md 第 2/3/5 条改为“按条件记录”：大/中迭代、含决策/坑/行为变化、影响用户可见行为的改动必须写；纯机械/纯文档小改不强制，靠 git commit 留痕；删除 V014（计划短标题下划线，属纯机械改动，按新阈值不记录）。
+- 反复讨论点：阈值按“改动大小”还是“是否有决策/坑”（结论：后者）；用户拍板认可。
+- 关键细节：V014 已删除且不补号，后续编号从 V015 继续。
+- 为什么这样做：日志记“为什么”不记流水账；机械改动由 git 历史承担。
+- 验证：AGENTS.md / ITERATION_LOG / HowToUse 三处规则与索引一致，无 V014 残留。
+- 影响/注意：后续小改动默认不写 ITERATION_LOG，除非含决策/坑/用户可见变化。
+- 参考：本条目；无计划文档。
+
+### V016 · 开工前核对闸门（2026-08-14）
+- 一句话总结：状态切到“已确认”前新增开工前核对清单；需求目标改为“做什么 + 范围/边界”，取消独立“不做哪些”。
+- 为什么：多轮讨论后文档可能滞后；负向清单“不做哪些”容易过期反转，改为范围/边界并靠核对清单兜底。
+- 关键细节：核对不过只改文档不动代码；范围反转在讨论记录标注“范围变更：原→现”；小改动无计划文档不涉及核对。
+- 验证：模板 / AGENTS.md 规则 4 / 计划 README / HowToUse 四处读回一致。
+- 关联：无计划文档；HowToUse 第 11 节。
+
+### V017 · 规则补齐：进度恢复/废弃出口/核对展示（2026-08-14）
+- 一句话总结：补充恢复进度依据、计划创建后登记、已废弃状态、开工前核对展示格式、确认后状态更新，并清理索引空行。
+- 为什么：陌生 agent 模拟发现这些缺口：进度恢复无依据、计划创建后可能漏登记、放弃的计划无出口、核对结果格式不明确、确认后状态归属不清。
+- 关键细节：恢复进度以 git status / git diff 为准；计划 README 状态新增“已废弃”；新建计划后登记 README；核对结果逐项“通过 / 未通过 + 发现项”；用户确认后 agent 先改状态再写码。
+- 验证：AGENTS.md / 计划模板 / 计划 README / ITERATION_LOG 读回一致，索引空行已清理。
+- 关联：无计划文档；HowToUse 第 11 节。
+
+### V018 · 回测分析时间精度与小周期图表修复（2026-08-14）
+- 需求/背景：用户指出 5 类问题：①trades.csv/WebUI 交易时间最小精度只有天；②metrics/run_card 的持仓时间单位混乱（avg_holding_days 实际是 bar 数，digest 又按自然日算出 0 天）；③行情 K 线周期按钮（1M/3M/6M/1Y/ALL）硬编码日线 bar 数、tooltip 只显示天；④净值/回撤从数据起点开始，含大片预热空仓；⑤月度热力图、盈亏 vs 持仓、持仓分桶对短线交易失去作用。
+- 实现：①local loader 保留源数据 trade_date 列并在聚合时取 last，ohlcv artifact 输出完整 timestamp + trade_date；trades.csv 写完整时间并新增 holding_bars；②metrics.py 新增 avg_holding_bars，avg_holding_days 按 bars_per_day 换算；③digest 全链路保留完整时间、buckets 改为 bar 分桶、新增 period_pnl（日/周/月）；④config 新增 backtest_start/backtest_end，引擎执行窗口截断到回测窗口，runner 向 SignalEngine 注入 trade_start/trade_end，rb 策略去掉硬编码；⑤前端新增 resample 工具，K 线周期按钮改为 5m/15m/20m/1h/2h/1D/1W/1M/1Y（按基础 interval 动态显示），1D/1W/1M/1Y 按 trade_date 分桶，隐藏后端 indicator_series，热力图支持日/周/月切换。
+- 反复讨论点：用户先要求调研不改代码；拍板 backtest_start/end 分离数据窗口与回测窗口、热力图日/周/月切换、trade_date 期货日 K、周期切换只前端计算并隐藏后端指标、1m 行情本轮不做；Codex 建议引擎执行窗口截断（而不是只裁剪展示），digest 纳入 config 指纹自动重建。
+- 关键细节：backtest_end 纯日期会被解析为 00:00 截掉最后一天，需按整天包含处理；digest 与 metrics 的 avg_holding_days 换算曾不一致，统一以 metrics.csv 为准；trades.csv 完整时间后 MAE/MFE 的 ohlcv key 也要完整时间；日线 run 的 trades 时间只显示日期、日内显示到分钟；1m 数据约 8.5 万根/标的，前端全量渲染会卡，后续用切片接口/懒加载。
+- 为什么这样做：数据窗口负责指标预热，回测窗口负责执行与展示；前端聚合避免后端接口改造，隐藏后端指标避免周期切换后时间错位；trade_date 保证期货夜盘归次日。
+- 验证：后端回归 `pytest tests/test_analysis_digest.py tests/test_analysis_charts.py tests/test_analysis_api.py tests/test_analysis_runner_hook.py tests/test_base_engine.py tests/test_engine_execution_modes.py tests/test_china_futures_engine.py tests/test_metrics.py tests/test_metrics_calc_integer_index.py tests/test_metrics_tracking_error.py tests/test_local_loader.py tests/test_local_loader_interval_case.py tests/test_ui_services.py tests/test_backtest_runner_security.py tests/test_runner_coverage.py tests/test_runner_env.py -q` 243 passed；前端 `npm run build` 通过、vitest 401 passed；Chrome 截图确认 rb 5m run 与日线 run `daily_regression_10stocks` 的周期按钮、时间格式、净值起点正常。
+- 影响/注意：旧 run 的 analysis.digest.json 需要重建（schema v3）；config 新增 backtest_start/end 后 metrics 口径变为回测窗口；K 线周期切换后后端 indicator_series 暂时隐藏；1m 行情显示留待后续迭代。
+- 参考：计划 P-20260814-timeline_charts_fix；run `rb_futures_5m_20250901_29_v1`、`daily_regression_10stocks`；全局日志 E064/E065/E066；commit 待补。
+- 回归补充（2026-08-14）：按用户要求跑回归与日线 run 副本；发现并修复两处：①日线 trades 时间输出 `2023-03-08 00:00:00`，base.py 按 interval 自适应为纯日期；②ChartTab 残留旧 CandlestickChart 行导致重复渲染两个 K 线图、日线页面出现全部周期按钮，删除旧行。
+
+### V019 · K 线 tooltip OHLC 错位修复（2026-08-14）
+- 需求/背景：用户反馈 K 线悬浮框 O/H/L/C 错位，O 随 K 线递增（2025-09-01 显示 64、09-02 显示 65……），涨幅与涨跌额随之全错；1D 周期最明显。
+- 实现：新增 `frontend/src/lib/candleOhlc.ts`（`pickCandleOhlc`：优先取 `params.data`，兼容 ECharts value 首位带索引的情况，取末尾 4 个元素，并对 OHLC 做合法性自检）；CandlestickChart tooltip 改用该工具；`resample.ts` 对输入做 Number 归一化并按 time 稳定排序，防止字符串/缺失字段错位。
+- 反复讨论点：先排查主连数据，结论是 8/29 等日期主连与新浪 RB0 一致，250 天仅 2 个切换日差一天（暂不改 skill）；随后用 O 递增特征定位到 tooltip 把 ECharts 传入 value 的首位索引当成了 open。
+- 关键细节：ECharts candlestick 的 `params.value` 可能带前导 index/x 维度，不能按前 4 个元素直接解构；`params.data` 是原始 [open, close, low, high]，优先使用最稳。
+- 为什么这样做：展示层修复不碰回测/数据；自检能拦截未来任何 OHLC 错位，避免继续显示离谱涨幅。
+- 验证：前端 vitest 413 passed（新增 candleOhlc/resample 单测）、npm build 通过；后端相关 pytest 160 passed；Chrome CDP 实际悬停 1D K 线，2025-09-01 显示 `O:3150 H:3161 L:3094 C:3115 -1.11%`，O 不再递增。
+- 影响/注意：仅前端展示；主连切换规则差异保持原样，待后续单独讨论；旧 WebUI 页面需刷新/重启后端进程加载新 dist。
+- 参考：无计划文档；run `rb_futures_5m_20250901_29_v1`；commit 待补。
+
+### V020 · 交易方向与开平动作展示（2026-08-14）
+- 需求/背景：K 线标记把平多显示成 S、平空显示成 B；交易表把平仓显示成卖出/买入，无法区分开平与多空。用户希望图表用 B/S/CB/CS 四类，交易表用多开/空开/多平/空平四类。
+- 实现：新增 `frontend/src/lib/tradeActions.ts`（open/close + long/short 动作模型，可复用虚拟币/外汇）；`ui_services.build_trade_markers` 输出 action/direction；CandlestickChart 标记 B（多开）红、S（空开）绿、CB（多平）绿、CS（空平）红；TradesTab 方向文本四类、筛选 chips 四类、顶部计数四类；i18n 5 语言新增四个方向 key。
+- 反复讨论点：颜色分组最初误写为“多开/多平绿、空开/空平红”，用户纠正为按原始 side：多开/空平（买入）红、空开/多平（卖出）绿，与图表颜色一致；用户拍板筛选分四类、颜色按图表语义、B/S 保持现状、买入/卖出文本改为多开/空开。
+- 关键细节：开平判定用 pnl/holding_bars/holding_days，兼容旧 run；动作模型不绑定 A 股/期货字段名，后续虚拟币/外汇复用；不更新 HowToUse（用户指定）。
+- 为什么这样做：开平与多空是交易语义基础信息，展示层统一模型避免图表和交易表各算一套。
+- 验证：前端 vitest 全量 418 passed（2 个无关用例并发超时单独重跑通过，新增 tradeActions 19 passed）、npm build 通过；后端 `pytest tests/test_ui_services.py tests/test_analysis_digest.py tests/test_analysis_charts.py -q` 33 passed；Chrome CDP 验证交易表四分类文本与筛选（空开筛选只显示空开）、API markers 输出 open/close + long/short。
+- 影响/注意：交易表筛选 chips 从买入/卖出改为四类，属于用户可见行为变化；旧 WebUI 需刷新/重启后端加载新 dist。
+- 参考：计划 P-20260814-trade_action_ui；run `rb_futures_5m_20250901_29_v1`；commit 待补。
+
+### V021 · K 线多笔交易标记合并（2026-08-14）
+- 需求/背景：同一根 K 线上有多笔交易时 B/S/CB/CS 标记重叠，影响观看体验；希望同 bar 多笔合并显示。
+- 实现：新增 `frontend/src/lib/tradeMarkers.ts`（mergeBarTradeMarks）；CandlestickChart 先把标记映射到当前周期 bar，再按 bar 分组合并。规则：同类型合并保留原色；类型不唯一合并为灰色 T（#9ca3af）；多个 T 只保留一个；合并标记放在 bar 最高价上方；tooltip 显示 `N 笔：B x1 @ 3150；CB x1 @ 3155` 摘要。
+- 反复讨论点：用户要求 B+CB / S+CS 合并为 T；Codex 建议其他混合类型也一律合并 T、T 放最高价上方、图上不加数字、tooltip 显示明细，用户确认按推荐执行。
+- 关键细节：合并粒度跟随当前周期（5m→1D 自动变化）；单笔标记保持原行为；不影响交易表与后端数据。
+- 为什么这样做：展示层按 bar 聚合，减少遮挡同时保留逐笔信息。
+- 验证：前端 vitest 431 passed、npm build 通过；后端相关 pytest 33 passed；Chrome 截图确认 1D 周期下同 bar 多笔交易显示灰色 T。
+- 影响/注意：仅 K 线图展示；WebUI 刷新/重启后端加载新 dist。
+- 参考：无计划文档；run `rb_futures_5m_20250901_29_v1`；commit 待补。
+- 回归补充（2026-08-14）：按用户要求回归股票日 K run `daily_regression_10stocks`；前端全量 421 passed（4 个无关用例并发超时单独重跑 18 passed）、npm build 通过、后端相关 pytest 39 passed；Chrome 验证日线 K 线图正常渲染（B/CB 标记、日期轴、无报错），交易表四分类与筛选正常。
+
+### V022 · 状态同步与索引维护规则补齐（2026-08-14）
+- 一句话总结：明确确认后同步 README 状态、写日志必须同步索引、编号写后校验与不补号、已废弃留痕约定。
+- 为什么：再次模拟发现：已确认时 README 可能不同步；日志正文与索引可能漂移；并发撞号仍无写后校验；已废弃计划无留痕约定。
+- 关键细节：确认后更新计划 README 状态；写 ITERATION_LOG 时同步索引行；撞号后写者改最大+1；删除编号不补号；已废弃在计划文档头部标注、不写日志。
+- 验证：AGENTS.md / ITERATION_LOG 写前须知 / 计划 README 读回一致。
+- 关联：无计划文档；HowToUse 第 11 节。
+### V023 · 计划目录迁入仓库与路径可移植化（2026-08-15）
+- 一句话总结：计划目录迁入 `documents/plans/` 随源码 git 管理；规则文档去掉本机绝对路径，改为 `<repo_root>` / `<vibe_home>` 占位。
+- 为什么：要支持其他电脑 / 其他 agent 协同开发，仓库内规则与计划必须 clone 可得，且不能依赖本机 `E:\document`、`C:\Users\mumu` 等路径。
+- 关键细节：`.gitignore` 增加 `!AGENTS.md` 使 AGENTS 进入 git；AGENTS 全局规则改为“环境存在则遵守，否则本项目自治”；HowToUse 42 处硬编码路径替换为占位符；旧 `E:\document` 计划目录保留但不再活跃；历史迭代记录中的绝对路径保留。
+- 验证：rg 确认 AGENTS / HowToUse / documents/plans 无本机绝对路径；git ls-files 确认 AGENTS 与计划文件被跟踪。
+- 关联：计划目录 `documents/plans/`；无 commit（待提交）。
