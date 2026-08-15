@@ -21,11 +21,11 @@
 | CHANGELOG / CONTRIBUTING / SECURITY / AGENT_CONTRIBUTOR_GUIDE | 上游文档 | 暂不更新 |
 | HowToUse.md | 怎么用、FAQ、坑 | 主动维护 |
 | ITERATION_LOG.md | 过去做了什么、为什么、关键结论 | 主动维护 |
-| documents/plans/ | 开工前计划 | 主动维护 |
+| documents/plans/ | 开工前计划（README=状态与索引入口；_template.md=新建计划模板） | 主动维护 |
 
 ## 三、查找规则
 
-- 新需求 / 新迭代 / 未完成需求：先看当前计划目录
+- 新需求 / 新迭代 / 未完成需求：先看计划目录（README 为入口，新建计划用 _template.md）
 - 回顾过去：先查 ITERATION_LOG，按“关联”找计划文档
 - 使用问题：查 HowToUse
 - 冲突裁决：代码 + git history
