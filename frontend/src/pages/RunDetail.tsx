@@ -1,5 +1,5 @@
 import i18n from '@/i18n';
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams, useNavigate } from "react-router";
@@ -24,7 +24,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { DEFAULT_CHART_VIEW, type ChartView } from "@/lib/chartWindow";
+import { DEFAULT_CHART_VIEW, type ChartView, type ZoomWindow } from "@/lib/chartWindow";
 import { api, type BacktestMetrics, type RunAnalysis, type RunAnalysisCharts, type RunCard, type RunData, type ValidationData } from "@/lib/api";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
@@ -123,6 +123,8 @@ export function RunDetail() {
   const [code, setCode] = useState<Record<string, string>>({});
   const [tab, setTab] = useState<Tab>("chart");
   const [chartView, setChartView] = useState<ChartView>(DEFAULT_CHART_VIEW);
+  // 可视窗口走 run 级 ref：拖动只更新 ref 不触发重渲染（避免与 setOption 打架），run 切换时重置。
+  const chartWindowRef = useRef<ZoomWindow | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedSymbol, setSelectedSymbol] = useState("");
   const [chartPickerSymbol, setChartPickerSymbol] = useState("");
@@ -154,6 +156,7 @@ export function RunDetail() {
     setCode({});
     setTab("chart");
     setChartView(DEFAULT_CHART_VIEW);
+    chartWindowRef.current = null;
     setLoading(true);
     setSelectedSymbol("");
     setChartPickerSymbol("");
@@ -400,6 +403,7 @@ export function RunDetail() {
               bulkProgress={bulkChartProgress}
               chartView={chartView}
               onChartViewChange={setChartView}
+              chartWindowRef={chartWindowRef}
               onPickSymbol={setChartPickerSymbol}
               onAddSymbol={handleAddChartSymbol}
               onCurrentOnly={handleCurrentChartOnly}
@@ -583,6 +587,7 @@ function ChartTab({
   bulkProgress,
   chartView,
   onChartViewChange,
+  chartWindowRef,
   onPickSymbol,
   onAddSymbol,
   onCurrentOnly,
@@ -599,6 +604,7 @@ function ChartTab({
   bulkProgress: ChartLoadProgress;
   chartView: ChartView;
   onChartViewChange: (patch: React.SetStateAction<ChartView>) => void;
+  chartWindowRef: React.MutableRefObject<ZoomWindow | null>;
   onPickSymbol: (symbol: string) => void;
   onAddSymbol: (symbol: string) => void | Promise<void>;
   onCurrentOnly: (symbol: string) => void | Promise<void>;
@@ -607,13 +613,20 @@ function ChartTab({
   onCancelLoadAll: () => void;
 }) {
   const chartSymbols = run.chart_symbols || Object.keys(run.price_series || {});
-  const entries = selectedSymbols
-    .map((symbol) => [symbol, chartCache[symbol]?.price_series?.[symbol] || []] as const)
-    .filter(([, bars]) => bars.length > 0);
+  // markers 用 useMemo 稳定引用：避免窗口拖动等无关重渲染时 .filter 生成新数组，
+  // 触发 CandlestickChart 的 setOption 效应重跑（拖动被打断的回归根因）。
+  const chartEntries = useMemo(() => selectedSymbols
+    .filter((symbol) => (chartCache[symbol]?.price_series?.[symbol] || []).length > 0)
+    .map((symbol) => ({
+      symbol,
+      bars: chartCache[symbol]?.price_series?.[symbol] || [],
+      markers: chartCache[symbol]?.trade_markers?.filter((m) => m.code === symbol),
+    })),
+  [selectedSymbols, chartCache]);
   const hasEquity = run.equity_curve && run.equity_curve.length > 0;
   const progressPercent = bulkProgress.total > 0 ? Math.round((bulkProgress.done / bulkProgress.total) * 100) : 0;
 
-  if (chartSymbols.length === 0 && entries.length === 0 && !hasEquity) {
+  if (chartSymbols.length === 0 && chartEntries.length === 0 && !hasEquity) {
     return (
       <div className="p-8 text-center text-muted-foreground space-y-2">
         <p className="text-sm">{i18n.t("runDetail.noChartData")}</p>
@@ -698,15 +711,15 @@ function ChartTab({
           )}
         </div>
       )}
-      {entries.length === 0 && (
+      {chartEntries.length === 0 && (
         <div className="rounded-xl border border-dashed border-border/60 bg-card p-5 text-center text-sm text-muted-foreground shadow-sm">
           {Object.keys(loadingSymbols).length > 0 ? i18n.t("runDetail.loadingSelectedChart") : i18n.t("runDetail.pickSymbolToLoad")}
         </div>
       )}
-      {entries.map(([sym, bars]) => (
-        <div key={sym}>
-          <h3 className="text-sm font-semibold text-muted-foreground mb-1">{sym}</h3>
-          <CandlestickChart data={bars} markers={chartCache[sym]?.trade_markers?.filter(m => m.code === sym)} indicators={chartCache[sym]?.indicator_series?.[sym]} height={500} baseInterval={String((run.run_card?.backtest as Record<string, unknown> | undefined)?.interval ?? "")} sub={chartView.sub} overlays={chartView.overlays} period={chartView.period} window={chartView.window} onViewChange={(patch) => onChartViewChange((prev) => ({ ...prev, ...patch }))} />
+      {chartEntries.map(({ symbol, bars, markers }) => (
+        <div key={symbol}>
+          <h3 className="text-sm font-semibold text-muted-foreground mb-1">{symbol}</h3>
+          <CandlestickChart data={bars} markers={markers} indicators={chartCache[symbol]?.indicator_series?.[symbol]} height={500} baseInterval={String((run.run_card?.backtest as Record<string, unknown> | undefined)?.interval ?? "")} sub={chartView.sub} overlays={chartView.overlays} period={chartView.period} windowRef={chartWindowRef} onViewChange={(patch) => onChartViewChange((prev) => ({ ...prev, ...patch }))} />
         </div>
       ))}
       {hasEquity && (

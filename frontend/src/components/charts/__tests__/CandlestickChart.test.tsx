@@ -45,6 +45,10 @@ const BARS: PriceBar[] = Array.from({ length: 1000 }, (_, i) => ({
   volume: 1000,
 }));
 
+function makeWindowRef() {
+  return { current: null as { start: number; end: number } | null };
+}
+
 function props(overrides: Partial<Parameters<typeof CandlestickChart>[0]> = {}) {
   return {
     data: BARS,
@@ -52,7 +56,7 @@ function props(overrides: Partial<Parameters<typeof CandlestickChart>[0]> = {}) 
     sub: "vol" as ChartView["sub"],
     overlays: ["ma5", "ma20"] as ChartView["overlays"],
     period: null,
-    window: null,
+    windowRef: makeWindowRef(),
     onViewChange: vi.fn(),
     ...overrides,
   };
@@ -69,25 +73,28 @@ beforeEach(() => {
 });
 
 describe("CandlestickChart 可视窗口保持（文档验证场景 1/3/4 的核心机制）", () => {
-  it("场景1/2：调指标/副图时沿用当前窗口，不重置回默认", () => {
-    const onViewChange = vi.fn();
+  it("场景1/2：调指标/副图时沿用当前窗口（来自共享 ref），不重置回默认", () => {
+    const windowRef = makeWindowRef();
+    windowRef.current = { start: 30, end: 100 };
     const { rerender } = render(
-      <CandlestickChart {...props({ window: { start: 30, end: 100 }, onViewChange })} />,
+      <CandlestickChart {...props({ windowRef, sub: "vol", overlays: ["ma5"] })} />,
     );
     const callsBefore = setOption.mock.calls.length;
 
-    // 切换副图（sub 变化）
-    rerender(<CandlestickChart {...props({ window: { start: 30, end: 100 }, sub: "macd", onViewChange })} />);
+    // 切换副图（sub 变化）——窗口 ref 不变
+    rerender(<CandlestickChart {...props({ windowRef, sub: "macd", overlays: ["ma5"] })} />);
     expect(setOption.mock.calls.length).toBeGreaterThan(callsBefore);
     expect(lastOptionDataZoom()).toMatchObject({ start: 30, end: 100 });
 
-    // 切换指标（overlays 变化）
-    rerender(<CandlestickChart {...props({ window: { start: 30, end: 100 }, overlays: ["ma5", "boll"], onViewChange })} />);
+    // 切换指标（overlays 变化）——窗口 ref 不变
+    rerender(<CandlestickChart {...props({ windowRef, sub: "macd", overlays: ["ma5", "boll"] })} />);
     expect(lastOptionDataZoom()).toMatchObject({ start: 30, end: 100 });
   });
 
-  it("场景3：新图（带共享窗口）挂载时直接落在该窗口，而非默认最后 250 根", () => {
-    render(<CandlestickChart {...props({ window: { start: 30, end: 100 } })} />);
+  it("场景3：新图（共享 ref 已有窗口）挂载时直接落在该窗口，而非默认最后 250 根", () => {
+    const windowRef = makeWindowRef();
+    windowRef.current = { start: 30, end: 100 };
+    render(<CandlestickChart {...props({ windowRef })} />);
     expect(lastOptionDataZoom()).toMatchObject({ start: 30, end: 100 });
   });
 
@@ -97,17 +104,19 @@ describe("CandlestickChart 可视窗口保持（文档验证场景 1/3/4 的核�
     expect(lastOptionDataZoom()).toMatchObject({ start: 75, end: 100 });
   });
 
-  it("场景3/4：datazoom 事件把当前窗口上报给共享状态（供新图与回写沿用）", () => {
+  it("场景3/4：datazoom 事件把当前窗口写入共享 ref（供新图与回写沿用），不触发 onViewChange", () => {
+    const windowRef = makeWindowRef();
     const onViewChange = vi.fn();
-    render(<CandlestickChart {...props({ onViewChange })} />);
+    render(<CandlestickChart {...props({ windowRef, onViewChange })} />);
     const handler = on.mock.calls.find((call) => call[0] === "datazoom")?.[1];
     expect(handler).toBeDefined();
 
     handler({ start: 30, end: 100 });
-    expect(onViewChange).toHaveBeenLastCalledWith({ window: { start: 30, end: 100 } });
+    expect(windowRef.current).toEqual({ start: 30, end: 100 });
+    expect(onViewChange).not.toHaveBeenCalled();
 
     // batch 形式（多 dataZoom 组件）
     handler({ batch: [{ start: 40, end: 90 }] });
-    expect(onViewChange).toHaveBeenLastCalledWith({ window: { start: 40, end: 90 } });
+    expect(windowRef.current).toEqual({ start: 40, end: 90 });
   });
 });

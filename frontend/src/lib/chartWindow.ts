@@ -9,19 +9,17 @@ export interface ZoomWindow {
 export type Sub = "vol" | "macd" | "rsi" | "kdj";
 export type Overlay = "ma5" | "ma10" | "ma20" | "ma60" | "ema12" | "ema26" | "boll";
 
-/** 多标的共用的图表设置与可视窗口（RunDetail 级共享状态）。 */
+/** 多标的共用的图表设置（RunDetail 级共享状态）；可视窗口走 ref（拖动不触发重渲染）。 */
 export interface ChartView {
   sub: Sub;
   overlays: Overlay[];
   period: KlinePeriod | null;
-  window: ZoomWindow | null;
 }
 
 export const DEFAULT_CHART_VIEW: ChartView = {
   sub: "vol",
   overlays: ["ma5", "ma20"],
   period: null,
-  window: null,
 };
 
 /** 默认显示最后 250 根 K 线。 */

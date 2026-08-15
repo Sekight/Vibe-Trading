@@ -35,11 +35,11 @@ interface Props {
   sub: Sub;
   overlays: Overlay[];
   period: KlinePeriod | null;
-  window: ZoomWindow | null;
+  windowRef: { current: ZoomWindow | null };
   onViewChange: (patch: Partial<ChartView>) => void;
 }
 
-export function CandlestickChart({ data, markers, indicators, height = 500, baseInterval, sub, overlays, period, window: zoomWindow, onViewChange }: Props) {
+export function CandlestickChart({ data, markers, indicators, height = 500, baseInterval, sub, overlays, period, windowRef, onViewChange }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   void indicators; // 周期切换后只显示前端重算指标，隐藏后端 indicator_series。
   const chartRef = useRef<ReturnType<typeof echarts.init> | null>(null);
@@ -91,11 +91,12 @@ export function CandlestickChart({ data, markers, indicators, height = 500, base
     connectCharts();
     chartRef.current = chart;
 
-    // 用户缩放/滑动时上报当前可视窗口，RunDetail 级共享，供同组新图加入与 setOption 回写沿用。
+    // 用户缩放/滑动时把当前可视窗口写入共享 ref（run 级）。不触发 React 重渲染，
+    // 避免拖动过程中 setOption 用滞后窗口值回写导致拖动被"打架"。
     const onZoom = (params: any) => {
       const item = params?.batch && params.batch.length > 0 ? params.batch[0] : params;
       if (item && typeof item.start === "number" && typeof item.end === "number") {
-        onViewChange({ window: { start: item.start, end: item.end } });
+        windowRef.current = { start: item.start, end: item.end };
       }
     };
     chart.on("datazoom", onZoom);
@@ -238,7 +239,7 @@ export function CandlestickChart({ data, markers, indicators, height = 500, base
       legendNames.push("%K", "%D", "%J");
     }
 
-    const zoom = resolveZoom(zoomWindow, visibleData.length);
+    const zoom = resolveZoom(windowRef.current, visibleData.length);
 
     chart.setOption({
       backgroundColor: "transparent",
