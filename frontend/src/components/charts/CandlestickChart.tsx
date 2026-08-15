@@ -3,7 +3,7 @@ import i18n from "@/i18n";
 import { cn } from "@/lib/utils";
 import { ChevronDown } from "lucide-react";
 import type { PriceBar, TradeMarker, IndicatorPoint } from "@/lib/api";
-import { calcMA, calcBOLL, calcMACD, calcRSI, calcKDJ, calcEMA } from "@/lib/indicators";
+import { calcMA, calcBOLL, calcMACD, calcRSI, calcKDJ, calcATR, calcEMA } from "@/lib/indicators";
 import { getChartTheme } from "@/lib/chart-theme";
 import { abbreviateNum } from "@/lib/formatters";
 import { pickCandleOhlc } from "@/lib/candleOhlc";
@@ -82,6 +82,7 @@ export function CandlestickChart({ data, markers, indicators, height = 500, base
     macd: calcMACD(baseData.closes),
     rsi: calcRSI(baseData.closes),
     kdj: calcKDJ(baseData.highs, baseData.lows, baseData.closes),
+    atr: calcATR(baseData.highs, baseData.lows, baseData.closes),
   }), [baseData]);
 
   useEffect(() => {
@@ -229,6 +230,9 @@ export function CandlestickChart({ data, markers, indicators, height = 500, base
       subSeries = [{ name: "RSI", type: "line", data: indicatorCache.rsi, xAxisIndex: 1, yAxisIndex: 1, symbol: "none", lineStyle: { width: 1.5, color: t.infoColor } }];
       subYAxis = { ...subYAxis, min: 0, max: 100 };
       legendNames.push("RSI");
+    } else if (sub === "atr") {
+      subSeries = [{ name: "ATR", type: "line", data: indicatorCache.atr, xAxisIndex: 1, yAxisIndex: 1, symbol: "none", lineStyle: { width: 1.5, color: t.infoColor } }];
+      legendNames.push("ATR");
     } else {
       const kdj = indicatorCache.kdj;
       subSeries = [
@@ -349,7 +353,7 @@ export function CandlestickChart({ data, markers, indicators, height = 500, base
         <div className="w-px h-3 bg-border/40" />
 
         <div className="flex gap-0.5">
-          {(["vol", "macd", "rsi", "kdj"] as const).map((id) => (
+          {(["vol", "macd", "rsi", "kdj", "atr"] as const).map((id) => (
             <button key={id} onClick={() => onViewChange({ sub: id })} className={cn("px-1.5 py-0.5 rounded text-[10px] font-mono uppercase transition-colors", sub === id ? "bg-primary/15 text-primary font-medium" : "text-muted-foreground/50 hover:text-muted-foreground")}>{id}</button>
           ))}
         </div>

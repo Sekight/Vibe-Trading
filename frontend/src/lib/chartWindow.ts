@@ -6,7 +6,7 @@ export interface ZoomWindow {
   end: number;
 }
 
-export type Sub = "vol" | "macd" | "rsi" | "kdj";
+export type Sub = "vol" | "macd" | "rsi" | "kdj" | "atr";
 export type Overlay = "ma5" | "ma10" | "ma20" | "ma60" | "ema12" | "ema26" | "boll";
 
 /** 多标的共用的图表设置（RunDetail 级共享状态）；可视窗口走 ref（拖动不触发重渲染）。 */

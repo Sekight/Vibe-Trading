@@ -119,4 +119,11 @@ describe("CandlestickChart 可视窗口保持（文档验证场景 1/3/4 的核�
     handler({ batch: [{ start: 40, end: 90 }] });
     expect(windowRef.current).toEqual({ start: 40, end: 90 });
   });
+
+  it("atr 副图渲染 ATR 折线", () => {
+    render(<CandlestickChart {...props({ sub: "atr" as ChartView["sub"] })} />);
+    const last = setOption.mock.calls[setOption.mock.calls.length - 1];
+    const series = last?.[0]?.series as any[] | undefined;
+    expect(series?.some((s) => s.name === "ATR" && s.type === "line")).toBe(true);
+  });
 });

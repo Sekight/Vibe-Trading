@@ -41,6 +41,7 @@
 | V026 | 2026-08-15 | 期货止损成交价 tick 取整 | 引擎侧 _TICK 静态表（88 品种），止损成交价多单 floor/空单 ceil，消除不可成交小数价格 |
 | V027 | 2026-08-16 | 图表页保持行情可视时间窗口 | 调指标/切副图/切标签/加标的不再重置 K 线窗口；共享窗口机制 + ChartTab 保持挂载 |
 | V028 | 2026-08-16 | 图表页多标的共享图表设置 | 指标/副图/周期/窗口提升为 run 级共享，切标的全保持；换 run 显式重置不串 |
+| V029 | 2026-08-16 | 行情副图新增 ATR 指标 | 副图按钮新增 atr（14 周期 Wilder 平滑），纯前端增量、性能无感 |
 > 补录说明：V001-V009 为补录条目，依据 git 历史、HowToUse、全局复利与踩坑日志、`C:\Users\mumu\.codex\sessions` 会话记录回溯整理；当时未留痕的字段标“待补”。从下一条起，每次迭代收尾直接写正文。
 
 ## 模板
@@ -349,3 +350,10 @@
 - 影响/注意：ChartTab props 新增 chartView/onChartViewChange；多标的共用同一套指标设置（与窗口联动语义一致，比较口径统一）；datazoom 事件每次触发都会更新共享窗口并重渲染各图（setOption 效应依赖不含 window，不触发重建）。
 - 回归补充（2026-08-16）：用户验证功能正常后反馈行情窗口拖动每次只能移动固定小步（V028 引入的回归）。根因：窗口入 React 状态后，datazoom 事件 → setChartView → 重渲染 → ChartTab 的 `markers={...filter(...)}` 每次生成新数组 → CandlestickChart setOption 效应依赖含 markers → 效应重跑 → 用滞后的窗口值 setOption → 与拖动打架。修复：可视窗口移出 React 状态改 run 级 ref（拖动零重渲染，run 切换时置空），markers 在 ChartTab 用 useMemo 稳定引用；组件测试更新（datazoom 写 ref、setOption 随 ref 应用窗口）；前端全量 443 passed + build 通过；拖动平滑由用户目视验证。
 - 关联：计划 P-20260816-chart_window_preserve；commit `c907306`、`e4adcf1`、`ae5ad2c`；run 无（纯前端改动）。
+
+### V029 · 行情副图新增 ATR 指标（2026-08-16）
+- 一句话总结：WebUI 报告-图表行情页副图新增 ATR（14 周期，Wilder 平滑），与 vol/macd/rsi/kdj 同一排按钮切换，纯前端增量。
+- 为什么：用户希望在行情副图加入波动率类指标；ATR 与 RSI 同为 O(n) 递推、后端零参与，属低成本高复用的小改动（用户拍板不写计划文档）。
+- 关键细节：纯前端——后端 `charts.py` 只生成 PNG 静态图、digest 不参与行情指标，前端本就 `void indicators`（只用前端重算）。①`lib/indicators.ts` 新增 `calcATR(highs, lows, closes, period=14)`：TR = max(高−低, |高−前收|, |低−前收|)，首个 ATR = 前 14 个 TR 均值，此后 Wilder 平滑 `(ATR×(n−1)+TR)/n`，period 索引前返回 null（与 calcRSI 同风格）；②`lib/chartWindow.ts` 的 `Sub` 类型加 `"atr"`；③`CandlestickChart.tsx` 三处：indicatorCache 加 `atr`（与其余指标同批无条件预计算，每次数据变更仅多一次 O(n) 遍历，毫秒级无感）、渲染分支 `else if (sub === "atr")` 单折线（复用 RSI 写法）、副图按钮数组加 `"atr"`。i18n 无需改（副图按钮为硬编码小写 id + CSS uppercase）；tooltip 走通用分支自动显示 ATR 值；多标的共享 `ChartView.sub` 使 ATR 自动随切标的全图保持。
+- 验证：`npx vitest run` 前端全量 449 passed（新增 calcATR 单测 5 个 + CandlestickChart atr 渲染用例 1 个）、`tsc --noEmit` 通过。交互验证（点 atr 按钮看折线）由用户浏览器目视确认。
+- 关联：commit `eaa15b0`；run 无（纯前端改动）。

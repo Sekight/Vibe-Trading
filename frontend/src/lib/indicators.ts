@@ -68,6 +68,27 @@ export function calcMACD(data: number[], fast = 12, slow = 26, sig = 9) {
   return { dif, signal, histogram: hist };
 }
 
+export function calcATR(highs: number[], lows: number[], closes: number[], period = 14): N[] {
+  if (highs.length < period + 1) return highs.map(() => null);
+  const out: N[] = new Array(highs.length).fill(null);
+  let prevClose = closes[0];
+  let atr = 0;
+  for (let i = 1; i <= period; i++) {
+    const tr = Math.max(highs[i] - lows[i], Math.abs(highs[i] - prevClose), Math.abs(lows[i] - prevClose));
+    atr += tr;
+    prevClose = closes[i];
+  }
+  atr /= period;
+  out[period] = atr;
+  for (let i = period + 1; i < highs.length; i++) {
+    const tr = Math.max(highs[i] - lows[i], Math.abs(highs[i] - prevClose), Math.abs(lows[i] - prevClose));
+    atr = (atr * (period - 1) + tr) / period;
+    out[i] = atr;
+    prevClose = closes[i];
+  }
+  return out;
+}
+
 export function calcRSI(data: number[], period = 14): N[] {
   if (data.length < period + 1) return data.map(() => null);
   const out: N[] = new Array(data.length).fill(null);

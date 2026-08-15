@@ -1,4 +1,4 @@
-import { calcMA, calcEMA, calcBOLL, calcMACD, calcRSI, calcKDJ } from "../indicators";
+import { calcMA, calcEMA, calcBOLL, calcMACD, calcRSI, calcKDJ, calcATR } from "../indicators";
 
 describe("calcMA", () => {
   it("returns null for indices before period-1", () => {
@@ -153,6 +153,44 @@ describe("calcRSI", () => {
 
   it("returns all null when data length < period+1", () => {
     const result = calcRSI([1, 2, 3], 14);
+    expect(result.every((v) => v === null)).toBe(true);
+  });
+});
+
+describe("calcATR", () => {
+  const highs  = [11, 12, 13, 12, 14];
+  const lows   = [ 9, 10, 11, 10, 12];
+  const closes = [10, 11, 12, 11, 13];
+
+  it("returns null before period index", () => {
+    const result = calcATR(highs, lows, closes, 3);
+    for (let i = 0; i < 3; i++) expect(result[i]).toBeNull();
+  });
+
+  it("first ATR equals mean of first period TRs", () => {
+    const result = calcATR(highs, lows, closes, 3);
+    // TR[1..3] 都是 2 → ATR[3] = 2
+    expect(result[3]).toBeCloseTo(2, 10);
+  });
+
+  it("subsequent values use Wilder smoothing", () => {
+    const result = calcATR(highs, lows, closes, 3);
+    // TR[4] = max(2, |14−11|=3, |12−11|=1) = 3 → ATR[4] = (2*2 + 3)/3
+    expect(result[4]).toBeCloseTo(7 / 3, 10);
+  });
+
+  it("gap up: TR uses |high − prevClose|", () => {
+    const h = [10, 100, 102];
+    const l = [ 9,  90,  95];
+    const c = [ 9,  95, 100];
+    const result = calcATR(h, l, c, 2);
+    // TR[1] = max(10, |100−9|=91, |90−9|=81) = 91；TR[2] = 7
+    // ATR[2] = (91 + 7) / 2 = 49
+    expect(result[2]).toBeCloseTo(49, 10);
+  });
+
+  it("returns all null when data length < period+1", () => {
+    const result = calcATR([1, 2, 3], [1, 2, 3], [1, 2, 3], 14);
     expect(result.every((v) => v === null)).toBe(true);
   });
 });
