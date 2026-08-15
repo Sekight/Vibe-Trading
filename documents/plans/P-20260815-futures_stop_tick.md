@@ -7,28 +7,35 @@
 > 关联迭代：待填（收尾时填 V 号）
 > 关联：commit / run（收尾时补）
 
+## 项目调研
+
+- 2026-08-15，Codex 调研东财期货交易规则数据源（来源：`https://www.eastmoneyfutures.com/pages/service/jygz.html` 及其接口 `/emfApi/pzjy/getPZJYInfo`）：
+  - 页面是静态壳，数据由接口 `GET /emfApi/pzjy/getPZJYInfo` 动态返回，字段含 `minimumPrice`（最小变动价位）、`jydw`（交易单位）、`varietiesCN/EN`（品种名/代码）、`exchange`（交易所）与交割规则。
+  - 可稳定提取 **91 品种 / 6 交易所**全量规则；tick 文本可解析为数值（1元/吨→1、0.2点→0.2、0.02元/克→0.02、0.005元→0.005、1元/500千克→1）。
+  - 坑：接口编码不稳定，服务器节点间 GBK/UTF-8 混用（Content-Type 恒为 UTF-8），需 utf-8→gb18030→gbk 轮试 + 中文关键词校验的健壮解码。
+  - 与引擎现有 `_MULTIPLIER`（58 条硬编码 dict，兜底 10）交叉核对：覆盖 58/91，缺失 33（AO/BR/OP/LG/BZ/PS/PT/PD/EC 等新品），已覆盖乘数全部一致；JD 鸡蛋报价单位 500kg（5 吨/手 = 10 个报价单位），引擎 `jd=10` 正确。
+  - 该接口无手续费字段，补不了 `_COMMISSION`。
+  - 数据快照已存 `E:\zcodeWorkSpace\期货品种最小变动价位.json`（2026-08-15 抓取，91 条）。
+
 ## 需求目标
 
-- 做什么：让期货止损「设置价」与「成交价」符合品种最小变动价位（tick），消除 trades.csv / WebUI 中 rb 3143.7571 这类交易所不可成交的小数价格；或经讨论确认保持现状并明确口径。
-- 范围 / 边界：只处理期货止损价格精度；不动多空信号、仓位、手续费、乘数逻辑；A 股 / 现货（tick=0.01 或无 tick 概念）不受影响；若选方案 B 需新增各品种 tick 表，覆盖不全时有兜底。
-- 验收标准（一句话）：重跑 `rb_futures_5m_20250901_29_v1` 后，trades.csv 所有成交价均为 1 元整数，且盈亏 / 手续费按取整后价格口径一致；或（若选保持现状）文档明确口径并关闭本计划。
+- 做什么：让期货止损「成交价」符合品种最小变动价位（tick），消除 trades.csv / WebUI 中 rb 3143.7571 这类交易所不可成交的小数价格。引擎侧新增静态 `_TICK` 表，止损成交价按 tick 取整（多单 floor、空单 ceil）。
+- 范围 / 边界：只改 `china_futures.py`（新增 `_TICK` 表 + tick 查询）与 `base.py`（`_close_fill_price` 止损成交价取整）；策略与多空信号、仓位、手续费、乘数逻辑不动；A 股 / 现货引擎不受影响；`_TICK` 建全量 91 品种，未知品种兜底不取整。
+- 验收标准（一句话）：重跑 `rb_futures_5m_20250901_29_v1` 后 trades.csv 所有成交价均为 1 元整数（rb tick），且盈亏 / 手续费按取整后价格口径一致；新增 tick 取整单测（rb=1 / IF=0.2 / au=0.02 / 未知品种）覆盖。
 
 ## 实现方案
 
-（涉及文件/模块、关键设计；讨论中随时补充）
-
-- 现状：策略止损价 = `low_min − 0.3×ATR(14)`（多，`signal_engine.py:228`）/ `high_max + 0.3×ATR(14)`（空，`:245`），未按 tick 取整；引擎同 bar 止损成交价 = `min(open, stop)` / `max(open, stop)`（`base.py:647-668`），open 未跳穿时直接按小数 stop 成交；rb 最小变动价位 1 元。
-- 方案 A（倾向，改动最小）：策略侧对止损价按品种 tick 取整——多单 floor、空单 ceil（rb `_TICK=1`）。止损价同时用于风险手数（`risk_per_lot`），取整后手数计算口径一致，引擎零改动。策略当前是 rb 专属，加常量即可。
-- 方案 B：引擎侧新增各品种 tick 表（rb=1、IF=0.2、au=0.02、ag=1…），`_close_fill_price` 对止损成交价 round 到 tick。缺点是「设置价」与「成交价」不一致（手数仍按小数止损算，实际成交价取整后单笔风险与设计值有偏差）；需要维护整张 tick 表。
-- 方案 C：保持现状——止损按设定价成交是常见回测近似，价差经乘数换算盈亏正确（rb：16 手×10 吨×(−8.2429)=−1318.86），仅价格粒度不真实。
-- 待讨论点：取整方向（多单 floor/空单 ceil 偏保守，还是 round 就近）；方案 A 取整后手数可能 ±1，需复跑核对绩效变化。
+- `china_futures.py` 顶部新增 `_TICK: dict[str, float]`（与 `_MULTIPLIER` 同位置同风格，key 大小写混合按品种），全量 91 品种，值取自东财快照数值（`rb=1.0`、`IF=0.2`、`au=0.02`、`T=0.005`、`JD=1.0`…）；表上方注释注明数据源 URL、抓取日期与编码坑。
+- `china_futures.py` 实现 `get_price_tick(symbol)`：`_extract_product(symbol)` → `_TICK.get(product)`，返回 `Optional[float]`（未知品种 None）。
+- `base.py` `_close_fill_price`：止损分支（多单 `low ≤ stop`、空单 `high ≥ stop`）——若开盘未跳穿（多单 `open ≥ stop`、空单 `open ≤ stop`），成交价 = stop，再按 tick 取整：多单 `floor(stop / tick) * tick`、空单 `ceil(stop / tick) * tick`；若跳穿则按实际 open 成交（真实价格，不取整）；tick 为 None 不取整。取整钩子放 BaseEngine 默认返回 None、ChinaFuturesEngine 覆写，`_close_fill_price` 保持引擎无关。
+- 注意：止损「设置价」仍由策略输出（可能带小数），只有「成交价」在引擎侧取整；`risk_per_lot` 手数仍按策略原止损价计算（方案 B 固有取舍，见风险）。
 
 ## 执行清单
 
-1. 拍板方案 A / B / C，讨论记录收口。
-2. 方案 A：`signal_engine.py` 止损价按 `_TICK` 取整（多单 floor、空单 ceil）；重跑 rb run 核对价格全整数、盈亏/手续费口径一致。
-3. 方案 B：`china_futures.py` 新增 `_TICK` 表 + `base.py` 成交价取整 + 各 tick 品种单测（IF 0.2、au 0.02 档）。
-4. 方案 C：文档记录口径，计划转已废弃。
+1. `china_futures.py`：新增 `_TICK` 表（全量 91，对照快照逐条核对）与 `get_price_tick()`。
+2. `base.py`：`_close_fill_price` 止损成交价按 tick floor/ceil 取整（含跳穿分支区分、tick=None 不取整）。
+3. 单测：tick 取整（rb=1 多单 floor/空单 ceil、IF=0.2、au=0.02、未知品种不取整、跳穿按 open）+ 期货全周期回归（trades.csv 价格整数、total_commission 口径）。
+4. 重跑 `rb_futures_5m_20250901_29_v1` 与 A 股日线 run `20260808_032625_05_e9f25e`，核对绩效变化。
 5. 收尾：ITERATION_LOG、计划状态、README 索引。
 
 ## 开工前核对
@@ -43,11 +50,10 @@
 
 ## 验证
 
-（有内容才写：测试命令、run_id、预期结果）
-
-- 重跑 `rb_futures_5m_20250901_29_v1`：trades.csv 所有价格均为整数；原 3143.7571 / 3169.2857 两条止损行变为 3143 / 3170 口径；pnl = 手数×乘数×整数价差，与 equity.csv 期末权益差额核对。
-- 方案 A：`pytest tests/test_china_futures_engine.py tests/test_base_engine.py tests/test_metrics.py -q` 回归。
-- 方案 B：另加 tick 取整单测（IF 0.2、au 0.02 档）。
+- 单测：`pytest tests/test_china_futures_engine.py tests/test_base_engine.py tests/test_metrics.py tests/test_engine_execution_modes.py -q`。
+  - 新增用例：`_close_fill_price` 多单 floor / 空单 ceil 到 tick（rb=1、IF=0.2、au=0.02）；跳穿按 open 不取整；未知品种不取整；全周期后 trades.csv 价格全整数。
+- 重跑 `rb_futures_5m_20250901_29_v1`：原 3143.7571 / 3169.2857 两条止损行变为 3143 / 3170；trades.csv 所有价格整数；pnl = 手数×乘数×整数价差，与 equity.csv 期末权益差额核对；total_commission 随取整后价格核对。
+- 重跑 A 股日线 run `20260808_032625_05_e9f25e`：确认不受影响（A 股不经过期货 `_TICK`）。
 
 ## 讨论记录
 
@@ -58,9 +64,11 @@
 - 2026-08-15，Codex 提出方案 A（策略侧 tick 取整，推荐）/ B（引擎侧 tick 表）/ C（保持现状）；用户暂未拍板，先建计划文档待考虑。
 - 2026-08-15，用户提议：解析东财期货交易规则接口 `/emfApi/pzjy/getPZJYInfo` 后维护成**静态硬编码表**（代码内 map，如 `_TICK`），数据源在计划文档与代码注释中说明；该数据极少变化，即使变化也不影响回测引擎。
 - 2026-08-15，Codex 调研：该接口可稳定提取 **91 品种**最小变动价位+交易单位（注意：接口编码不稳定，GBK/UTF-8 混用，需 utf-8→gb18030→gbk 轮试+中文校验的健壮解码）；与引擎现有 `_MULTIPLIER`（58 条硬编码 dict，兜底 10）交叉核对，覆盖 58/91、缺失 33（AO/BR/OP/LG/BZ/PS/PT/PD/EC 等新品），已覆盖乘数全部一致（JD 鸡蛋报价单位 500kg，5 吨/手=10 个报价单位，引擎 jd=10 正确）；现有四张表（_MULTIPLIER/_COMMISSION/_MARGIN_RATE/_PRICE_LIMIT）均为硬编码 dict 带默认兜底，`_TICK` 同构可行；该接口无手续费字段，补不了 _COMMISSION。
+- 2026-08-15，用户拍板：①方案 B（引擎侧 `_TICK` 表）；②建全量 91 品种静态表，未知品种兜底不取整；③取整方向保守——多单 floor、空单 ceil；④数据快照 `E:\zcodeWorkSpace\期货品种最小变动价位.json` 作建表对照。
 
 ## 风险 / 注意
 
-- ATR 小数止损价同时参与 `risk_per_lot` 手数计算，方案 A 取整后手数可能 ±1，绩效需复跑核对。
-- 方案 B 的 tick 表覆盖不全时新品种会漏取整，需默认值兜底；且成交价取整后单笔风险与设计值有偏差。
-- 引擎只存乘数表没有 tick 表；tick 属品种语义，方案 A 让策略自管最内聚。
+- 止损「设置价」仍由策略输出（带小数），仅「成交价」取整；`risk_per_lot` 手数仍按策略原止损价计算，成交价取整后单笔风险与设计值有细微偏差（方案 B 固有取舍，绩效以复跑为准）。
+- `_TICK` 为静态表，新品种上市或规则调整后会过期；回测引擎对 tick 精度不敏感，过期仅影响取整粒度，不影响盈亏正确性。数据源与快照已留档，需要时重新抓取更新。
+- 取整用 `floor(x / tick) * tick` / `ceil(x / tick) * tick` 实现，避免浮点误差（如 au=0.02、T=0.005、TL=0.01）。
+- 引擎当前只覆盖 58/91 乘数；本次不扩 `_MULTIPLIER`（数据源无手续费字段，避免乘数全、费率缺的不对称），留作后续。
