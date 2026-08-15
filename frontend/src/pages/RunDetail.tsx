@@ -385,7 +385,8 @@ export function RunDetail() {
 
       <div className="flex-1 overflow-auto">
         <ErrorBoundary>
-          {tab === "chart" && (
+          {/* ChartTab 保持挂载：切换标签不卸载图表，保留副图/指标/周期与可视窗口；非图表标签时隐藏 */}
+          <div className={tab === "chart" ? "" : "hidden"}>
             <ChartTab
               run={run}
               chartPickerSymbol={chartPickerSymbol}
@@ -401,7 +402,7 @@ export function RunDetail() {
               onLoadAll={handleLoadAllChartSymbols}
               onCancelLoadAll={handleCancelLoadAllCharts}
             />
-          )}
+          </div>
           {tab === "analysisCharts" && runId && <AnalysisChartsTab runId={runId} />}
           {tab === "analysis" && runId && <AnalysisTab runId={runId} />}
           {tab === "trades" && <TradesTab run={run} />}

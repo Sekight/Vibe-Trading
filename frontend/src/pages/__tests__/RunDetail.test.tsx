@@ -195,6 +195,28 @@ describe("RunDetail page", () => {
     expect(screen.getByText("0.8")).toBeInTheDocument();
   });
 
+  it("keeps ChartTab mounted when switching tabs (window/state preserved)", async () => {
+    apiMock.getRun.mockResolvedValue({
+      status: "success",
+      run_id: "keepmount",
+      prompt: "Keep mount run",
+    });
+    apiMock.getRunCode.mockResolvedValue({});
+
+    renderRunDetail("/runs/keepmount");
+
+    await screen.findByText("Keep mount run");
+    // ChartTab 无数据占位（此前切走标签会卸载该占位）
+    expect(screen.getByText("No chart data available")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Trades" }));
+    // ChartTab 保持挂载 → 占位仍在 DOM（被 CSS 隐藏）
+    expect(screen.getByText("No chart data available")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Chart" }));
+    expect(screen.getByText("No chart data available")).toBeInTheDocument();
+  });
+
   it("pads and scroll-wraps run-card key/value and artifact tables", async () => {
     apiMock.getRun.mockResolvedValue({
       status: "success",

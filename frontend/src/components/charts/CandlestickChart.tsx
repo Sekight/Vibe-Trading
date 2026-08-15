@@ -10,6 +10,12 @@ import { pickCandleOhlc } from "@/lib/candleOhlc";
 import { tradeMarkerStyle } from "@/lib/tradeActions";
 import { mergeBarTradeMarks } from "@/lib/tradeMarkers";
 import { availablePeriods, periodKeyOf, periodKeyOfDate, resampleBars, tradeDateOfTime, type KlinePeriod } from "@/lib/resample";
+import { resolveZoom, type ZoomWindow } from "@/lib/chartWindow";
+
+// 多标的共享可视窗口：任一图缩放时记录（datazoom 事件），新图挂载时采用；
+// 最后一张图卸载时清空 —— 换 run 会卸载全部图表，共享窗口随之归零，run 隔离天然成立。
+let sharedWindow: ZoomWindow | null = null;
+let liveChartCount = 0;
 import { echarts, CHART_GROUP, connectCharts } from "@/lib/echarts";
 import { useThemeDark } from "@/lib/theme-store";
 
@@ -27,7 +33,6 @@ const OVERLAY_OPTIONS: { id: Overlay; label: string; group: string }[] = [
 ];
 
 const OVERLAY_COLORS = ["#f59e0b", "#8b5cf6", "#3b82f6", "#ec4899", "#10b981", "#f97316", "#6366f1"];
-const DEFAULT_VISIBLE_BARS = 250;
 
 interface Props {
   data: PriceBar[];
@@ -96,6 +101,16 @@ export function CandlestickChart({ data, markers, indicators, height = 500, base
     connectCharts();
     chartRef.current = chart;
 
+    // 用户缩放/滑动时记录当前可视窗口，供同组新图加入与 setOption 回写沿用。
+    const onZoom = (params: any) => {
+      const item = params?.batch && params.batch.length > 0 ? params.batch[0] : params;
+      if (item && typeof item.start === "number" && typeof item.end === "number") {
+        sharedWindow = { start: item.start, end: item.end };
+      }
+    };
+    chart.on("datazoom", onZoom);
+    liveChartCount += 1;
+
     let resizeFrame: number | null = null;
     const ro = new ResizeObserver(() => {
       if (resizeFrame !== null) cancelAnimationFrame(resizeFrame);
@@ -108,8 +123,11 @@ export function CandlestickChart({ data, markers, indicators, height = 500, base
     return () => {
       ro.disconnect();
       if (resizeFrame !== null) cancelAnimationFrame(resizeFrame);
+      chart.off("datazoom", onZoom);
       chart.dispose();
       chartRef.current = null;
+      liveChartCount -= 1;
+      if (liveChartCount <= 0) sharedWindow = null;
     };
   }, [visibleData.length === 0, dark]);
 
@@ -233,7 +251,7 @@ export function CandlestickChart({ data, markers, indicators, height = 500, base
       legendNames.push("%K", "%D", "%J");
     }
 
-    const defaultStart = visibleData.length <= DEFAULT_VISIBLE_BARS ? 0 : Math.max(0, 100 - (DEFAULT_VISIBLE_BARS / visibleData.length) * 100);
+    const zoom = resolveZoom(sharedWindow, visibleData.length);
 
     chart.setOption({
       backgroundColor: "transparent",
@@ -281,7 +299,7 @@ export function CandlestickChart({ data, markers, indicators, height = 500, base
         subYAxis,
       ],
       dataZoom: [
-        { type: "inside", xAxisIndex: [0, 1], start: defaultStart, end: 100 },
+        { type: "inside", xAxisIndex: [0, 1], start: zoom.start, end: zoom.end },
         { type: "slider", xAxisIndex: [0, 1], bottom: 4, height: 20, labelFormatter: (val: string) => val },
       ],
       series: [
