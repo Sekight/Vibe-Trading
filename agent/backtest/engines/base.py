@@ -658,14 +658,28 @@ class BaseEngine(ABC):
             pos = self.positions.get(symbol)
             direction = pos.direction if pos is not None else 1
             if direction == 1 and low is not None and pd.notna(low) and float(low) <= stop:
-                if open_px is not None and pd.notna(open_px):
-                    return min(float(open_px), stop)
-                return stop
+                # 未跳穿（开盘 ≥ 止损）按止损价成交；跳空低开穿破则按实际开盘价。
+                if open_px is not None and pd.notna(open_px) and float(open_px) < stop:
+                    return float(open_px)
+                return self._round_stop_fill(stop, direction, symbol)
             if direction == -1 and high is not None and pd.notna(high) and float(high) >= stop:
-                if open_px is not None and pd.notna(open_px):
-                    return max(float(open_px), stop)
-                return stop
+                # 未跳穿（开盘 ≤ 止损）按止损价成交；跳空高开穿破则按实际开盘价。
+                if open_px is not None and pd.notna(open_px) and float(open_px) > stop:
+                    return float(open_px)
+                return self._round_stop_fill(stop, direction, symbol)
         return float(bar.get("close", bar.get("open", 0)))
+
+    def _round_stop_fill(self, price: float, direction: int, symbol: str) -> float:
+        """止损成交价按品种最小变动价位取整：多单 floor、空单 ceil（保守）。
+
+        跳空穿破时按实际开盘价成交，不走这里；未知品种（tick=None）不取整。
+        """
+        tick = self.get_price_tick(symbol)
+        if tick is None or tick <= 0:
+            return float(price)
+        if direction == 1:
+            return math.floor(price / tick) * tick
+        return math.ceil(price / tick) * tick
 
     def _stop_price(self, ts: pd.Timestamp, symbol: str) -> Optional[float]:
         """Return the strategy-provided stop price at ``ts`` or None."""
@@ -676,6 +690,14 @@ class BaseEngine(ABC):
             return None
         val = self._stop_arr[self._bar_idx, col]
         return None if val is None or np.isnan(val) else float(val)
+
+    def get_price_tick(self, symbol: str) -> Optional[float]:
+        """Minimum price tick for the instrument; None = unknown (no rounding).
+
+        Futures engines override with their product table; equity engines
+        inherit the no-rounding default.
+        """
+        return None
 
     # ── PnL / margin calculation hooks ──
     # Override in FuturesBaseEngine to inject contract multiplier.

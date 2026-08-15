@@ -375,3 +375,58 @@ def test_full_cycle_rb_commission_flows_to_metrics_and_trades_csv(tmp_path: Path
     )
     rows = pd.read_csv(tmp_path / "artifacts" / "trades.csv")
     assert rows["commission"].sum() == pytest.approx(t.commission)
+
+
+# ---------------------------------------------------------------------------
+# Minimum price tick: lookup + stop-fill rounding
+# ---------------------------------------------------------------------------
+
+
+class TestPriceTick:
+    def test_tick_lookup(self) -> None:
+        engine = _make_engine(codes=["rb2410.SHFE"])
+        assert engine.get_price_tick("rb2410.SHFE") == 1.0
+        assert engine.get_price_tick("IF2406.CFFEX") == 0.2
+        assert engine.get_price_tick("au2412") == 0.02
+        assert engine.get_price_tick("T2406.CFFEX") == 0.005
+        assert engine.get_price_tick("UNKNOWN") is None
+
+    def test_round_stop_fill_long_floor_short_ceil(self) -> None:
+        engine = _make_engine(codes=["rb2410.SHFE"])
+        # 多单 floor、空单 ceil 到 1 元
+        assert engine._round_stop_fill(3143.7571, 1, "rb2410.SHFE") == 3143.0
+        assert engine._round_stop_fill(3169.2857, -1, "rb2410.SHFE") == 3170.0
+        # 小数档 tick：IF 0.2、au 0.02
+        assert engine._round_stop_fill(3456.15, 1, "IF2406.CFFEX") == 3456.0
+        assert engine._round_stop_fill(612.345, 1, "au2412") == pytest.approx(612.34)
+        # 未知品种不取整
+        assert engine._round_stop_fill(100.5, 1, "XXX") == 100.5
+
+    def test_close_fill_price_long_floor(self) -> None:
+        engine = _make_engine(codes=["rb2410.SHFE"])
+        engine._same_bar = True
+        engine.positions["rb2410.SHFE"] = Position(
+            "rb2410.SHFE", 1, 3152.0, pd.Timestamp("2025-09-17"), 16.0
+        )
+        engine._stop_price = lambda ts, symbol: 3143.7571  # type: ignore[method-assign]
+        bar = pd.Series({"open": 3155.0, "high": 3160.0, "low": 3140.0, "close": 3145.0})
+        assert engine._close_fill_price(
+            bar, pd.Timestamp("2025-09-17 10:05:00"), "rb2410.SHFE"
+        ) == 3143.0
+        # 跳空低开穿破止损：按实际开盘价成交，不取整
+        bar_gap = pd.Series({"open": 3140.0, "high": 3160.0, "low": 3135.0, "close": 3145.0})
+        assert engine._close_fill_price(
+            bar_gap, pd.Timestamp("2025-09-17 10:05:00"), "rb2410.SHFE"
+        ) == 3140.0
+
+    def test_close_fill_price_short_ceil(self) -> None:
+        engine = _make_engine(codes=["rb2410.SHFE"])
+        engine._same_bar = True
+        engine.positions["rb2410.SHFE"] = Position(
+            "rb2410.SHFE", -1, 3160.0, pd.Timestamp("2025-09-19"), 15.0
+        )
+        engine._stop_price = lambda ts, symbol: 3169.2857  # type: ignore[method-assign]
+        bar = pd.Series({"open": 3165.0, "high": 3175.0, "low": 3160.0, "close": 3170.0})
+        assert engine._close_fill_price(
+            bar, pd.Timestamp("2025-09-19 13:50:00"), "rb2410.SHFE"
+        ) == 3170.0

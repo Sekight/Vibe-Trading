@@ -47,6 +47,36 @@ _MULTIPLIER: dict[str, int] = {
     "si": 5, "lc": 1,
 }
 
+# ── Minimum price tick (报价单位计) ──
+# 静态表，随交易所规则调整、极少变化；数据源：东财期货「品种及交易规则」
+# https://www.eastmoneyfutures.com/pages/service/jygz.html 接口 GET /emfApi/pzjy/getPZJYInfo
+# （2026-08-15 抓取，88 品种；月均价合约 L_F/PP_F/V_F 未收录；该接口编码不稳定，GBK/UTF-8 混用）。
+# 键大小写与 _MULTIPLIER 一致；止损成交价按此取整（多单 floor、空单 ceil），未知品种不取整。
+
+_TICK: dict[str, float] = {
+    # 上海期货交易所
+    "ad": 5, "ag": 1, "al": 5, "ao": 1, "au": 0.02, "br": 5, "bu": 1,
+    "cu": 10, "fu": 1, "hc": 1, "ni": 10, "op": 2, "pb": 5, "rb": 1,
+    "ru": 5, "sn": 10, "sp": 2, "ss": 5, "wr": 1, "zn": 5,
+    # 中金所
+    "IC": 0.2, "IF": 0.2, "IH": 0.2, "IM": 0.2,
+    "T": 0.005, "TF": 0.005, "TL": 0.01, "TS": 0.002,
+    # 大连商品交易所
+    "a": 1, "b": 1, "bb": 0.05, "bz": 1, "c": 1, "cs": 1, "eb": 1,
+    "eg": 1, "fb": 0.5, "i": 0.5, "j": 0.5, "jd": 1, "jm": 0.5,
+    "l": 1, "lg": 0.5, "lh": 5, "m": 1, "p": 1, "pg": 1, "pp": 1,
+    "rr": 1, "v": 1, "y": 1,
+    # 郑州商品交易所
+    "AP": 1, "CF": 5, "CJ": 5, "CY": 5, "FG": 1, "JR": 1, "LR": 1,
+    "MA": 1, "OI": 1, "PF": 2, "PK": 2, "PL": 1, "PM": 1, "PR": 2,
+    "PX": 2, "RI": 1, "RM": 1, "RS": 1, "SA": 1, "SF": 2, "SH": 1,
+    "SM": 2, "SR": 1, "TA": 2, "UR": 1, "WH": 1, "ZC": 0.2,
+    # 上海国际能源交易中心
+    "bc": 10, "ec": 0.5, "lu": 1, "nr": 5, "sc": 0.1,
+    # 广州期货交易所
+    "lc": 20, "pd": 0.05, "ps": 5, "pt": 0.05, "si": 5,
+}
+
 # ── Margin rate (exchange minimum) ──
 
 _MARGIN_RATE: dict[str, float] = {
@@ -233,6 +263,11 @@ class ChinaFuturesEngine(FuturesBaseEngine):
         """Look up contract multiplier from product code."""
         product = _extract_product(symbol)
         return float(_MULTIPLIER.get(product, 10))
+
+    def get_price_tick(self, symbol: str) -> Optional[float]:
+        """Minimum price tick for the product; None when unknown (no rounding)."""
+        product = _extract_product(symbol)
+        return _TICK.get(product)
 
     def get_margin_rate(self, symbol: str) -> float:
         """Look up exchange margin rate for a product.
