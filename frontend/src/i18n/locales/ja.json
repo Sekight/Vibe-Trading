@@ -624,6 +624,7 @@
     "sideSummary": "買い {{buy}} · 売り {{sell}}",
     "totalPnl": "累計損益",
     "pnl": "損益",
+    "commission": "手数料",
     "returnPct": "リターン",
     "holdingDays": "保有日数",
     "holdingBars": "保有バー数",

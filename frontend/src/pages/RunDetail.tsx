@@ -769,6 +769,7 @@ function TradesTab({ run }: { run: RunData }) {
   const kindOf = (tr: Record<string, string>): TradeKind | null => tradeActionInfo(tr)?.kind ?? null;
   const symbols = [...new Set(trades.map((tr) => tr.code).filter(Boolean))];
   const hasPnl = trades.some((tr) => parseTradeNumber(tr.pnl) != null);
+  const hasCommission = trades.some((tr) => (tr.commission ?? "") !== "");
   const hasReturnPct = trades.some((tr) => parseTradeNumber(tr.return_pct) != null);
   const hasHoldingDays = trades.some((tr) => (tr.holding_days ?? "") !== "");
   const hasHoldingBars = trades.some((tr) => (tr.holding_bars ?? "") !== "");
@@ -858,6 +859,7 @@ function TradesTab({ run }: { run: RunData }) {
               {hasLots && <th className="py-2 pr-4 text-right">{i18n.t("runDetail.lots")}</th>}
               {hasWeight && <th className="py-2 pr-4 text-right">{i18n.t("runDetail.positionWeight")}</th>}
               {hasPnl && <th className="py-2 pr-4 text-right">{i18n.t("runDetail.pnl")}</th>}
+              {hasCommission && <th className="py-2 pr-4 text-right">{i18n.t("runDetail.commission")}</th>}
               {hasReturnPct && <th className="py-2 pr-4 text-right">{i18n.t("runDetail.returnPct")}</th>}
               {hasHoldingDays && <th className="py-2 pr-4 text-right">{i18n.t("runDetail.holdingDays")}</th>}
               {hasHoldingBars && <th className="py-2 pr-4 text-right">{i18n.t("runDetail.holdingBars")}</th>}
@@ -906,6 +908,14 @@ function TradesTab({ run }: { run: RunData }) {
                   {hasPnl && (
                     <td className={cn("py-2 pr-4 text-right font-mono tabular-nums", signedNumberClass(pnl))}>
                       {pnl != null ? formatSigned(pnl) : "—"}
+                    </td>
+                  )}
+                  {hasCommission && (
+                    <td className="py-2 pr-4 text-right font-mono tabular-nums text-muted-foreground">
+                      {(() => {
+                        const commission = parseTradeNumber(tr.commission);
+                        return commission != null ? commission.toLocaleString(undefined, { maximumFractionDigits: 2 }) : "—";
+                      })()}
                     </td>
                   )}
                   {hasReturnPct && (

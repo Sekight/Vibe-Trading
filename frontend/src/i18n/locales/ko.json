@@ -624,6 +624,7 @@
     "sideSummary": "매수 {{buy}} · 매도 {{sell}}",
     "totalPnl": "총 손익",
     "pnl": "손익",
+    "commission": "수수료",
     "returnPct": "수익률",
     "holdingDays": "보유일수",
     "holdingBars": "보유 bar 수",

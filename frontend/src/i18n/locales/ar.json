@@ -624,6 +624,7 @@
     "sideSummary": "شراء {{buy}} · بيع {{sell}}",
     "totalPnl": "إجمالي الربح/الخسارة",
     "pnl": "الربح/الخسارة",
+    "commission": "العمولة",
     "returnPct": "العائد",
     "holdingDays": "أيام الاحتفاظ",
     "holdingBars": "أشرطة الاحتفاظ",

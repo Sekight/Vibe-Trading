@@ -624,6 +624,7 @@
     "sideSummary": "买 {{buy}} · 卖 {{sell}}",
     "totalPnl": "总盈亏",
     "pnl": "盈亏",
+    "commission": "手续费",
     "returnPct": "收益率",
     "holdingDays": "持有天数",
     "holdingBars": "持仓bar数",

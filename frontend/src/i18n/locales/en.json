@@ -629,6 +629,7 @@
     "sideSummary": "Buy {{buy}} · Sell {{sell}}",
     "totalPnl": "Total P&L",
     "pnl": "P&L",
+    "commission": "Commission",
     "returnPct": "Return",
     "holdingDays": "Held (days)",
     "holdingBars": "Held (bars)",

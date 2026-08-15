@@ -161,6 +161,33 @@ describe("RunDetail page", () => {
     expect(screen.getByRole("columnheader", { name: "Time" })).toHaveClass("ps-4");
   });
 
+  it("renders the commission column in the trades table", async () => {
+    apiMock.getRun.mockResolvedValue({
+      status: "success",
+      run_id: "commission",
+      prompt: "Commission run",
+      trade_log: [{
+        time: "2026-07-29",
+        code: "AAPL",
+        side: "BUY",
+        price: "200",
+        qty: "2",
+        pnl: "5",
+        commission: "0.8",
+        reason: "signal",
+      }],
+    });
+    apiMock.getRunCode.mockResolvedValue({});
+
+    renderRunDetail("/runs/commission");
+
+    await screen.findByText("Commission run");
+    fireEvent.click(screen.getByRole("tab", { name: "Trades" }));
+
+    expect(screen.getByRole("columnheader", { name: "Commission" })).toBeInTheDocument();
+    expect(screen.getByText("0.8")).toBeInTheDocument();
+  });
+
   it("pads and scroll-wraps run-card key/value and artifact tables", async () => {
     apiMock.getRun.mockResolvedValue({
       status: "success",
