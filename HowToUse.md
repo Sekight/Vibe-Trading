@@ -1,6 +1,6 @@
 # Vibe-Trading 本地使用手册（HowToUse）
 
-> 适用环境：Windows 11 + Python 3.13 + 源码目录 `<repo_root>`
+> 适用环境：Windows 11 / macOS + Python 3.13 + 源码目录 `<repo_root>`
 > 当前版本：vibe-trading-ai 0.1.13（editable 源码安装）
 > 官方参考：`README.md` / `README_zh.md` / `wiki/` / `vibe-trading --help`
 
@@ -50,7 +50,16 @@ cd /d <repo_root>
 .\.venv\Scripts\activate.bat
 ```
 
-### 2.3 不激活
+### 2.3 macOS（zsh / bash）
+
+```bash
+cd <repo_root>
+source .venv/bin/activate
+```
+
+macOS 的 `.venv` 需在本机重建，Windows 的 `.venv` 不能跨平台复用：先 `python3 -m venv .venv`，激活后 `pip install -e .`，再 `vibe-trading setup` 构建前端。
+
+### 2.4 不激活
 
 直接用完整路径，不用设置执行策略：
 
@@ -58,7 +67,12 @@ cd /d <repo_root>
 <repo_root>\.venv\Scripts\vibe-trading.exe --version
 ```
 
-### 2.4 验证
+```bash
+# macOS 不激活时
+<repo_root>/.venv/bin/vibe-trading --version
+```
+
+### 2.5 验证
 
 ```powershell
 vibe-trading --version
