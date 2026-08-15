@@ -1,9 +1,28 @@
-/** 图表可视窗口的纯计算逻辑（默认窗口 / 沿用当前窗口），与 ECharts 解耦便于单测。 */
+/** 图表可视窗口与图表设置的纯计算/类型定义（多标的共享），与 ECharts 解耦便于单测。 */
+import type { KlinePeriod } from "./resample";
 
 export interface ZoomWindow {
   start: number;
   end: number;
 }
+
+export type Sub = "vol" | "macd" | "rsi" | "kdj";
+export type Overlay = "ma5" | "ma10" | "ma20" | "ma60" | "ema12" | "ema26" | "boll";
+
+/** 多标的共用的图表设置与可视窗口（RunDetail 级共享状态）。 */
+export interface ChartView {
+  sub: Sub;
+  overlays: Overlay[];
+  period: KlinePeriod | null;
+  window: ZoomWindow | null;
+}
+
+export const DEFAULT_CHART_VIEW: ChartView = {
+  sub: "vol",
+  overlays: ["ma5", "ma20"],
+  period: null,
+  window: null,
+};
 
 /** 默认显示最后 250 根 K 线。 */
 export const DEFAULT_VISIBLE_BARS = 250;

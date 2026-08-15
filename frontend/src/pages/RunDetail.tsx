@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { DEFAULT_CHART_VIEW, type ChartView } from "@/lib/chartWindow";
 import { api, type BacktestMetrics, type RunAnalysis, type RunAnalysisCharts, type RunCard, type RunData, type ValidationData } from "@/lib/api";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
@@ -121,6 +122,7 @@ export function RunDetail() {
   const [run, setRun] = useState<RunData | null>(null);
   const [code, setCode] = useState<Record<string, string>>({});
   const [tab, setTab] = useState<Tab>("chart");
+  const [chartView, setChartView] = useState<ChartView>(DEFAULT_CHART_VIEW);
   const [loading, setLoading] = useState(true);
   const [selectedSymbol, setSelectedSymbol] = useState("");
   const [chartPickerSymbol, setChartPickerSymbol] = useState("");
@@ -151,6 +153,7 @@ export function RunDetail() {
     setRun(null);
     setCode({});
     setTab("chart");
+    setChartView(DEFAULT_CHART_VIEW);
     setLoading(true);
     setSelectedSymbol("");
     setChartPickerSymbol("");
@@ -395,6 +398,8 @@ export function RunDetail() {
               loadingSymbols={chartLoadingSymbols}
               bulkLoading={bulkChartLoading}
               bulkProgress={bulkChartProgress}
+              chartView={chartView}
+              onChartViewChange={setChartView}
               onPickSymbol={setChartPickerSymbol}
               onAddSymbol={handleAddChartSymbol}
               onCurrentOnly={handleCurrentChartOnly}
@@ -576,6 +581,8 @@ function ChartTab({
   loadingSymbols,
   bulkLoading,
   bulkProgress,
+  chartView,
+  onChartViewChange,
   onPickSymbol,
   onAddSymbol,
   onCurrentOnly,
@@ -590,6 +597,8 @@ function ChartTab({
   loadingSymbols: Record<string, boolean>;
   bulkLoading: boolean;
   bulkProgress: ChartLoadProgress;
+  chartView: ChartView;
+  onChartViewChange: (patch: React.SetStateAction<ChartView>) => void;
   onPickSymbol: (symbol: string) => void;
   onAddSymbol: (symbol: string) => void | Promise<void>;
   onCurrentOnly: (symbol: string) => void | Promise<void>;
@@ -697,7 +706,7 @@ function ChartTab({
       {entries.map(([sym, bars]) => (
         <div key={sym}>
           <h3 className="text-sm font-semibold text-muted-foreground mb-1">{sym}</h3>
-          <CandlestickChart data={bars} markers={chartCache[sym]?.trade_markers?.filter(m => m.code === sym)} indicators={chartCache[sym]?.indicator_series?.[sym]} height={500} baseInterval={String((run.run_card?.backtest as Record<string, unknown> | undefined)?.interval ?? "")} />
+          <CandlestickChart data={bars} markers={chartCache[sym]?.trade_markers?.filter(m => m.code === sym)} indicators={chartCache[sym]?.indicator_series?.[sym]} height={500} baseInterval={String((run.run_card?.backtest as Record<string, unknown> | undefined)?.interval ?? "")} sub={chartView.sub} overlays={chartView.overlays} period={chartView.period} window={chartView.window} onViewChange={(patch) => onChartViewChange((prev) => ({ ...prev, ...patch }))} />
         </div>
       ))}
       {hasEquity && (

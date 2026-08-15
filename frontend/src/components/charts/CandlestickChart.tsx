@@ -10,17 +10,9 @@ import { pickCandleOhlc } from "@/lib/candleOhlc";
 import { tradeMarkerStyle } from "@/lib/tradeActions";
 import { mergeBarTradeMarks } from "@/lib/tradeMarkers";
 import { availablePeriods, periodKeyOf, periodKeyOfDate, resampleBars, tradeDateOfTime, type KlinePeriod } from "@/lib/resample";
-import { resolveZoom, type ZoomWindow } from "@/lib/chartWindow";
-
-// 多标的共享可视窗口：任一图缩放时记录（datazoom 事件），新图挂载时采用；
-// 最后一张图卸载时清空 —— 换 run 会卸载全部图表，共享窗口随之归零，run 隔离天然成立。
-let sharedWindow: ZoomWindow | null = null;
-let liveChartCount = 0;
+import { resolveZoom, type ChartView, type Overlay, type Sub, type ZoomWindow } from "@/lib/chartWindow";
 import { echarts, CHART_GROUP, connectCharts } from "@/lib/echarts";
 import { useThemeDark } from "@/lib/theme-store";
-
-type Sub = "vol" | "macd" | "rsi" | "kdj";
-type Overlay = "ma5" | "ma10" | "ma20" | "ma60" | "ema12" | "ema26" | "boll";
 
 const OVERLAY_OPTIONS: { id: Overlay; label: string; group: string }[] = [
   { id: "ma5", label: "MA5", group: "MA" },
@@ -40,36 +32,34 @@ interface Props {
   indicators?: Record<string, IndicatorPoint[]>;
   height?: number;
   baseInterval?: string;
+  sub: Sub;
+  overlays: Overlay[];
+  period: KlinePeriod | null;
+  window: ZoomWindow | null;
+  onViewChange: (patch: Partial<ChartView>) => void;
 }
 
-export function CandlestickChart({ data, markers, indicators, height = 500, baseInterval }: Props) {
+export function CandlestickChart({ data, markers, indicators, height = 500, baseInterval, sub, overlays, period, window: zoomWindow, onViewChange }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   void indicators; // 周期切换后只显示前端重算指标，隐藏后端 indicator_series。
   const chartRef = useRef<ReturnType<typeof echarts.init> | null>(null);
-  const [sub, setSub] = useState<Sub>("vol");
-  const [overlays, setOverlays] = useState<Set<Overlay>>(new Set(["ma5", "ma20"]));
   const [showMenu, setShowMenu] = useState(false);
   const dark = useThemeDark();
 
   const periods = useMemo(() => availablePeriods(baseInterval), [baseInterval]);
-  const [period, setPeriod] = useState<KlinePeriod>("5m");
-  useEffect(() => {
-    setPeriod(periods[0] ?? "5m");
-  }, [periods]);
+  const effectivePeriod = period ?? periods[0] ?? "5m";
+  const overlaySet = useMemo(() => new Set(overlays), [overlays]);
 
   const toggleOverlay = useCallback((id: Overlay) => {
-    setOverlays(prev => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
-      return next;
-    });
-  }, []);
+    const next = overlaySet.has(id) ? overlays.filter((o) => o !== id) : [...overlays, id];
+    onViewChange({ overlays: next });
+  }, [overlays, overlaySet, onViewChange]);
 
   // 基础周期直接使用原始 bar；切换周期时前端按时间戳/trade_date 聚合。
   const visibleData = useMemo(() => {
-    if (!period || period.toLowerCase() === String(baseInterval || "").toLowerCase()) return data;
-    return resampleBars(data, period);
-  }, [data, period, baseInterval]);
+    if (effectivePeriod.toLowerCase() === String(baseInterval || "").toLowerCase()) return data;
+    return resampleBars(data, effectivePeriod);
+  }, [data, effectivePeriod, baseInterval]);
 
   const baseData = useMemo(() => {
     const dates = visibleData.map(d => d.time);
@@ -101,15 +91,14 @@ export function CandlestickChart({ data, markers, indicators, height = 500, base
     connectCharts();
     chartRef.current = chart;
 
-    // 用户缩放/滑动时记录当前可视窗口，供同组新图加入与 setOption 回写沿用。
+    // 用户缩放/滑动时上报当前可视窗口，RunDetail 级共享，供同组新图加入与 setOption 回写沿用。
     const onZoom = (params: any) => {
       const item = params?.batch && params.batch.length > 0 ? params.batch[0] : params;
       if (item && typeof item.start === "number" && typeof item.end === "number") {
-        sharedWindow = { start: item.start, end: item.end };
+        onViewChange({ window: { start: item.start, end: item.end } });
       }
     };
     chart.on("datazoom", onZoom);
-    liveChartCount += 1;
 
     let resizeFrame: number | null = null;
     const ro = new ResizeObserver(() => {
@@ -126,8 +115,6 @@ export function CandlestickChart({ data, markers, indicators, height = 500, base
       chart.off("datazoom", onZoom);
       chart.dispose();
       chartRef.current = null;
-      liveChartCount -= 1;
-      if (liveChartCount <= 0) sharedWindow = null;
     };
   }, [visibleData.length === 0, dark]);
 
@@ -152,14 +139,14 @@ export function CandlestickChart({ data, markers, indicators, height = 500, base
     };
 
     for (const [key, { name, data: lineData }] of Object.entries(overlayMap)) {
-      if (overlays.has(key as Overlay)) {
+      if (overlaySet.has(key as Overlay)) {
         overlaySeries.push({ name, type: "line", data: lineData, xAxisIndex: 0, yAxisIndex: 0, symbol: "none", lineStyle: { color: OVERLAY_COLORS[colorIdx], width: 1 } });
         legendNames.push(name);
         colorIdx++;
       }
     }
 
-    if (overlays.has("boll")) {
+    if (overlaySet.has("boll")) {
       const boll = indicatorCache.boll;
       overlaySeries.push(
         { name: "BOLL+", type: "line", data: boll.upper, xAxisIndex: 0, yAxisIndex: 0, symbol: "none", lineStyle: { color: t.bollColor, width: 0.8, type: "dashed" } },
@@ -172,9 +159,9 @@ export function CandlestickChart({ data, markers, indicators, height = 500, base
     const rawMarks: any[] = (markers || []).map(m => {
       let idx = dates.indexOf(m.time);
       if (idx < 0) {
-        const isMinute = period === "5m" || period === "15m" || period === "20m" || period === "1h" || period === "2h";
+        const isMinute = effectivePeriod === "5m" || effectivePeriod === "15m" || effectivePeriod === "20m" || effectivePeriod === "1h" || effectivePeriod === "2h";
         const hasTradeDate = visibleData.some(d => d.trade_date);
-        const markerKey = isMinute ? periodKeyOf(m.time, period) : periodKeyOfDate(hasTradeDate ? tradeDateOfTime(m.time) : m.time.slice(0, 10), period);
+        const markerKey = isMinute ? periodKeyOf(m.time, effectivePeriod) : periodKeyOfDate(hasTradeDate ? tradeDateOfTime(m.time) : m.time.slice(0, 10), effectivePeriod);
         idx = dates.indexOf(markerKey);
       }
       if (idx < 0) return null;
@@ -251,7 +238,7 @@ export function CandlestickChart({ data, markers, indicators, height = 500, base
       legendNames.push("%K", "%D", "%J");
     }
 
-    const zoom = resolveZoom(sharedWindow, visibleData.length);
+    const zoom = resolveZoom(zoomWindow, visibleData.length);
 
     chart.setOption({
       backgroundColor: "transparent",
@@ -323,7 +310,7 @@ export function CandlestickChart({ data, markers, indicators, height = 500, base
       <div className="flex items-center gap-2 mb-1 flex-wrap">
         <div className="flex gap-0.5 flex-wrap">
           {periods.map((p) => (
-            <button key={p} onClick={() => setPeriod(p)} className={cn("px-1.5 py-0.5 rounded text-[10px] font-mono transition-colors", period === p ? "bg-primary/15 text-primary font-medium" : "text-muted-foreground/50 hover:text-muted-foreground")}>{p}</button>
+            <button key={p} onClick={() => onViewChange({ period: p })} className={cn("px-1.5 py-0.5 rounded text-[10px] font-mono transition-colors", effectivePeriod === p ? "bg-primary/15 text-primary font-medium" : "text-muted-foreground/50 hover:text-muted-foreground")}>{p}</button>
           ))}
         </div>
 
@@ -334,7 +321,7 @@ export function CandlestickChart({ data, markers, indicators, height = 500, base
             onClick={() => setShowMenu(!showMenu)}
             className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
           >
-            Indicators ({overlays.size}) <ChevronDown className="h-3 w-3" />
+            Indicators ({overlaySet.size}) <ChevronDown className="h-3 w-3" />
           </button>
           {showMenu && (
             <div className="absolute top-full left-0 mt-1 z-50 bg-card border rounded-lg shadow-lg p-2 min-w-[160px]" onMouseLeave={() => setShowMenu(false)}>
@@ -343,14 +330,14 @@ export function CandlestickChart({ data, markers, indicators, height = 500, base
                   <p className="text-[9px] text-muted-foreground/50 uppercase tracking-wider px-1 pt-1">{group}</p>
                   {OVERLAY_OPTIONS.filter(o => o.group === group).map(o => (
                     <label key={o.id} className="flex items-center gap-2 px-1 py-0.5 rounded hover:bg-muted/30 cursor-pointer">
-                      <input type="checkbox" checked={overlays.has(o.id)} onChange={() => toggleOverlay(o.id)} className="h-3 w-3 rounded accent-primary" />
+                      <input type="checkbox" checked={overlaySet.has(o.id)} onChange={() => toggleOverlay(o.id)} className="h-3 w-3 rounded accent-primary" />
                       <span className="text-xs">{o.label}</span>
                     </label>
                   ))}
                 </div>
               ))}
               <div className="border-t mt-1 pt-1">
-                <button onClick={() => { setOverlays(new Set()); setShowMenu(false); }} className="text-[10px] text-muted-foreground hover:text-foreground px-1 py-0.5 w-full text-left rounded hover:bg-muted/30">
+                <button onClick={() => { onViewChange({ overlays: [] }); setShowMenu(false); }} className="text-[10px] text-muted-foreground hover:text-foreground px-1 py-0.5 w-full text-left rounded hover:bg-muted/30">
                   Bare K (clear all)
                 </button>
               </div>
@@ -362,7 +349,7 @@ export function CandlestickChart({ data, markers, indicators, height = 500, base
 
         <div className="flex gap-0.5">
           {(["vol", "macd", "rsi", "kdj"] as const).map((id) => (
-            <button key={id} onClick={() => setSub(id)} className={cn("px-1.5 py-0.5 rounded text-[10px] font-mono uppercase transition-colors", sub === id ? "bg-primary/15 text-primary font-medium" : "text-muted-foreground/50 hover:text-muted-foreground")}>{id}</button>
+            <button key={id} onClick={() => onViewChange({ sub: id })} className={cn("px-1.5 py-0.5 rounded text-[10px] font-mono uppercase transition-colors", sub === id ? "bg-primary/15 text-primary font-medium" : "text-muted-foreground/50 hover:text-muted-foreground")}>{id}</button>
           ))}
         </div>
       </div>
