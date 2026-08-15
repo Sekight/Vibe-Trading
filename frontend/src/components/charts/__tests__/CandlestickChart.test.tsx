@@ -1,0 +1,113 @@
+import { describe, expect, it, vi } from "vitest";
+import { render } from "@testing-library/react";
+import { CandlestickChart } from "../CandlestickChart";
+import type { PriceBar } from "@/lib/api";
+import type { ChartView } from "@/lib/chartWindow";
+
+// 用假 echarts 实例捕获 setOption / datazoom 事件，验证「窗口保持」核心机制。
+const { chartInstance, setOption, on } = vi.hoisted(() => {
+  const setOption = vi.fn();
+  const on = vi.fn();
+  return {
+    chartInstance: {
+      group: "",
+      setOption,
+      on,
+      off: vi.fn(),
+      resize: vi.fn(),
+      dispose: vi.fn(),
+    },
+    setOption,
+    on,
+  };
+});
+
+vi.mock("@/lib/echarts", () => ({
+  echarts: { init: vi.fn(() => chartInstance) },
+  CHART_GROUP: "test-charts",
+  connectCharts: vi.fn(),
+}));
+
+// jsdom 无 ResizeObserver
+class FakeResizeObserver {
+  observe() {}
+  disconnect() {}
+  unobserve() {}
+}
+vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+
+const BARS: PriceBar[] = Array.from({ length: 1000 }, (_, i) => ({
+  time: `2025-01-${String((i % 28) + 1).padStart(2, "0")} ${String(i % 24).padStart(2, "0")}:00`,
+  open: 100 + i * 0.1,
+  high: 101 + i * 0.1,
+  low: 99 + i * 0.1,
+  close: 100.5 + i * 0.1,
+  volume: 1000,
+}));
+
+function props(overrides: Partial<Parameters<typeof CandlestickChart>[0]> = {}) {
+  return {
+    data: BARS,
+    baseInterval: "5m",
+    sub: "vol" as ChartView["sub"],
+    overlays: ["ma5", "ma20"] as ChartView["overlays"],
+    period: null,
+    window: null,
+    onViewChange: vi.fn(),
+    ...overrides,
+  };
+}
+
+function lastOptionDataZoom() {
+  const last = setOption.mock.calls[setOption.mock.calls.length - 1];
+  return last?.[0]?.dataZoom?.[0] as { start: number; end: number } | undefined;
+}
+
+beforeEach(() => {
+  setOption.mockClear();
+  on.mockClear();
+});
+
+describe("CandlestickChart 可视窗口保持（文档验证场景 1/3/4 的核心机制）", () => {
+  it("场景1/2：调指标/副图时沿用当前窗口，不重置回默认", () => {
+    const onViewChange = vi.fn();
+    const { rerender } = render(
+      <CandlestickChart {...props({ window: { start: 30, end: 100 }, onViewChange })} />,
+    );
+    const callsBefore = setOption.mock.calls.length;
+
+    // 切换副图（sub 变化）
+    rerender(<CandlestickChart {...props({ window: { start: 30, end: 100 }, sub: "macd", onViewChange })} />);
+    expect(setOption.mock.calls.length).toBeGreaterThan(callsBefore);
+    expect(lastOptionDataZoom()).toMatchObject({ start: 30, end: 100 });
+
+    // 切换指标（overlays 变化）
+    rerender(<CandlestickChart {...props({ window: { start: 30, end: 100 }, overlays: ["ma5", "boll"], onViewChange })} />);
+    expect(lastOptionDataZoom()).toMatchObject({ start: 30, end: 100 });
+  });
+
+  it("场景3：新图（带共享窗口）挂载时直接落在该窗口，而非默认最后 250 根", () => {
+    render(<CandlestickChart {...props({ window: { start: 30, end: 100 } })} />);
+    expect(lastOptionDataZoom()).toMatchObject({ start: 30, end: 100 });
+  });
+
+  it("场景3/4：无共享窗口时用默认窗口（最后 250 根）", () => {
+    render(<CandlestickChart {...props()} />);
+    // 1000 根 → 默认 start = 100 - 250/1000*100 = 75
+    expect(lastOptionDataZoom()).toMatchObject({ start: 75, end: 100 });
+  });
+
+  it("场景3/4：datazoom 事件把当前窗口上报给共享状态（供新图与回写沿用）", () => {
+    const onViewChange = vi.fn();
+    render(<CandlestickChart {...props({ onViewChange })} />);
+    const handler = on.mock.calls.find((call) => call[0] === "datazoom")?.[1];
+    expect(handler).toBeDefined();
+
+    handler({ start: 30, end: 100 });
+    expect(onViewChange).toHaveBeenLastCalledWith({ window: { start: 30, end: 100 } });
+
+    // batch 形式（多 dataZoom 组件）
+    handler({ batch: [{ start: 40, end: 90 }] });
+    expect(onViewChange).toHaveBeenLastCalledWith({ window: { start: 40, end: 90 } });
+  });
+});

@@ -40,6 +40,7 @@
 | V025 | 2026-08-15 | 计划模板新增"项目调研"可选章节 | 调研/讨论事实基线查了才写；规则只落模板一处，不新增其他文档条目 |
 | V026 | 2026-08-15 | 期货止损成交价 tick 取整 | 引擎侧 _TICK 静态表（88 品种），止损成交价多单 floor/空单 ceil，消除不可成交小数价格 |
 | V027 | 2026-08-16 | 图表页保持行情可视时间窗口 | 调指标/切副图/切标签/加标的不再重置 K 线窗口；共享窗口机制 + ChartTab 保持挂载 |
+| V028 | 2026-08-16 | 图表页多标的共享图表设置 | 指标/副图/周期/窗口提升为 run 级共享，切标的全保持；换 run 显式重置不串 |
 > 补录说明：V001-V009 为补录条目，依据 git 历史、HowToUse、全局复利与踩坑日志、`C:\Users\mumu\.codex\sessions` 会话记录回溯整理；当时未留痕的字段标“待补”。从下一条起，每次迭代收尾直接写正文。
 
 ## 模板
@@ -339,3 +340,11 @@
 - 验证：新增 `chartWindow` 纯逻辑单测 5 个（默认窗口/沿用窗口/越界夹取）、RunDetail 保持挂载测试；前端全量 439 passed、npm build 通过。交互验证待用户浏览器实测（滑到非默认区间后调指标/切副图/切标签/加删标的/换 run）。
 - 影响/注意：ECharts 实例在非图表标签时保持存活（内存可接受）；图表隐藏时容器 0 尺寸，重新显示依赖 ResizeObserver resize；`HowToUse.md` 的 macOS 协同改动为用户未提交内容，未纳入本次提交。
 - 关联：计划 P-20260816-chart_window_preserve；commit `544658b`、`27dbd57`；run 无（纯前端改动）。
+
+### V028 · 图表页多标的共享图表设置（2026-08-16）
+- 一句话总结：把 指标/副图/周期/可视窗口 提升为 run 级共享状态，多标的切换标的（showOnly/删增）时全部保持；换 run 显式重置、不串数据。
+- 为什么：V027 交付后用户反馈——多标的切换标的同时 indicators/副图/周期/时间窗口全部重置。根因：①指标/副图/周期是各图内部 useState，新挂载的图总是默认值；②模块级共享窗口「最后一张图卸载时清空」在切换标的经过全部卸载时误清窗口。
+- 关键细节：新增 `chartWindow.ts` 的 `ChartView`（sub/overlays/period/window）与 `DEFAULT_CHART_VIEW`；RunDetail 持有 `chartView` 共享状态，runId effect 显式重置（与现有重置并列）；CandlestickChart 改受控组件（sub/overlays/period/window 来自 props、datazoom 事件上报窗口、工具栏全部走 onViewChange）；移除模块级 sharedWindow/计数清空；period 为 null 时各图回退 periods[0]（run 基础周期），新图挂载不会覆盖用户已选周期；ChartTab 保持挂载（V027）保留。
+- 验证：前端全量 443 passed（含新增 CandlestickChart 组件测试 4 个：窗口随 props 应用、datazoom 事件上报、指标/副图切换窗口保持、默认窗口兜底）、npm build 通过；后端回归 188 passed（本次零 Python 改动，完整后端套件未跑——用户指示验证文档场景而非全量后端）。文档验证场景：场景 1/2（调指标/副图保持窗口）、3/4（加标的/切换标的入同窗口）由组件测试覆盖核心机制，场景 2（切标签）与场景 5/6（run 隔离）由架构保证（状态提升 + runId 显式重置）+ 既有 RunDetail 保持挂载测试；最终浏览器交互清单待用户实测。
+- 影响/注意：ChartTab props 新增 chartView/onChartViewChange；多标的共用同一套指标设置（与窗口联动语义一致，比较口径统一）；datazoom 事件每次触发都会更新共享窗口并重渲染各图（setOption 效应依赖不含 window，不触发重建）。
+- 关联：计划 P-20260816-chart_window_preserve；commit `e4adcf1`、`ae5ad2c`；run 无（纯前端改动）。
