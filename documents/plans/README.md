@@ -20,4 +20,4 @@
 |---|---|---|---|---|---|
 | P-20260814-timeline_charts_fix | 已完成 | 2026-08-14 | 回测分析时间精度与小周期图表修复 | P-20260814-timeline_charts_fix.md | V018 |
 | P-20260814-trade_action_ui | 已完成 | 2026-08-14 | 交易方向与开平动作展示（图表 + 交易表） | P-20260814-trade_action_ui.md | V020 |
-| P-20260814-total_commission | 讨论中 | 2026-08-14 | 总手续费与单边手续费落盘展示 | P-20260814-total_commission.md | 待填 |
+| P-20260814-total_commission | 已确认 | 2026-08-14 | 总手续费与单边手续费落盘展示 | P-20260814-total_commission.md | 待填 |

@@ -2,7 +2,7 @@
 
 > 编号：P-20260814-total_commission
 > 短标题规则：单词间用 _ 连接，不使用 -（例如 P-20260814-timeline_charts_fix）
-> 状态：讨论中
+> 状态：已确认
 > 日期：2026-08-14
 > 关联迭代：待填（收尾时填 V 号）
 > 关联：commit / run（收尾时补）
@@ -33,7 +33,7 @@
    - WebUI 顶部指标汇总由 MetricsCard 自动展示 metrics 新字段。
    - `agent/backtest/analysis/digest.py`：
      - METRIC_MEANINGS 增加 `total_commission` 说明；
-     - METRIC_GROUPS 归入“仓位与换手”（待确认，也可放“其他”）；
+     - METRIC_GROUPS 新建「交易成本」分组，`total_commission` 归入（2026-08-15 用户拍板方案 A）；
      - render_digest_for_llm 会按分组自动输出该指标。
    - 旧 run 无该字段：WebUI/digest 按缺失处理，不报错。
 
@@ -73,7 +73,8 @@
 - 2026-08-14，用户提出：run_card 要有总手续费、trades.csv 每行要有单边手续费、WebUI 顶部指标加总手续费、digest/LLM 报告包含总手续费。
 - 2026-08-14，Codex 调研：trades.csv 是事件式（每行一次开或平），不能把开+平合计写进每一行；每行 commission 应为单边费用，total_commission 汇总所有单边。
 - 2026-08-14，确认手续费构成：期货只含手续费；A 股 entry=佣金+过户费、exit=佣金+过户费+卖出印花税。
-- 待确认：①“metrics.csv 每一行记录”是否指 trades.csv（建议按 trades.csv 理解）；②total_commission 在 LLM 报告归入“仓位与换手”还是“其他”；③是否在平仓行额外显示 roundtrip_commission（本轮默认不做）。
+- 待确认：①”metrics.csv 每一行记录”是否指 trades.csv（建议按 trades.csv 理解）；②total_commission 在 LLM 报告归入”仓位与换手”还是”其他”；③是否在平仓行额外显示 roundtrip_commission（本轮默认不做）。
+- 2026-08-15，待确认项收口（用户拍板）：①按需求目标理解，trades.csv 每行 commission（非 metrics.csv 每行）；②新建「交易成本」分组归入 total_commission（方案 A，非并入「仓位与换手」）；③本轮不做 roundtrip_commission。
 
 ## 风险 / 注意
 
