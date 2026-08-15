@@ -4,7 +4,7 @@
 > 当前版本：vibe-trading-ai 0.1.13（editable 源码安装）
 > 官方参考：`README.md` / `README_zh.md` / `wiki/` / `vibe-trading --help`
 
-> 路径约定：<repo_root> = 本仓库根目录；<vibe_home> = %USERPROFILE%\.vibe-trading（Windows）或 ~/.vibe-trading（其他系统）。文中占位符使用前替换为实际路径。
+> 路径约定：<repo_root> = 本仓库根目录；<vibe_home> = %USERPROFILE%\.vibe-trading（Windows）或 ~/.vibe-trading（其他系统）。文中占位符使用前替换为实际路径。克隆后先进入仓库根目录，所有 <repo_root> 均指该目录。
 
 ---
 
