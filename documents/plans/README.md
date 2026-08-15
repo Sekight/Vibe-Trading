@@ -22,4 +22,4 @@
 | P-20260814-trade_action_ui | 已完成 | 2026-08-14 | 交易方向与开平动作展示（图表 + 交易表） | P-20260814-trade_action_ui.md | V020 |
 | P-20260814-total_commission | 已完成 | 2026-08-14 | 总手续费与单边手续费落盘展示 | P-20260814-total_commission.md | V024 |
 | P-20260815-futures_stop_tick | 已完成 | 2026-08-15 | 期货止损成交价按最小变动价位取整 | P-20260815-futures_stop_tick.md | V026 |
-| P-20260816-chart_window_preserve | 已确认 | 2026-08-16 | 图表页保持行情可视时间窗口 | P-20260816-chart_window_preserve.md | 待填 |
+| P-20260816-chart_window_preserve | 已完成 | 2026-08-16 | 图表页保持行情可视时间窗口 | P-20260816-chart_window_preserve.md | V027 |

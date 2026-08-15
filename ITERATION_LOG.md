@@ -39,6 +39,7 @@
 | V024 | 2026-08-15 | 总手续费与单边手续费落盘展示 | trades.csv 每行单边 commission、total_commission 进 metrics/run_card/digest/WebUI，新建交易成本分组 |
 | V025 | 2026-08-15 | 计划模板新增"项目调研"可选章节 | 调研/讨论事实基线查了才写；规则只落模板一处，不新增其他文档条目 |
 | V026 | 2026-08-15 | 期货止损成交价 tick 取整 | 引擎侧 _TICK 静态表（88 品种），止损成交价多单 floor/空单 ceil，消除不可成交小数价格 |
+| V027 | 2026-08-16 | 图表页保持行情可视时间窗口 | 调指标/切副图/切标签/加标的不再重置 K 线窗口；共享窗口机制 + ChartTab 保持挂载 |
 > 补录说明：V001-V009 为补录条目，依据 git 历史、HowToUse、全局复利与踩坑日志、`C:\Users\mumu\.codex\sessions` 会话记录回溯整理；当时未留痕的字段标“待补”。从下一条起，每次迭代收尾直接写正文。
 
 ## 模板
@@ -330,3 +331,11 @@
 - 验证：新增 5 组单测（tick 查表 rb/IF/au/T/未知、floor/ceil、长/空止损、跳穿不取整）；后端 188 passed；重跑 rb run 价格全整数（3143.7571→3143、3169.2857→3170），`100000 + pnl合计 − 手续费合计 = final_value` 一致，total_commission 1155.3084→1149.089（取整口径）；A 股日线 run `20260808_032625_05_e9f25e` 无回归（total_commission 仍 16125.2623）。
 - 影响/注意：取整方向保守——多单 floor 卖出价更低、空单 ceil 买回价更高，绩效比取整前略悲观；`_TICK` 为静态表，新品种/规则调整后会过期，数据源与快照已留档，需要时重新抓取；`_MULTIPLIER` 本次未扩（数据源无手续费字段，避免乘数全费率缺的不对称）。
 - 关联：计划 P-20260815-futures_stop_tick；commit `62b1c38`、`5d044ae`；run `rb_futures_5m_20250901_29_v1`、`20260808_032625_05_e9f25e`。
+
+### V027 · 图表页保持行情可视时间窗口（2026-08-16）
+- 一句话总结：调 indicators / 切副图 vol/macd/rsi/kdj / 切换标签 不再把 K 线可视窗口重置回默认；加标的时新图加载到当前同组窗口；删标的不影响其余图；换 run 恢复默认。
+- 为什么：缩放/滑动状态只存在 ECharts 实例内，`setOption(notMerge=true)` 每次用「最后 250 根」硬覆盖 dataZoom.start；标签切换条件渲染卸载组件导致副图/指标/周期/窗口全丢；用户在多标的分析中频繁被重置打断。
+- 关键细节：①模块级共享窗口 `sharedWindow`——datazoom 事件记录窗口百分比，`resolveZoom` 在 setOption 前沿用（调指标/副图不再重置），新图挂载时加入当前同组窗口，最后一张图卸载时清空（换 run 全卸载即归零，run 隔离无需额外代码，沿用 RunDetail runId effect 清空 selectedSymbols）；②ChartTab 保持挂载 + 非图表标签 CSS 隐藏（跨标签保留全部状态，重显靠既有 ResizeObserver 触发 resize）；③周期切换（行为 4）本轮不做；多标的窗口按百分比联动（与 echarts.connect 组行为一致）。纯前端，全部改动在 CandlestickChart.tsx + RunDetail.tsx，ChartTab 无 props 变更。
+- 验证：新增 `chartWindow` 纯逻辑单测 5 个（默认窗口/沿用窗口/越界夹取）、RunDetail 保持挂载测试；前端全量 439 passed、npm build 通过。交互验证待用户浏览器实测（滑到非默认区间后调指标/切副图/切标签/加删标的/换 run）。
+- 影响/注意：ECharts 实例在非图表标签时保持存活（内存可接受）；图表隐藏时容器 0 尺寸，重新显示依赖 ResizeObserver resize；`HowToUse.md` 的 macOS 协同改动为用户未提交内容，未纳入本次提交。
+- 关联：计划 P-20260816-chart_window_preserve；commit `544658b`、`27dbd57`；run 无（纯前端改动）。
