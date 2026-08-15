@@ -53,6 +53,7 @@ class TradeRecord:
         exit_reason: Why closed (signal / liquidation / end_of_backtest).
         holding_bars: Number of bars held.
         commission: Total commission (entry + exit).
+        entry_commission: Commission paid at entry (for per-side reporting).
         entry_margin: Actual margin allocated at entry, after size rounding.
         exit_margin: Margin-equivalent value traded at the exit price.
     """
@@ -70,6 +71,7 @@ class TradeRecord:
     exit_reason: str
     holding_bars: int
     commission: float
+    entry_commission: float = 0.0
     entry_margin: float = 0.0
     exit_margin: float = 0.0
 

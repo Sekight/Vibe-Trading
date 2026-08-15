@@ -12,6 +12,7 @@ describe("getMetricLabel", () => {
   it("returns human label for known keys", () => {
     expect(getMetricLabel("sharpe")).toBe("Sharpe");
     expect(getMetricLabel("max_drawdown")).toBe("Max DD");
+    expect(getMetricLabel("total_commission")).toBe("Total Commission");
   });
 
   it("returns raw key for unknown keys", () => {
@@ -55,6 +56,11 @@ describe("formatMetricVal", () => {
     expect(formatMetricVal("avg_holding_days", 3.456)).toBe("3.5");
   });
 
+  it("formats total_commission as money with grouping", () => {
+    const result = formatMetricVal("total_commission", 1155.31);
+    expect(result).toMatch(/1.*155\.31|1,155\.31/);
+  });
+
   // Fallback
   it("falls back to 4 decimal places for unknown keys", () => {
     expect(formatMetricVal("unknown_key", 1.23456789)).toBe("1.2346");
@@ -65,6 +71,7 @@ describe("metricSentiment", () => {
   it("returns neutral for neutral keys regardless of value", () => {
     expect(metricSentiment("trade_count", 100)).toBe("neutral");
     expect(metricSentiment("avg_holding_days", 0)).toBe("neutral");
+    expect(metricSentiment("total_commission", 5000)).toBe("neutral");
     expect(metricSentiment("final_value", -999)).toBe("neutral");
   });
 

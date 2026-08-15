@@ -375,6 +375,13 @@ class TestCalcMetrics:
         assert m["trade_count"] == 2
         assert m["win_rate"] == 0.5
 
+    def test_total_commission(self) -> None:
+        eq = self._growing_equity()
+        # _trade() hardcodes commission=1.0 per round trip
+        trades = [_trade(), _trade()]
+        m = calc_metrics(eq, trades, 1_000_000, 252)
+        assert m["total_commission"] == pytest.approx(2.0)
+
     def test_benchmark_comparison(self) -> None:
         eq = self._growing_equity()
         dates = eq.index
@@ -388,6 +395,7 @@ class TestCalcMetrics:
         m = calc_metrics(pd.Series(dtype=float), [], 1_000_000, 252)
         assert m["final_value"] == 1_000_000
         assert m["total_return"] == 0
+        assert m["total_commission"] == 0
 
     def test_single_bar_equity_metrics_finite(self) -> None:
         # A one-bar backtest yields a single-observation return series.

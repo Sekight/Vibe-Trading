@@ -13,6 +13,8 @@ Validates:
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pandas as pd
 import pytest
 
@@ -315,3 +317,61 @@ class TestLeverageFromMargin:
         )
 
         assert engine._leverage_for_symbol("IF2406.CFFEX") == pytest.approx(1 / 0.12)
+
+
+def test_full_cycle_rb_commission_flows_to_metrics_and_trades_csv(tmp_path: Path) -> None:
+    """rb 万1/side: per-side fees land in TradeRecord, total_commission and trades.csv."""
+    from backtest.metrics import calc_metrics
+
+    dates = pd.bdate_range("2025-09-01", periods=6)
+    frame = pd.DataFrame({
+        "open": [3100.0] * 6,
+        "high": [3110.0] * 6,
+        "low": [3090.0] * 6,
+        "close": [3100.0] * 6,
+        "pre_close": [3100.0] * 6,
+        "pct_chg": [0.0] * 6,
+        "settle": [3100.0] * 6,
+        "pre_settle": [3100.0] * 6,
+        "volume": [100] * 6,
+    }, index=dates)
+    engine = _make_engine(codes=["rb2410.SHFE"], interval="1D")
+    targets = pd.DataFrame(
+        {"rb2410.SHFE": [0.0, 1.0, 1.0, 1.0, 0.0, 0.0]}, index=dates
+    )
+    engine._execute_bars(
+        dates,
+        {"rb2410.SHFE": frame},
+        frame[["close"]].rename(columns={"close": "rb2410.SHFE"}),
+        targets,
+        ["rb2410.SHFE"],
+    )
+
+    assert len(engine.trades) == 1
+    t = engine.trades[0]
+    multiplier = 10  # rb contract multiplier
+    entry_fee = t.size * t.entry_price * multiplier * 0.0001
+    exit_fee = t.size * t.exit_price * multiplier * 0.0001
+    assert t.entry_commission == pytest.approx(entry_fee)
+    assert t.commission == pytest.approx(entry_fee + exit_fee)
+
+    equity = pd.Series(
+        [s.equity for s in engine.equity_snapshots],
+        index=[s.timestamp for s in engine.equity_snapshots],
+    )
+    m = calc_metrics(equity, engine.trades, engine.initial_capital, 252)
+    assert m["total_commission"] == pytest.approx(t.commission)
+
+    engine._write_artifacts(
+        tmp_path,
+        {"rb2410.SHFE": frame},
+        dates,
+        equity,
+        pd.Series(1_000_000.0, index=dates),
+        pd.Series(0.0, index=dates),
+        targets,
+        {},
+        ["rb2410.SHFE"],
+    )
+    rows = pd.read_csv(tmp_path / "artifacts" / "trades.csv")
+    assert rows["commission"].sum() == pytest.approx(t.commission)

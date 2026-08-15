@@ -5,13 +5,15 @@ Uses ChinaAEngine as a concrete implementation since BaseEngine is abstract.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
 
 from backtest.engines.base import BaseEngine, _align, _load_optimizer
 from backtest.engines.china_a import ChinaAEngine
-from backtest.models import Position
+from backtest.models import Position, TradeRecord
 
 
 class _LifecycleEngine(ChinaAEngine):
@@ -237,6 +239,60 @@ class TestClosePosition:
         engine._close_position("000001.SZ", 15.0, pd.Timestamp("2025-01-03"), "signal")
         # Margin returned + 0 PnL - exit commission
         assert engine.capital > capital_before  # margin returned exceeds commission
+
+
+# ---------------------------------------------------------------------------
+# _write_artifacts: trades.csv per-side commission
+# ---------------------------------------------------------------------------
+
+
+class TestWriteArtifactsCommission:
+    def test_trades_csv_has_per_side_commission(self, tmp_path: Path) -> None:
+        engine = ChinaAEngine({"initial_cash": 1_000_000, "interval": "1D"})
+        ts = pd.Timestamp("2025-01-02")
+        engine.trades.append(TradeRecord(
+            symbol="000001.SZ",
+            direction=1,
+            entry_price=15.0,
+            exit_price=16.0,
+            entry_time=ts,
+            exit_time=pd.Timestamp("2025-01-03"),
+            size=1000.0,
+            leverage=1.0,
+            pnl=1000.0,
+            pnl_pct=6.67,
+            exit_reason="signal",
+            holding_bars=1,
+            commission=8.5,
+            entry_commission=3.5,
+        ))
+        dates = pd.DatetimeIndex([ts, pd.Timestamp("2025-01-03")])
+        data_map = {"000001.SZ": pd.DataFrame({"close": [15.0, 16.0]}, index=dates)}
+        equity = pd.Series(1_000_000.0, index=dates)
+        target_pos = pd.DataFrame(0.0, index=dates, columns=["000001.SZ"])
+        engine._write_artifacts(
+            tmp_path,
+            data_map,
+            dates,
+            equity,
+            pd.Series(1_000_000.0, index=dates),
+            pd.Series(0.0, index=dates),
+            target_pos,
+            {},
+            ["000001.SZ"],
+        )
+
+        rows = pd.read_csv(tmp_path / "artifacts" / "trades.csv")
+        assert list(rows.columns) == [
+            "timestamp", "code", "side", "price", "qty", "position_weight",
+            "lots", "reason", "pnl", "commission", "holding_days", "holding_bars", "return_pct",
+        ]
+        entry = rows[rows["side"] == "buy"].iloc[0]
+        exit_row = rows[rows["side"] == "sell"].iloc[0]
+        assert entry["commission"] == pytest.approx(3.5)
+        assert exit_row["commission"] == pytest.approx(5.0)
+        # 单边之和 = 回合总手续费
+        assert entry["commission"] + exit_row["commission"] == pytest.approx(8.5)
 
 
 # ---------------------------------------------------------------------------

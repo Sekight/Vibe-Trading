@@ -243,11 +243,12 @@ def test_group_metrics_covers_all_scalars_and_keeps_benchmark_label() -> None:
         "avg_turnover": 0.05, "total_turnover": 1.0,
         "rebalance_turnover_mean": 0.1, "rebalance_turnover_max": 0.2,
         "rebalance_count": 10,
+        "total_commission": 100.0,
         "extra_scalar": 7,
     }
     groups = group_metrics(metrics)
     labels = [label for label, _ in groups]
-    assert labels == ["性能", "基准相对", "风险", "仓位与换手", "再平衡", "其他"]
+    assert labels == ["性能", "基准相对", "风险", "仓位与换手", "交易成本", "再平衡", "其他"]
     assigned = {key for _, items in groups for key, _ in items}
     assert assigned == set(metrics)
 
@@ -262,7 +263,7 @@ def test_render_digest_for_llm_includes_benchmark_and_grouped_metrics(tmp_path: 
     assert "| 指标 | 含义 | 值 |" in prompt
     assert "| total_return | 累计总收益率 | 0.05 |" in prompt
     assert "| trade_count | 成交笔数（完成回合的交易数） | 2 |" in prompt
-    assert "平均持仓（自然日）" in prompt
+    assert "平均持仓: " in prompt
     assert "平均盈亏比（按单笔收益率）" in prompt
     assert "equal-weight(universe)" in prompt
     assert "## 核心指标" not in prompt
@@ -270,11 +271,23 @@ def test_render_digest_for_llm_includes_benchmark_and_grouped_metrics(tmp_path: 
     assert "无数据" in prompt
 
 
+def test_render_digest_for_llm_includes_total_commission_group(tmp_path: Path) -> None:
+    run_dir = write_run_dir(tmp_path, "20260811_444444_00_comm")
+    digest = build_digest(run_dir)
+    digest["metrics"]["total_commission"] = 123.45
+    prompt = render_digest_for_llm(digest)
+
+    assert "### 交易成本" in prompt
+    assert "| total_commission | 总手续费" in prompt
+    assert "123.45" in prompt
+
+
 def test_metric_meanings_are_unambiguous() -> None:
     assert "策略净值最大回撤" in METRIC_MEANINGS["max_drawdown"]
     assert "按每交易日 bar 数换算" in METRIC_MEANINGS["avg_holding_days"]
     assert "平均持仓篮子最大回撤" in METRIC_MEANINGS["risk_xray_max_drawdown"]
     assert "按盈亏金额" in METRIC_MEANINGS["profit_loss_ratio"]
+    assert "总手续费" in METRIC_MEANINGS["total_commission"]
 
 
 def test_build_digest_includes_regime_summary_for_two_assets(tmp_path: Path) -> None:

@@ -80,6 +80,7 @@ METRIC_GROUPS: List[tuple] = [
         "avg_turnover",
         "total_turnover", "rebalance_turnover_mean", "rebalance_turnover_max",
     ]),
+    ("交易成本", ["total_commission"]),
     ("再平衡", ["rebalance_count"]),
 ]
 
@@ -119,6 +120,8 @@ METRIC_MEANINGS: Dict[str, str] = {
     "max_single_weight": "单票最大目标仓位",
     "avg_turnover": "平均换手率", "total_turnover": "累计换手率",
     "rebalance_turnover_mean": "再平衡平均换手", "rebalance_turnover_max": "再平衡最大换手",
+    # 交易成本
+    "total_commission": "总手续费（所有成交单边手续费之和，开仓+平仓）",
     # 再平衡
     "rebalance_count": "再平衡次数",
     # 旧字段（2026-08-11 弃用，旧 run 仍可能出现）
@@ -755,7 +758,6 @@ def render_digest_for_llm(digest: Dict[str, Any], max_trades: int = 20) -> str:
         f"- 平均单笔收益率: {_markdown_cell(summary.get('avg_return_pct'))}%",
         f"- 胜率: {_markdown_cell(summary.get('win_rate'))}",
         f"- 平均盈亏比（按单笔收益率）: {_markdown_cell(summary.get('profit_loss_ratio'))}",
-        f"- 平均持仓（自然日）: {_markdown_cell(summary.get('avg_holding_days'))} 天",
         f"- 平均持仓: {_markdown_cell(summary.get('avg_holding_bars'))} 根 / {_markdown_cell(summary.get('avg_holding_days'))} 天",
         "",
         "## 持仓分桶（按平仓记录）",

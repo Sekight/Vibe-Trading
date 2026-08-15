@@ -1403,6 +1403,7 @@ class BaseEngine(ABC):
             exit_reason=reason,
             holding_bars=holding_bars,
             commission=pos.entry_commission + exit_comm,
+            entry_commission=pos.entry_commission,
             entry_margin=margin,
             exit_margin=exit_margin,
         ))
@@ -1450,7 +1451,7 @@ class BaseEngine(ABC):
         # Trades (compatible format)
         def _fmt_ts(ts: Any) -> str:
             """日线回测只显示日期，日内回测保留完整时间。"""
-            if self._interval.lower() in ("1d", "1d"):
+            if self._interval.lower() in ("1d",):
                 return str(ts.date()) if hasattr(ts, "date") else str(ts)
             return str(ts)
 
@@ -1468,12 +1469,6 @@ class BaseEngine(ABC):
 
         trade_rows = []
         for t in self.trades:
-            entry_key = (
-                str(t.entry_time.date()) if hasattr(t.entry_time, "date") else str(t.entry_time)
-            )
-            exit_key = (
-                str(t.exit_time.date()) if hasattr(t.exit_time, "date") else str(t.exit_time)
-            )
             entry_key = _fmt_ts(t.entry_time)
             exit_key = _fmt_ts(t.exit_time)
             entry_weight, entry_lots = _weight_and_lots(
@@ -1493,6 +1488,7 @@ class BaseEngine(ABC):
                 "lots": entry_lots,
                 "reason": "signal",
                 "pnl": 0.0,
+                "commission": round(t.entry_commission, 4),
                 "holding_days": 0,
                 "return_pct": 0.0,
                 "holding_bars": 0,
@@ -1512,13 +1508,13 @@ class BaseEngine(ABC):
                 "lots": exit_lots,
                 "reason": t.exit_reason,
                 "pnl": round(t.pnl, 4),
+                "commission": round(t.commission - t.entry_commission, 4),
                 "holding_days": hold_days,
                 "return_pct": round(t.pnl_pct, 2),
                 "holding_bars": t.holding_bars,
             })
 
-        trade_cols = ["timestamp", "code", "side", "price", "qty", "position_weight", "lots", "reason", "pnl", "holding_days", "return_pct"]
-        trade_cols = ["timestamp", "code", "side", "price", "qty", "position_weight", "lots", "reason", "pnl", "holding_days", "holding_bars", "return_pct"]
+        trade_cols = ["timestamp", "code", "side", "price", "qty", "position_weight", "lots", "reason", "pnl", "commission", "holding_days", "holding_bars", "return_pct"]
         pd.DataFrame(trade_rows or [], columns=trade_cols).to_csv(out / "trades.csv", index=False)
 
         # Metrics
