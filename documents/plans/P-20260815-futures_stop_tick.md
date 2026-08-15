@@ -9,13 +9,18 @@
 
 ## 项目调研
 
-- 2026-08-15，Codex 调研东财期货交易规则数据源（来源：`https://www.eastmoneyfutures.com/pages/service/jygz.html` 及其接口 `/emfApi/pzjy/getPZJYInfo`）：
-  - 页面是静态壳，数据由接口 `GET /emfApi/pzjy/getPZJYInfo` 动态返回，字段含 `minimumPrice`（最小变动价位）、`jydw`（交易单位）、`varietiesCN/EN`（品种名/代码）、`exchange`（交易所）与交割规则。
-  - 可稳定提取 **91 品种 / 6 交易所**全量规则；tick 文本可解析为数值（1元/吨→1、0.2点→0.2、0.02元/克→0.02、0.005元→0.005、1元/500千克→1）。
-  - 坑：接口编码不稳定，服务器节点间 GBK/UTF-8 混用（Content-Type 恒为 UTF-8），需 utf-8→gb18030→gbk 轮试 + 中文关键词校验的健壮解码。
-  - 与引擎现有 `_MULTIPLIER`（58 条硬编码 dict，兜底 10）交叉核对：覆盖 58/91，缺失 33（AO/BR/OP/LG/BZ/PS/PT/PD/EC 等新品），已覆盖乘数全部一致；JD 鸡蛋报价单位 500kg（5 吨/手 = 10 个报价单位），引擎 `jd=10` 正确。
-  - 该接口无手续费字段，补不了 `_COMMISSION`。
-  - 数据快照已存 `E:\zcodeWorkSpace\期货品种最小变动价位.json`（2026-08-15 抓取，91 条）。
+**外部（接口/网页）**
+- 东财「品种及交易规则」页面为静态壳，数据由接口 `GET /emfApi/pzjy/getPZJYInfo` 动态返回，含 `minimumPrice`（最小变动价位）、`jydw`（交易单位）、`varietiesCN/EN`（品种名/代码）——2026-08-15，https://www.eastmoneyfutures.com/pages/service/jygz.html
+- 接口可稳定提取 **91 品种 / 6 交易所**全量规则，tick 文本可解析为数值（1元/吨→1、0.2点→0.2、0.02元/克→0.02、0.005元→0.005、1元/500千克→1）——2026-08-15，接口实测
+- 接口编码不稳定：节点间 GBK/UTF-8 混用（Content-Type 恒为 UTF-8），需 utf-8→gb18030→gbk 轮试 + 中文关键词校验——2026-08-15，接口实测
+- 该接口无手续费字段，补不了 `_COMMISSION`——2026-08-15，接口实测
+- 数据快照留档：`E:\zcodeWorkSpace\期货品种最小变动价位.json`（91 条）——2026-08-15，抓取
+
+**内部（代码/项目现状）**
+- 引擎现有四张表（`_MULTIPLIER` 58 条兜底 10、`_COMMISSION` 37 条、`_MARGIN_RATE` 45 条、`_PRICE_LIMIT`）均为硬编码 dict、带默认兜底，无接口无自动更新；`_TICK` 同构可行——2026-08-15，agent/backtest/engines/china_futures.py
+- `_extract_product` 保留合约代码大小写（rb 小写、IF/CF 大写），静态表键须与之匹配——2026-08-15，china_futures.py:112
+- 东财 91 品种与 `_MULTIPLIER` 大小写不敏感核对：覆盖 58、缺失 33（AO/BR/OP/LG/BZ/PS/PT/PD/EC 等新品），已覆盖乘数全部一致；JD 鸡蛋报价单位 500kg（5 吨/手 = 10 个报价单位），引擎 `jd=10` 正确——2026-08-15，快照 vs china_futures.py
+- 类继承 `ChinaFuturesEngine → FuturesBaseEngine → BaseEngine`，`GlobalFuturesEngine` 同走 FuturesBaseEngine；tick 钩子放 BaseEngine 默认 None 即可隔离境外/复合引擎——2026-08-15，engines/*.py
 
 ## 需求目标
 
