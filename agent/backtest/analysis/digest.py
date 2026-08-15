@@ -25,6 +25,7 @@ import pandas as pd
 # a cache stays cheap even when a run holds hundreds of OHLCV files.
 DIGEST_FILENAME = "analysis.digest.json"
 DIGEST_SCHEMA_VERSION = 2
+DIGEST_SCHEMA_VERSION = 3
 _DIGEST_SOURCE_FILES = (
     "config.json",
     "run_card.json",
@@ -38,21 +39,27 @@ _DIGEST_SOURCE_FILES = (
 
 
 BUCKET_EDGES: List[tuple] = [
-    (0, 3),
-    (4, 7),
-    (8, 15),
-    (16, 30),
-    (31, 60),
-    (61, None),
+    (0, 4),
+    (5, 10),
+    (11, 20),
+    (21, 40),
+    (41, 80),
+    (81, None),
 ]
-BUCKET_LABELS = ["≤3天", "4-7天", "8-15天", "16-30天", "31-60天", ">60天"]
+BUCKET_LABELS = ["0-4根", "5-10根", "11-20根", "21-40根", "41-80根", ">80根"]
+
+# 小周期回测把持仓时长换算成自然日时需要知道每交易日的 bar 数。
+_BARS_PER_DAY = {
+    "1m": 240, "5m": 48, "15m": 16, "20m": 12, "30m": 8,
+    "1H": 4, "1h": 4, "2H": 2, "2h": 2, "4H": 1, "4h": 1, "1D": 1, "1d": 1,
+}
 
 
 METRIC_GROUPS: List[tuple] = [
     ("性能", [
         "total_return", "annual_return", "final_value", "sharpe", "sortino",
         "calmar", "max_drawdown", "win_rate", "profit_factor",
-        "profit_loss_ratio", "trade_count", "avg_holding_days",
+        "profit_loss_ratio", "trade_count", "avg_holding_bars", "avg_holding_days",
         "max_consecutive_loss",
     ]),
     ("基准相对", [
@@ -86,7 +93,8 @@ METRIC_MEANINGS: Dict[str, str] = {
     "max_drawdown": "策略净值最大回撤（实际资金曲线，含现金与交易成本）",
     "win_rate": "胜率（盈利交易占比）", "profit_factor": "盈亏因子（总盈利 / 总亏损）",
     "profit_loss_ratio": "平均盈亏比（按盈亏金额计算）",
-    "trade_count": "成交笔数（完成回合的交易数）", "avg_holding_days": "平均持仓（交易日 / bar 数）",
+    "trade_count": "成交笔数（完成回合的交易数）", "avg_holding_bars": "平均持仓（bar 数）",
+    "avg_holding_days": "平均持仓（按每交易日 bar 数换算的天数）",
     "max_consecutive_loss": "最大连续亏损笔数",
     # 基准相对
     "benchmark_label": "基准标签（本次对比基准的标识）",
@@ -266,6 +274,13 @@ def _date_prefix(value: Any) -> Optional[str]:
         return text[:10]
     return None
 
+def _full_ts(value: Any) -> Optional[str]:
+    """Keep a timestamp as-is for sub-daily runs; None when empty."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
 
 def pair_trades(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Pair entry/exit rows into round-trip trades using per-code FIFO.
@@ -283,7 +298,8 @@ def pair_trades(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             continue
         pnl = _float(row, "pnl", 0.0) or 0.0
         holding_days = _int(row, "holding_days", 0)
-        is_exit = abs(pnl) > 1e-9 or holding_days > 0
+        holding_bars = _int(row, "holding_bars", 0)
+        is_exit = abs(pnl) > 1e-9 or holding_days > 0 or holding_bars > 0
         if not is_exit:
             open_queues.setdefault(code, deque()).append(row)
             continue
@@ -292,8 +308,8 @@ def pair_trades(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         entry = queue.popleft() if queue else None
         direction = "long" if (entry or {}).get("side") == "buy" else "short"
         trades.append({
-            "entry_ts": _date_prefix((entry or {}).get("timestamp")) or _date_prefix(row.get("timestamp")),
-            "exit_ts": _date_prefix(row.get("timestamp")),
+            "entry_ts": _full_ts((entry or {}).get("timestamp")) or _full_ts(row.get("timestamp")),
+            "exit_ts": _full_ts(row.get("timestamp")),
             "code": code,
             "direction": direction,
             "entry_price": _float(entry, "price") if entry else None,
@@ -302,26 +318,30 @@ def pair_trades(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             "pnl": pnl,
             "return_pct": _float(row, "return_pct", 0.0) or 0.0,
             "holding_days": holding_days,
+            "holding_bars": holding_bars,
             "reason": str(row.get("reason") or ""),
             "win": pnl > 0,
         })
     return trades
 
 
-def trade_summary(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
+def trade_summary(trades: List[Dict[str, Any]], interval: str = "1D") -> Dict[str, Any]:
     """Aggregate round-trip trades into headline stats."""
     count = len(trades)
     if count == 0:
         return {
             "count": 0, "wins": 0, "losses": 0, "total_pnl": 0.0,
             "avg_return_pct": 0.0, "win_rate": 0.0,
-            "avg_holding_days": 0.0, "profit_loss_ratio": None,
+            "avg_holding_bars": 0.0, "avg_holding_days": 0.0,
+            "profit_loss_ratio": None,
         }
     wins = [t for t in trades if t["win"]]
     losses = [t for t in trades if not t["win"]]
     total_pnl = sum(t["pnl"] for t in trades)
     avg_return = sum(t["return_pct"] for t in trades) / count
-    avg_holding = sum(t["holding_days"] for t in trades) / count
+    avg_holding_bars = sum(t.get("holding_bars") or 0 for t in trades) / count
+    bars_per_day = float(_BARS_PER_DAY.get(str(interval).strip(), 1))
+    avg_holding_days = round(avg_holding_bars / bars_per_day, 2)
     profit_loss_ratio: Optional[float] = None
     if wins and losses:
         avg_win = sum(t["return_pct"] for t in wins) / len(wins)
@@ -335,7 +355,7 @@ def trade_summary(trades: List[Dict[str, Any]]) -> Dict[str, Any]:
         "total_pnl": round(total_pnl, 4),
         "avg_return_pct": round(avg_return, 4),
         "win_rate": round(len(wins) / count, 4),
-        "avg_holding_days": round(avg_holding, 2),
+        "avg_holding_days": round(avg_holding_days, 2),
         "profit_loss_ratio": profit_loss_ratio,
     }
 
@@ -357,20 +377,54 @@ def monthly_pnl(trades: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         bucket["count"] += 1
     return [grouped[key] for key in sorted(grouped)]
 
+def daily_pnl(trades: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Aggregate realized pnl by exit day (closed-trade basis)."""
+    grouped: Dict[str, Dict[str, Any]] = {}
+    for trade in trades:
+        day = str(trade.get("exit_ts") or "")[:10]
+        if len(day) != 10:
+            continue
+        bucket = grouped.setdefault(day, {"date": day, "pnl": 0.0, "count": 0})
+        bucket["pnl"] = round(bucket["pnl"] + trade["pnl"], 4)
+        bucket["count"] += 1
+    return [grouped[key] for key in sorted(grouped)]
 
-def _bucket_for_holding(days: int) -> int:
+def weekly_pnl(trades: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Aggregate realized pnl by ISO week of the exit timestamp."""
+    grouped: Dict[str, Dict[str, Any]] = {}
+    for trade in trades:
+        day = str(trade.get("exit_ts") or "")[:10]
+        try:
+            dt = datetime.strptime(day, "%Y-%m-%d")
+        except (ValueError, TypeError):
+            continue
+        iso = dt.isocalendar()
+        key = f"{iso[0]}-W{iso[1]:02d}"
+        bucket = grouped.setdefault(key, {"week": key, "pnl": 0.0, "count": 0})
+        bucket["pnl"] = round(bucket["pnl"] + trade["pnl"], 4)
+        bucket["count"] += 1
+    return [grouped[key] for key in sorted(grouped)]
+
+def period_pnl(trades: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+    """Return day/week/month PnL aggregations for the heatmap switcher."""
+    return {
+        "day": daily_pnl(trades),
+        "week": weekly_pnl(trades),
+        "month": monthly_pnl(trades),
+    }
+
+def _bucket_for_holding_bars(bars: int) -> int:
     for index, (lo, hi) in enumerate(BUCKET_EDGES):
-        if days >= lo and (hi is None or days <= hi):
+        if bars >= lo and (hi is None or bars <= hi):
             return index
     return len(BUCKET_EDGES) - 1
 
-
 def holding_buckets(trades: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Fixed 6-bucket holding-period statistics (0 rows are never omitted)."""
+    """Fixed bar-count buckets for sub-daily holding periods."""
     rows: List[Dict[str, Any]] = []
     for index, label in enumerate(BUCKET_LABELS):
         lo, hi = BUCKET_EDGES[index]
-        bucket = [t for t in trades if (t["holding_days"] >= lo and (hi is None or t["holding_days"] <= hi))]
+        bucket = [t for t in trades if (_bucket_for_holding_bars(t.get("holding_bars") or 0) == index)]
         count = len(bucket)
         wins = [t for t in bucket if t["win"]]
         losses = [t for t in bucket if not t["win"]]
@@ -385,8 +439,8 @@ def holding_buckets(trades: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 avg_profit_loss_ratio = round(avg_win / avg_loss, 4)
         rows.append({
             "bucket": label,
-            "min_days": lo,
-            "max_days": hi,
+            "min_bars": lo,
+            "max_bars": hi,
             "count": count,
             "total_pnl": round(total_pnl, 4),
             "avg_return_pct": avg_return,
@@ -396,6 +450,8 @@ def holding_buckets(trades: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return rows
 
 
+
+
 def _load_ohlcv(run_dir: Path, code: str) -> Dict[str, Dict[str, float]]:
     """Load one symbol's OHLCV artifact as date -> ohlc dict."""
     safe_name = code.replace(":", "_").replace("/", "_").replace("\\", "_")
@@ -403,7 +459,7 @@ def _load_ohlcv(run_dir: Path, code: str) -> Dict[str, Dict[str, float]]:
     rows = load_csv(path)
     bars: Dict[str, Dict[str, float]] = {}
     for row in rows:
-        ts = _date_prefix(row.get("trade_date") or row.get("timestamp") or row.get("time"))
+        ts = _full_ts(row.get("timestamp") or row.get("time") or row.get("trade_date"))
         if not ts:
             continue
         high = _float(row, "high")
@@ -575,7 +631,7 @@ def build_digest(run_dir: Path) -> Dict[str, Any]:
     equity_curve: List[Dict[str, Any]] = []
     benchmark_peak: Optional[float] = None
     for row in equity_rows:
-        ts = _date_prefix(row.get("timestamp") or row.get("time"))
+        ts = _full_ts(row.get("timestamp") or row.get("time"))
         equity = _float(row, "equity")
         if not ts or equity is None:
             continue
@@ -596,7 +652,11 @@ def build_digest(run_dir: Path) -> Dict[str, Any]:
         })
 
     metrics = _metrics_from_run(run_dir)
-    summary = trade_summary(trades)
+    summary = trade_summary(trades, config.get("interval", "1D"))
+    # 持仓口径以引擎 metrics.csv 为准，避免 digest 自己按 interval 换算出第二套数字。
+    for key in ("avg_holding_bars", "avg_holding_days"):
+        if key in metrics and metrics[key] is not None:
+            summary[key] = metrics[key]
     mae_values = [t["mae_pct"] for t in trades if t.get("mae_pct") is not None]
     mfe_values = [t["mfe_pct"] for t in trades if t.get("mfe_pct") is not None]
     top_winners = sorted([t for t in trades if t["win"]], key=lambda t: t["pnl"], reverse=True)[:5]
@@ -613,7 +673,7 @@ def build_digest(run_dir: Path) -> Dict[str, Any]:
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "config": {
             key: config.get(key)
-            for key in ("codes", "start_date", "end_date", "interval", "source", "initial_cash", "engine", "commission", "benchmark")
+            for key in ("codes", "start_date", "end_date", "backtest_start", "backtest_end", "interval", "source", "initial_cash", "engine", "commission", "benchmark")
             if key in config
         },
         "metrics": metrics,
@@ -623,6 +683,7 @@ def build_digest(run_dir: Path) -> Dict[str, Any]:
         "trades": trades_sorted,
         "trade_summary": summary,
         "monthly_pnl": monthly_pnl(trades_sorted),
+        "period_pnl": period_pnl(trades_sorted),
         "buckets": holding_buckets(trades_sorted),
         "mae_mfe_summary": {
             "with_data": len(mae_values),
@@ -695,6 +756,7 @@ def render_digest_for_llm(digest: Dict[str, Any], max_trades: int = 20) -> str:
         f"- 胜率: {_markdown_cell(summary.get('win_rate'))}",
         f"- 平均盈亏比（按单笔收益率）: {_markdown_cell(summary.get('profit_loss_ratio'))}",
         f"- 平均持仓（自然日）: {_markdown_cell(summary.get('avg_holding_days'))} 天",
+        f"- 平均持仓: {_markdown_cell(summary.get('avg_holding_bars'))} 根 / {_markdown_cell(summary.get('avg_holding_days'))} 天",
         "",
         "## 持仓分桶（按平仓记录）",
         "| 桶 | 笔数 | 合计盈亏 | 平均收益率% | 胜率 | 平均盈亏比 |",
@@ -711,19 +773,19 @@ def render_digest_for_llm(digest: Dict[str, Any], max_trades: int = 20) -> str:
     for item in (digest.get("monthly_pnl") or [])[:24]:
         lines.append(f"| {item['year']}-{item['month']:02d} | {_markdown_cell(item['pnl'])} | {item['count']} |")
 
-    lines.extend(["", "## Top 盈利 / 亏损", "| 类型 | 平仓日 | 代码 | 方向 | 盈亏 | 收益率% | 持仓（自然日） |", "|---|---|---|---|---|---|---|"])
+    lines.extend(["", "## Top 盈利 / 亏损", "| 类型 | 平仓日 | 代码 | 方向 | 盈亏 | 收益率% | 持仓（根） |", "|---|---|---|---|---|---|---|"])
     for label, trades in (("盈利", digest.get("top_winners") or []), ("亏损", digest.get("top_losers") or [])):
         for trade in trades[:5]:
             lines.append(
                 f"| {label} | {trade.get('exit_ts') or '-'} | {trade.get('code') or '-'} "
                 f"| {trade.get('direction') or '-'} | {_markdown_cell(trade.get('pnl'))} "
-                f"| {_markdown_cell(trade.get('return_pct'))} | {trade.get('holding_days')} |"
+                f"| {_markdown_cell(trade.get('return_pct'))} | {trade.get('holding_bars', trade.get('holding_days'))} |"
             )
 
     mae_mfe = digest.get("mae_mfe_summary") or {}
     lines.extend([
         "",
-        "## MAE/MFE（日线近似，入场日不计）",
+        "## MAE/MFE（bar 级，入场 bar 不计）",
         f"- 有效样本: {mae_mfe.get('with_data', 0)}",
         f"- 平均 MAE: {_markdown_cell(mae_mfe.get('avg_mae_pct'))}%",
         f"- 平均 MFE: {_markdown_cell(mae_mfe.get('avg_mfe_pct'))}%",

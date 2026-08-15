@@ -419,6 +419,7 @@ class BaseEngine(ABC):
 
     def __init__(self, config: dict):
         self.config = config
+        self._interval: str = str(config.get("interval") or "1D")
         self.initial_capital: float = config.get("initial_cash", 1_000_000)
         self.default_leverage: float = config.get("leverage", 1.0)
         # Execution modes: next_open (default, existing behavior) or close-family.
@@ -785,6 +786,31 @@ class BaseEngine(ABC):
 
         # Sync codes after _align may have dropped all-NaN symbols
         valid_codes = [c for c in valid_codes if c in target_pos.columns]
+
+        # Optional execution window: data is loaded (and indicators warmed) over
+        # start_date/end_date, but the backtest itself only runs inside
+        # backtest_start/backtest_end when configured. Truncating here keeps
+        # equity/metrics from including the warmup stretch.
+        backtest_start = config.get("backtest_start")
+        backtest_end = config.get("backtest_end")
+        if backtest_start or backtest_end:
+            mask = pd.Series(True, index=dates)
+            if backtest_start:
+                mask &= dates >= pd.Timestamp(backtest_start)
+            if backtest_end:
+                end_ts = pd.Timestamp(backtest_end)
+                if len(str(backtest_end).strip()) == 10:
+                    # 纯日期视为包含整天，避免 09-29 的盘中 bar 被 00:00 截掉。
+                    end_ts = end_ts + pd.Timedelta(days=1) - pd.Timedelta(seconds=1)
+                mask &= dates <= end_ts
+            dates = dates[mask]
+            close_df = close_df.loc[dates]
+            target_pos = target_pos.loc[dates]
+            ret_df = ret_df.loc[dates]
+            if len(dates) == 0:
+                raise ValueError(
+                    "backtest window is empty after applying backtest_start/backtest_end"
+                )
 
         # Optional stop-price series from the strategy. Only used for
         # exit_mode="stop" same-bar exits; without it stops fall back to close.
@@ -1422,10 +1448,13 @@ class BaseEngine(ABC):
         target_pos.to_csv(out / "positions.csv")
 
         # Trades (compatible format)
-        equity_by_date = {
-            str(ts.date()) if hasattr(ts, "date") else str(ts): eq
-            for ts, eq in equity_series.items()
-        }
+        def _fmt_ts(ts: Any) -> str:
+            """日线回测只显示日期，日内回测保留完整时间。"""
+            if self._interval.lower() in ("1d", "1d"):
+                return str(ts.date()) if hasattr(ts, "date") else str(ts)
+            return str(ts)
+
+        equity_by_date = {_fmt_ts(ts): eq for ts, eq in equity_series.items()}
 
         def _weight_and_lots(symbol, price, size, ts_key):
             equity = equity_by_date.get(ts_key)
@@ -1445,6 +1474,8 @@ class BaseEngine(ABC):
             exit_key = (
                 str(t.exit_time.date()) if hasattr(t.exit_time, "date") else str(t.exit_time)
             )
+            entry_key = _fmt_ts(t.entry_time)
+            exit_key = _fmt_ts(t.exit_time)
             entry_weight, entry_lots = _weight_and_lots(
                 t.symbol, t.entry_price, t.size, entry_key
             )
@@ -1464,6 +1495,7 @@ class BaseEngine(ABC):
                 "pnl": 0.0,
                 "holding_days": 0,
                 "return_pct": 0.0,
+                "holding_bars": 0,
             })
             # Exit event
             try:
@@ -1482,9 +1514,11 @@ class BaseEngine(ABC):
                 "pnl": round(t.pnl, 4),
                 "holding_days": hold_days,
                 "return_pct": round(t.pnl_pct, 2),
+                "holding_bars": t.holding_bars,
             })
 
         trade_cols = ["timestamp", "code", "side", "price", "qty", "position_weight", "lots", "reason", "pnl", "holding_days", "return_pct"]
+        trade_cols = ["timestamp", "code", "side", "price", "qty", "position_weight", "lots", "reason", "pnl", "holding_days", "holding_bars", "return_pct"]
         pd.DataFrame(trade_rows or [], columns=trade_cols).to_csv(out / "trades.csv", index=False)
 
         # Metrics

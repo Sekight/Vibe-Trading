@@ -476,6 +476,7 @@ export interface PriceBar {
   time: string;
   timestamp?: string;
   code?: string;
+  trade_date?: string;
   open: number;
   high: number;
   low: number;
@@ -488,6 +489,8 @@ export interface TradeMarker {
   timestamp?: string;
   code?: string;
   side: "BUY" | "SELL";
+  action?: "open" | "close";
+  direction?: "long" | "short";
   price: number;
   qty?: number;
   reason?: string;
@@ -641,9 +644,15 @@ export interface RunAnalysisCharts {
     drawdown?: Array<{ date: string; value: number; benchmark?: number | null }>;
     pnl_scatter?: Array<{ index: number; entry_ts?: string; code?: string; direction?: string; return_pct?: number; win: boolean }>;
     monthly_heatmap?: Array<{ year: number; month: number; pnl: number; count: number }>;
-    pnl_vs_holding?: Array<{ holding_days?: number; return_pct?: number; pnl?: number; win: boolean; code?: string }>;
+    period_pnl?: {
+      day?: Array<{ date: string; pnl: number; count: number }>;
+      week?: Array<{ week: string; pnl: number; count: number }>;
+      month?: Array<{ year: number; month: number; pnl: number; count: number }>;
+    };
+    heatmap_default?: "day" | "week" | "month";
+    pnl_vs_holding?: Array<{ holding_days?: number; holding_bars?: number; return_pct?: number; pnl?: number; win: boolean; code?: string }>;
     mae_mfe?: Array<{ entry_ts?: string; code?: string; mae_pct?: number; mfe_pct?: number; win: boolean }>;
-    holding_buckets?: Array<{ bucket: string; min_days: number; max_days: number | null; count: number; total_pnl: number; avg_return_pct: number; win_rate: number; avg_profit_loss_ratio?: number | null }>;
+    holding_buckets?: Array<{ bucket: string; min_bars: number; max_bars: number | null; count: number; total_pnl: number; avg_return_pct: number; win_rate: number; avg_profit_loss_ratio?: number | null }>;
   };
   pngs: AnalysisPngInfo[];
   benchmark_label?: string | null;

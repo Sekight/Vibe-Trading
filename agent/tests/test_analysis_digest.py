@@ -73,17 +73,17 @@ def test_pair_trades_ignores_non_trade_rows() -> None:
 
 def test_holding_buckets_always_returns_six_fixed_buckets() -> None:
     trades = [
-        {"holding_days": 1, "pnl": 10.0, "return_pct": 1.0, "win": True},
-        {"holding_days": 10, "pnl": -5.0, "return_pct": -0.5, "win": False},
-        {"holding_days": 100, "pnl": 20.0, "return_pct": 2.0, "win": True},
+        {"holding_bars": 3, "pnl": 10.0, "return_pct": 1.0, "win": True},
+        {"holding_bars": 10, "pnl": -5.0, "return_pct": -0.5, "win": False},
+        {"holding_bars": 100, "pnl": 20.0, "return_pct": 2.0, "win": True},
     ]
     buckets = holding_buckets(trades)
 
-    assert [b["bucket"] for b in buckets] == ["≤3天", "4-7天", "8-15天", "16-30天", "31-60天", ">60天"]
+    assert [b["bucket"] for b in buckets] == ["0-4根", "5-10根", "11-20根", "21-40根", "41-80根", ">80根"]
     assert buckets[0]["count"] == 1
     assert buckets[0]["avg_return_pct"] == 1.0
-    assert buckets[1]["count"] == 0
-    assert buckets[2]["count"] == 1
+    assert buckets[1]["count"] == 1
+    assert buckets[2]["count"] == 0
     assert buckets[2]["win_rate"] == 0.0
     assert buckets[5]["count"] == 1
     assert buckets[5]["win_rate"] == 1.0
@@ -188,7 +188,7 @@ def test_load_digest_builds_and_persists_when_file_missing(tmp_path: Path) -> No
     digest = load_digest(run_dir)
     assert digest["run_id"] == run_dir.name
     payload = json.loads((run_dir / "analysis.digest.json").read_text(encoding="utf-8"))
-    assert payload["schema_version"] == 2
+    assert payload["schema_version"] == 3
     assert payload["digest"]["run_id"] == run_dir.name
     assert payload["sources"]["artifacts/trades.csv"]["size"] > 0
 
@@ -197,7 +197,7 @@ def test_write_digest_json_persists_schema_sources_and_digest(tmp_path: Path) ->
     run_dir = write_run_dir(tmp_path, "20260811_111111_00_digest")
     write_digest_json(run_dir)
     payload = json.loads((run_dir / "analysis.digest.json").read_text(encoding="utf-8"))
-    assert payload["schema_version"] == 2
+    assert payload["schema_version"] == 3
     assert payload["digest"]["metrics"]["total_return"] == 0.05
     assert payload["sources"]["artifacts/equity.csv"]["size"] > 0
 
@@ -272,7 +272,7 @@ def test_render_digest_for_llm_includes_benchmark_and_grouped_metrics(tmp_path: 
 
 def test_metric_meanings_are_unambiguous() -> None:
     assert "策略净值最大回撤" in METRIC_MEANINGS["max_drawdown"]
-    assert "平均持仓（交易日" in METRIC_MEANINGS["avg_holding_days"]
+    assert "按每交易日 bar 数换算" in METRIC_MEANINGS["avg_holding_days"]
     assert "平均持仓篮子最大回撤" in METRIC_MEANINGS["risk_xray_max_drawdown"]
     assert "按盈亏金额" in METRIC_MEANINGS["profit_loss_ratio"]
 

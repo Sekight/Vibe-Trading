@@ -79,6 +79,9 @@ _OHLCV_AGG = {
     "volume": "sum",
 }
 
+# 源数据若带交易日列（期货夜盘 21:00 归次日），聚合时取桶内最后一根的交易日。
+_TRADE_DATE_AGG = {"trade_date": "last"}
+
 
 def _resample_to_interval(df: pd.DataFrame, interval: str, symbol: str) -> pd.DataFrame:
     """Resample an OHLCV frame to the requested bar ``interval``.
@@ -120,7 +123,10 @@ def _resample_to_interval(df: pd.DataFrame, interval: str, symbol: str) -> pd.Da
             if target == source:
                 return df
 
-    resampled = df.resample(rule).agg(_OHLCV_AGG)
+    agg_rules = dict(_OHLCV_AGG)
+    if "trade_date" in df.columns:
+        agg_rules.update(_TRADE_DATE_AGG)
+    resampled = df.resample(rule).agg(agg_rules)
     resampled = resampled.dropna(subset=["open", "high", "low", "close"])
     resampled.index.name = df.index.name
     return resampled
@@ -162,15 +168,21 @@ def _normalize_columns(
         parsed_dates = pd.to_datetime(df[date_col], errors="coerce", utc=True)
     # Normalize every input to the loader's UTC-naive index contract. Parsing
     # as UTC first also handles files that span daylight-saving offset changes.
-    df["trade_date"] = parsed_dates.dt.tz_convert(None)
-    df = df.dropna(subset=["trade_date"])
-    df = df.set_index("trade_date").sort_index()
+    # Use a temporary column so a source-provided ``trade_date`` is preserved
+    # for futures daily/weekly K-lines (night session belongs to next day).
+    df["_parsed_dt"] = parsed_dates.dt.tz_convert(None)
+    df = df.dropna(subset=["_parsed_dt"])
+    df = df.set_index("_parsed_dt").sort_index()
+    df.index.name = "timestamp"
 
     ohlcv_cols: list[str] = ["open", "high", "low", "close"]
     if "volume" in df.columns:
         ohlcv_cols.append("volume")
 
-    df = df[ohlcv_cols]
+    keep_cols = list(ohlcv_cols)
+    if "trade_date" in df.columns:
+        keep_cols.append("trade_date")
+    df = df[keep_cols]
     for col in ohlcv_cols:
         df[col] = pd.to_numeric(df[col], errors="coerce")
     df = df.dropna(subset=["open", "high", "low", "close"])

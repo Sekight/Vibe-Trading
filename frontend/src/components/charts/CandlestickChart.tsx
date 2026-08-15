@@ -6,11 +6,14 @@ import type { PriceBar, TradeMarker, IndicatorPoint } from "@/lib/api";
 import { calcMA, calcBOLL, calcMACD, calcRSI, calcKDJ, calcEMA } from "@/lib/indicators";
 import { getChartTheme } from "@/lib/chart-theme";
 import { abbreviateNum } from "@/lib/formatters";
+import { pickCandleOhlc } from "@/lib/candleOhlc";
+import { tradeMarkerStyle } from "@/lib/tradeActions";
+import { mergeBarTradeMarks } from "@/lib/tradeMarkers";
+import { availablePeriods, periodKeyOf, periodKeyOfDate, resampleBars, tradeDateOfTime, type KlinePeriod } from "@/lib/resample";
 import { echarts, CHART_GROUP, connectCharts } from "@/lib/echarts";
 import { useThemeDark } from "@/lib/theme-store";
 
 type Sub = "vol" | "macd" | "rsi" | "kdj";
-type Range = "1M" | "3M" | "6M" | "1Y" | "ALL";
 type Overlay = "ma5" | "ma10" | "ma20" | "ma60" | "ema12" | "ema26" | "boll";
 
 const OVERLAY_OPTIONS: { id: Overlay; label: string; group: string }[] = [
@@ -23,24 +26,31 @@ const OVERLAY_OPTIONS: { id: Overlay; label: string; group: string }[] = [
   { id: "boll", label: "BOLL", group: "Channel" },
 ];
 
-const RANGE_BARS: Record<Range, number> = { "1M": 22, "3M": 63, "6M": 126, "1Y": 252, ALL: Infinity };
 const OVERLAY_COLORS = ["#f59e0b", "#8b5cf6", "#3b82f6", "#ec4899", "#10b981", "#f97316", "#6366f1"];
+const DEFAULT_VISIBLE_BARS = 250;
 
 interface Props {
   data: PriceBar[];
   markers?: TradeMarker[];
   indicators?: Record<string, IndicatorPoint[]>;
   height?: number;
+  baseInterval?: string;
 }
 
-export function CandlestickChart({ data, markers, indicators, height = 500 }: Props) {
+export function CandlestickChart({ data, markers, indicators, height = 500, baseInterval }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
+  void indicators; // 周期切换后只显示前端重算指标，隐藏后端 indicator_series。
   const chartRef = useRef<ReturnType<typeof echarts.init> | null>(null);
   const [sub, setSub] = useState<Sub>("vol");
-  const [range, setRange] = useState<Range>("ALL");
   const [overlays, setOverlays] = useState<Set<Overlay>>(new Set(["ma5", "ma20"]));
   const [showMenu, setShowMenu] = useState(false);
   const dark = useThemeDark();
+
+  const periods = useMemo(() => availablePeriods(baseInterval), [baseInterval]);
+  const [period, setPeriod] = useState<KlinePeriod>("5m");
+  useEffect(() => {
+    setPeriod(periods[0] ?? "5m");
+  }, [periods]);
 
   const toggleOverlay = useCallback((id: Overlay) => {
     setOverlays(prev => {
@@ -50,18 +60,22 @@ export function CandlestickChart({ data, markers, indicators, height = 500 }: Pr
     });
   }, []);
 
-  // Memoize base data arrays — only recompute when raw data changes
-  const baseData = useMemo(() => {
-    const dates = data.map(d => d.time);
-    const closes = data.map(d => d.close);
-    const highs = data.map(d => d.high);
-    const lows = data.map(d => d.low);
-    const opens = data.map(d => d.open);
-    const candle = data.map(d => [d.open, d.close, d.low, d.high]);
-    return { dates, closes, highs, lows, opens, candle };
-  }, [data]);
+  // 基础周期直接使用原始 bar；切换周期时前端按时间戳/trade_date 聚合。
+  const visibleData = useMemo(() => {
+    if (!period || period.toLowerCase() === String(baseInterval || "").toLowerCase()) return data;
+    return resampleBars(data, period);
+  }, [data, period, baseInterval]);
 
-  // Memoize indicator calculations — only recompute when data changes (not on overlay toggle)
+  const baseData = useMemo(() => {
+    const dates = visibleData.map(d => d.time);
+    const closes = visibleData.map(d => d.close);
+    const highs = visibleData.map(d => d.high);
+    const lows = visibleData.map(d => d.low);
+    const opens = visibleData.map(d => d.open);
+    const candle = visibleData.map(d => [d.open, d.close, d.low, d.high]);
+    return { dates, closes, highs, lows, opens, candle };
+  }, [visibleData]);
+
   const indicatorCache = useMemo(() => ({
     ma5: calcMA(baseData.closes, 5),
     ma10: calcMA(baseData.closes, 10),
@@ -75,18 +89,8 @@ export function CandlestickChart({ data, markers, indicators, height = 500 }: Pr
     kdj: calcKDJ(baseData.highs, baseData.lows, baseData.closes),
   }), [baseData]);
 
-  // Memoize backend indicator series with Map lookup (O(1) instead of O(n) find)
-  const extraIndicators = useMemo(() => {
-    if (!indicators) return [];
-    return Object.entries(indicators).map(([name, points]) => {
-      const lookup = new Map(points.map(p => [p.time, p.value]));
-      return { name: name.toUpperCase(), values: baseData.dates.map(d => lookup.get(d) ?? null) };
-    });
-  }, [indicators, baseData.dates]);
-
-  // Init chart instance — only on mount/unmount and dark mode change
   useEffect(() => {
-    if (!containerRef.current || data.length === 0) return;
+    if (!containerRef.current || visibleData.length === 0) return;
     const chart = echarts.init(containerRef.current);
     chart.group = CHART_GROUP;
     connectCharts();
@@ -107,18 +111,15 @@ export function CandlestickChart({ data, markers, indicators, height = 500 }: Pr
       chart.dispose();
       chartRef.current = null;
     };
-  }, [data.length === 0, dark]); // only re-init when going empty↔non-empty or theme changes
+  }, [visibleData.length === 0, dark]);
 
-  // Update chart options — setOption on existing instance, no dispose
   useEffect(() => {
     const chart = chartRef.current;
-    if (!chart || data.length === 0) return;
+    if (!chart || visibleData.length === 0) return;
 
     const t = getChartTheme();
     const { dates, closes, opens, candle } = baseData;
 
-    // Overlay series
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const overlaySeries: any[] = [];
     const legendNames: string[] = ["K"];
     let colorIdx = 0;
@@ -150,25 +151,60 @@ export function CandlestickChart({ data, markers, indicators, height = 500 }: Pr
       legendNames.push("BOLL");
     }
 
-    // Trade markers
-    const marks = (markers || []).map(m => ({
-      coord: [m.time, m.price],
-      value: m.side === "BUY" ? "B" : "S",
-      name: [`${m.side} @ ${m.price}`, m.qty ? `Qty: ${m.qty}` : "", m.reason || ""].filter(Boolean).join("\n"),
-      itemStyle: { color: m.side === "BUY" ? t.upColor : t.downColor },
-      label: { color: "#fff", fontSize: 10, fontWeight: "bold" as const },
-    }));
+    const rawMarks: any[] = (markers || []).map(m => {
+      let idx = dates.indexOf(m.time);
+      if (idx < 0) {
+        const isMinute = period === "5m" || period === "15m" || period === "20m" || period === "1h" || period === "2h";
+        const hasTradeDate = visibleData.some(d => d.trade_date);
+        const markerKey = isMinute ? periodKeyOf(m.time, period) : periodKeyOfDate(hasTradeDate ? tradeDateOfTime(m.time) : m.time.slice(0, 10), period);
+        idx = dates.indexOf(markerKey);
+      }
+      if (idx < 0) return null;
+      const markerStyle = tradeMarkerStyle(m);
+      return { idx, markerStyle, side: m.side, price: m.price, qty: m.qty, reason: m.reason };
+    }).filter(Boolean);
 
-    // Volume
-    const vol = data.map((d, i) => ({
+    const groupedMarks = new Map<number, any[]>();
+    for (const raw of rawMarks) {
+      const list = groupedMarks.get(raw.idx) ?? [];
+      list.push(raw);
+      groupedMarks.set(raw.idx, list);
+    }
+    const marks: any[] = [];
+    for (const [idx, list] of groupedMarks) {
+      const bar = visibleData[idx];
+      if (list.length === 1) {
+        const raw = list[0];
+        marks.push({
+          coord: [dates[idx], raw.price],
+          value: raw.markerStyle.label,
+          name: [`${raw.side} @ ${raw.price}`, raw.qty ? `Qty: ${raw.qty}` : "", raw.reason || ""].filter(Boolean).join("\n"),
+          itemStyle: { color: raw.markerStyle.buySide ? t.upColor : t.downColor },
+          label: { color: "#fff", fontSize: 10, fontWeight: "bold" as const },
+        });
+      } else {
+        const merged = mergeBarTradeMarks(
+          list.map((raw: any) => ({ label: raw.markerStyle.label, price: raw.price, qty: raw.qty, reason: raw.reason })),
+          bar.high,
+          bar.low,
+        );
+        if (!merged) continue;
+        marks.push({
+          coord: [dates[idx], merged.price],
+          value: merged.label,
+          name: merged.detail,
+          itemStyle: { color: merged.label === "T" ? "#9ca3af" : (merged.buySide ? t.upColor : t.downColor) },
+          label: { color: "#fff", fontSize: 10, fontWeight: "bold" as const },
+        });
+      }
+    }
+
+    const vol = visibleData.map((d, i) => ({
       value: d.volume,
       itemStyle: { color: closes[i] >= opens[i] ? t.volumeUp : t.volumeDown },
     }));
 
-    // Sub-chart
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let subSeries: any[] = [];
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let subYAxis: any = { scale: true, gridIndex: 1, splitLine: { lineStyle: { color: t.gridColor } }, axisLabel: { color: t.textColor, fontSize: 10 } };
 
     if (sub === "vol") {
@@ -197,14 +233,7 @@ export function CandlestickChart({ data, markers, indicators, height = 500 }: Pr
       legendNames.push("%K", "%D", "%J");
     }
 
-    // Backend custom indicators (Map-based O(1) lookup)
-    const extraSeries = extraIndicators.map((ind, i) => {
-      legendNames.push(ind.name);
-      return { name: ind.name, type: "line" as const, data: ind.values, xAxisIndex: 0, yAxisIndex: 0, symbol: "none", lineStyle: { width: 1, color: OVERLAY_COLORS[(colorIdx + i) % OVERLAY_COLORS.length], type: "dashed" as const } };
-    });
-
-    const maxBars = RANGE_BARS[range];
-    const defaultStart = maxBars >= data.length ? 0 : Math.max(0, 100 - (maxBars / data.length) * 100);
+    const defaultStart = visibleData.length <= DEFAULT_VISIBLE_BARS ? 0 : Math.max(0, 100 - (DEFAULT_VISIBLE_BARS / visibleData.length) * 100);
 
     chart.setOption({
       backgroundColor: "transparent",
@@ -212,13 +241,14 @@ export function CandlestickChart({ data, markers, indicators, height = 500 }: Pr
         trigger: "axis", axisPointer: { type: "cross" },
         backgroundColor: t.tooltipBg, borderColor: t.tooltipBorder,
         textStyle: { color: t.tooltipText, fontSize: 11 },
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         formatter: (params: any) => {
           if (!Array.isArray(params) || !params.length) return "";
           let html = `<b>${params[0].axisValue}</b>`;
           for (const p of params) {
-            if (p.seriesName === "K" && Array.isArray(p.value)) {
-              const [open, close, low, high] = p.value;
+            if (p.seriesName === "K") {
+              const ohlc = pickCandleOhlc({ data: p.data, value: p.value });
+              if (!ohlc) continue;
+              const [open, close, low, high] = ohlc;
               const chg = close - open;
               const pct = open ? ((chg / open) * 100).toFixed(2) : "0.00";
               const clr = chg >= 0 ? t.upColor : t.downColor;
@@ -261,29 +291,26 @@ export function CandlestickChart({ data, markers, indicators, height = 500 }: Pr
           markPoint: marks.length > 0 ? { data: marks, symbolSize: 28, tooltip: { formatter: (p: { name?: string; value?: string }) => p.name || p.value || "" } } : undefined,
         },
         ...overlaySeries,
-        ...extraSeries,
         ...subSeries,
       ],
     }, true);
-  }, [data, markers, baseData, indicatorCache, extraIndicators, sub, range, overlays, dark]);
+  }, [visibleData, markers, baseData, indicatorCache, sub, overlays, period, dark]);
 
-  if (data.length === 0) {
+  if (visibleData.length === 0) {
     return <div className="text-muted-foreground text-sm p-4">{i18n.t("charts.noPriceData")}</div>;
   }
 
   return (
     <div>
       <div className="flex items-center gap-2 mb-1 flex-wrap">
-        {/* Time range */}
-        <div className="flex gap-0.5">
-          {(["1M", "3M", "6M", "1Y", "ALL"] as const).map((r) => (
-            <button key={r} onClick={() => setRange(r)} className={cn("px-1.5 py-0.5 rounded text-[10px] font-mono transition-colors", range === r ? "bg-primary/15 text-primary font-medium" : "text-muted-foreground/50 hover:text-muted-foreground")}>{r}</button>
+        <div className="flex gap-0.5 flex-wrap">
+          {periods.map((p) => (
+            <button key={p} onClick={() => setPeriod(p)} className={cn("px-1.5 py-0.5 rounded text-[10px] font-mono transition-colors", period === p ? "bg-primary/15 text-primary font-medium" : "text-muted-foreground/50 hover:text-muted-foreground")}>{p}</button>
           ))}
         </div>
 
         <div className="w-px h-3 bg-border/40" />
 
-        {/* Indicator dropdown */}
         <div className="relative">
           <button
             onClick={() => setShowMenu(!showMenu)}
@@ -315,7 +342,6 @@ export function CandlestickChart({ data, markers, indicators, height = 500 }: Pr
 
         <div className="w-px h-3 bg-border/40" />
 
-        {/* Sub-chart selector */}
         <div className="flex gap-0.5">
           {(["vol", "macd", "rsi", "kdj"] as const).map((id) => (
             <button key={id} onClick={() => setSub(id)} className={cn("px-1.5 py-0.5 rounded text-[10px] font-mono uppercase transition-colors", sub === id ? "bg-primary/15 text-primary font-medium" : "text-muted-foreground/50 hover:text-muted-foreground")}>{id}</button>

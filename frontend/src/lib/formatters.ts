@@ -12,7 +12,8 @@ const METRIC_LABELS_EN: Record<string, string> = {
   sortino: "Sortino",
   profit_loss_ratio: "P/L Ratio (by amount)",
   max_consecutive_loss: "Max Consec. Loss",
-  avg_holding_days: "Avg Hold (Trading Days)",
+  avg_holding_bars: "Avg Hold (Bars)",
+  avg_holding_days: "Avg Hold (Days)",
   benchmark_return: "Benchmark",
   excess_return: "Excess Return",
   information_ratio: "IR",
@@ -36,7 +37,8 @@ const METRIC_LABELS_ZH: Record<string, string> = {
   sortino: "索提诺",
   profit_loss_ratio: "盈亏比（按金额）",
   max_consecutive_loss: "最大连续亏损",
-  avg_holding_days: "平均持仓（交易日）",
+  avg_holding_bars: "平均持仓（bar）",
+  avg_holding_days: "平均持仓（天）",
   benchmark_return: "基准收益",
   excess_return: "超额收益",
   information_ratio: "IR",
@@ -61,7 +63,7 @@ export function getMetricLabel(k: string): string {
 const PCT_KEYS = ["total_return", "annual_return", "win_rate", "max_drawdown", "benchmark_return", "excess_return", "avg_position_weight", "max_position_weight", "avg_portfolio_weight", "max_portfolio_weight", "max_single_weight", "risk_xray_avg_invested"];
 const RATIO_KEYS = ["sharpe", "calmar", "sortino", "profit_loss_ratio", "information_ratio"];
 const INT_KEYS = ["trade_count", "max_consecutive_loss"];
-const NEUTRAL_KEYS = new Set(["trade_count", "avg_holding_days", "final_value"]);
+const NEUTRAL_KEYS = new Set(["trade_count", "avg_holding_bars", "avg_holding_days", "final_value"]);
 
 export function formatMetricVal(k: string, v: number): string {
   if (PCT_KEYS.includes(k)) {
@@ -75,6 +77,7 @@ export function formatMetricVal(k: string, v: number): string {
   if (INT_KEYS.includes(k)) return String(Math.round(v));
   if (k === "final_value") return v.toLocaleString(undefined, { maximumFractionDigits: 0 });
   if (k === "avg_holding_days") return v.toFixed(1);
+  if (k === "avg_holding_bars" || k === "avg_holding_days") return v.toFixed(1);
   return v.toFixed(4);
 }
 
@@ -92,6 +95,7 @@ export const DISPLAY_ORDER = [
   "total_return", "annual_return", "sharpe", "max_drawdown", "win_rate", "trade_count",
   "calmar", "sortino", "profit_loss_ratio", "max_consecutive_loss",
   "benchmark_return", "excess_return", "information_ratio", "final_value", "avg_holding_days",
+  "benchmark_return", "excess_return", "information_ratio", "final_value", "avg_holding_bars", "avg_holding_days",
   "avg_portfolio_weight", "max_portfolio_weight", "max_single_weight",
   "avg_position_weight", "max_position_weight", "risk_xray_avg_invested",
 ];

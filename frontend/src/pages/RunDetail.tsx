@@ -29,6 +29,7 @@ import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
 import { CandlestickChart } from "@/components/charts/CandlestickChart";
+import { tradeActionInfo, type TradeKind } from "@/lib/tradeActions";
 import { EquityChart } from "@/components/charts/EquityChart";
 import { MetricsCard } from "@/components/chat/MetricsCard";
 import { ValidationPanel } from "@/components/charts/ValidationPanel";
@@ -695,7 +696,7 @@ function ChartTab({
       {entries.map(([sym, bars]) => (
         <div key={sym}>
           <h3 className="text-sm font-semibold text-muted-foreground mb-1">{sym}</h3>
-          <CandlestickChart data={bars} markers={chartCache[sym]?.trade_markers?.filter(m => m.code === sym)} indicators={chartCache[sym]?.indicator_series?.[sym]} height={500} />
+          <CandlestickChart data={bars} markers={chartCache[sym]?.trade_markers?.filter(m => m.code === sym)} indicators={chartCache[sym]?.indicator_series?.[sym]} height={500} baseInterval={String((run.run_card?.backtest as Record<string, unknown> | undefined)?.interval ?? "")} />
         </div>
       ))}
       {hasEquity && (
@@ -710,12 +711,6 @@ function ChartTab({
 
 const TRADES_PAGE_SIZE = 100;
 
-function normalizeSide(value?: string): "BUY" | "SELL" | "" {
-  const side = (value || "").trim().toUpperCase();
-  if (side.startsWith("B")) return "BUY";
-  if (side.startsWith("S")) return "SELL";
-  return "";
-}
 
 function parseTradeNumber(value?: string): number | null {
   if (value == null || value === "") return null;
@@ -766,43 +761,49 @@ function formatSigned(value: number, suffix = ""): string {
 
 function TradesTab({ run }: { run: RunData }) {
   const trades = run.trade_log || [];
-  const [sideFilter, setSideFilter] = useState<"" | "BUY" | "SELL">("");
+  const [sideFilter, setSideFilter] = useState<"" | TradeKind>("");
   const [symbolFilter, setSymbolFilter] = useState("");
   const [visibleCount, setVisibleCount] = useState(TRADES_PAGE_SIZE);
   if (trades.length === 0) return <div className="p-8 text-muted-foreground text-sm">{i18n.t("runDetail.noTrades")}</div>;
 
+  const kindOf = (tr: Record<string, string>): TradeKind | null => tradeActionInfo(tr)?.kind ?? null;
   const symbols = [...new Set(trades.map((tr) => tr.code).filter(Boolean))];
   const hasPnl = trades.some((tr) => parseTradeNumber(tr.pnl) != null);
   const hasReturnPct = trades.some((tr) => parseTradeNumber(tr.return_pct) != null);
   const hasHoldingDays = trades.some((tr) => (tr.holding_days ?? "") !== "");
+  const hasHoldingBars = trades.some((tr) => (tr.holding_bars ?? "") !== "");
   const hasLots = trades.some((tr) => tradeLots(tr, parseTradeNumber(tr.qty)) != null);
   const hasWeight = trades.some((tr) => (
     tradePositionWeight(tr, run, parseTradeNumber(tr.qty), parseTradeNumber(tr.price)) != null
   ));
 
   const filtered = trades.filter((tr) => (
-    (!sideFilter || normalizeSide(tr.side) === sideFilter)
+    (!sideFilter || kindOf(tr) === sideFilter)
     && (!symbolFilter || tr.code === symbolFilter)
   ));
-  const buys = filtered.filter((tr) => normalizeSide(tr.side) === "BUY").length;
-  const sells = filtered.filter((tr) => normalizeSide(tr.side) === "SELL").length;
+  const longOpen = filtered.filter((tr) => kindOf(tr) === "long_open").length;
+  const shortOpen = filtered.filter((tr) => kindOf(tr) === "short_open").length;
+  const longClose = filtered.filter((tr) => kindOf(tr) === "long_close").length;
+  const shortClose = filtered.filter((tr) => kindOf(tr) === "short_close").length;
   const totalPnl = hasPnl
     ? filtered.reduce((sum, tr) => sum + (parseTradeNumber(tr.pnl) ?? 0), 0)
     : null;
   const visible = filtered.slice(0, visibleCount);
   const remaining = filtered.length - visible.length;
 
-  const sideChips: { id: "" | "BUY" | "SELL"; label: string }[] = [
+  const sideChips: { id: "" | TradeKind; label: string }[] = [
     { id: "", label: i18n.t("runDetail.sideAll") },
-    { id: "BUY", label: i18n.t("runDetail.sideBuy") },
-    { id: "SELL", label: i18n.t("runDetail.sideSell") },
+    { id: "long_open", label: i18n.t("runDetail.sideLongOpen") },
+    { id: "short_open", label: i18n.t("runDetail.sideShortOpen") },
+    { id: "long_close", label: i18n.t("runDetail.sideLongClose") },
+    { id: "short_close", label: i18n.t("runDetail.sideShortClose") },
   ];
 
   return (
     <div className="p-4 space-y-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-muted-foreground">
         <span className="font-medium text-foreground">{i18n.t("runDetail.tradesCount", { count: filtered.length })}</span>
-        <span>{i18n.t("runDetail.sideSummary", { buy: buys, sell: sells })}</span>
+        <span>{i18n.t("runDetail.sideLongOpen")} {longOpen} · {i18n.t("runDetail.sideShortOpen")} {shortOpen} · {i18n.t("runDetail.sideLongClose")} {longClose} · {i18n.t("runDetail.sideShortClose")} {shortClose}</span>
         {totalPnl != null && (
           <span className="inline-flex items-center gap-1">
             {i18n.t("runDetail.totalPnl")}
@@ -859,12 +860,13 @@ function TradesTab({ run }: { run: RunData }) {
               {hasPnl && <th className="py-2 pr-4 text-right">{i18n.t("runDetail.pnl")}</th>}
               {hasReturnPct && <th className="py-2 pr-4 text-right">{i18n.t("runDetail.returnPct")}</th>}
               {hasHoldingDays && <th className="py-2 pr-4 text-right">{i18n.t("runDetail.holdingDays")}</th>}
+              {hasHoldingBars && <th className="py-2 pr-4 text-right">{i18n.t("runDetail.holdingBars")}</th>}
               <th className="py-2">{i18n.t("runDetail.reason")}</th>
             </tr>
           </thead>
           <tbody>
             {visible.map((tr, i) => {
-              const side = normalizeSide(tr.side);
+              const kind = kindOf(tr);
               const pnl = parseTradeNumber(tr.pnl);
               const returnPct = parseTradeNumber(tr.return_pct);
               const price = parseTradeNumber(tr.price);
@@ -876,11 +878,11 @@ function TradesTab({ run }: { run: RunData }) {
                   <td className="py-2 pr-4">
                     <span className={cn(
                       "inline-block rounded-full px-2 py-0.5 text-xs font-medium",
-                      side === "BUY" && "bg-success/10 text-success",
-                      side === "SELL" && "bg-danger/10 text-danger",
-                      side === "" && "bg-muted text-muted-foreground",
+                      (kind === "long_open" || kind === "short_close") && "bg-danger/10 text-danger",
+                      (kind === "short_open" || kind === "long_close") && "bg-success/10 text-success",
+                      !kind && "bg-muted text-muted-foreground",
                     )}>
-                      {side === "BUY" ? i18n.t("runDetail.sideBuy") : side === "SELL" ? i18n.t("runDetail.sideSell") : tr.side}
+                      {kind === "long_open" ? i18n.t("runDetail.sideLongOpen") : kind === "short_open" ? i18n.t("runDetail.sideShortOpen") : kind === "long_close" ? i18n.t("runDetail.sideLongClose") : kind === "short_close" ? i18n.t("runDetail.sideShortClose") : tr.side}
                     </span>
                   </td>
                   <td className="py-2 pr-4 text-right font-mono tabular-nums">{tr.price}</td>
@@ -913,6 +915,9 @@ function TradesTab({ run }: { run: RunData }) {
                   )}
                   {hasHoldingDays && (
                     <td className="py-2 pr-4 text-right font-mono tabular-nums text-muted-foreground">{tr.holding_days ?? "—"}</td>
+                  )}
+                  {hasHoldingBars && (
+                    <td className="py-2 pr-4 text-right font-mono tabular-nums text-muted-foreground">{tr.holding_bars ?? "—"}</td>
                   )}
                   <td className="py-2 text-xs text-muted-foreground">{tr.reason}</td>
                 </tr>
@@ -1077,6 +1082,9 @@ function AnalysisChartCard({
   const dark = useThemeDark();
   const points = payload[chartKey];
   const hasData = Array.isArray(points) && points.length > 0;
+  const [heatGranularity, setHeatGranularity] = useState<"day" | "week" | "month">(
+    (payload.heatmap_default as "day" | "week" | "month" | undefined) ?? "month"
+  );
 
   useEffect(() => {
     if (!ref.current || !hasData) return;
@@ -1163,17 +1171,22 @@ function AnalysisChartCard({
         }],
       };
     } else if (chartKey === "monthly_heatmap" && Array.isArray(points)) {
-      const rows = points as Array<{ year: number; month: number; pnl: number; count: number }>;
-      const years = [...new Set(rows.map((r) => r.year))].sort();
+      const periodData = ((payload.period_pnl as Record<string, Array<Record<string, unknown>>> | undefined) ?? {})[heatGranularity] ?? [];
+      const rows = periodData.map((r) => ({
+        label: heatGranularity === "month"
+          ? `${String(r.year).padStart(4, "0")}-${String(r.month).padStart(2, "0")}`
+          : String(r.date ?? r.week ?? ""),
+        pnl: Number(r.pnl ?? 0),
+      }));
+      const labels = rows.map((r) => r.label);
       const maxAbs = Math.max(1, ...rows.map((r) => Math.abs(r.pnl)));
       option = {
         grid: { left: 18, right: 18, top: 44, bottom: 80, containLabel: true },
-        tooltip: { ...tooltip, trigger: "item", formatter: (params: { data: { value: number[] } }) => {
-          const value = params.data.value;
-          return `${years[value[1]] ?? ""}-${String(value[0] + 1).padStart(2, "0")}: ${value[2]}%`;
+        tooltip: { ...tooltip, trigger: "item", formatter: (params: { data?: { label?: string; pnl?: number } }) => {
+          return `${params.data?.label ?? ""}: ${Number(params.data?.pnl ?? 0).toFixed(2)}`;
         } },
-        xAxis: { type: "category", name: i18n.t("runDetail.chartAxisMonth" as any), data: Array.from({ length: 12 }, (_, i) => String(i + 1)), splitArea: { show: true }, ...axis, ...middleName },
-        yAxis: { type: "category", name: i18n.t("runDetail.chartAxisYear" as any), data: years, splitArea: { show: true }, ...axis },
+        xAxis: { type: "category", data: labels, splitArea: { show: true }, ...axis, ...middleName },
+        yAxis: { type: "category", data: ["PnL"], splitArea: { show: true }, ...axis },
         visualMap: {
           min: -maxAbs, max: maxAbs, calculable: true, orient: "horizontal", left: "center", bottom: 24,
           textStyle: { color: t.textColor, fontSize: 10 },
@@ -1181,13 +1194,13 @@ function AnalysisChartCard({
         },
         series: [{
           type: "heatmap",
-          data: rows.map((r) => [r.month - 1, years.indexOf(r.year), r.pnl]),
+          data: rows.map((r, i) => ({ value: [i, 0, r.pnl], label: r.label, pnl: r.pnl })),
           label: { show: false },
           itemStyle: { borderColor: t.tooltipBg, borderWidth: 1 },
         }],
       };
     } else if (chartKey === "pnl_vs_holding" && Array.isArray(points)) {
-      const rows = points as Array<{ holding_days?: number; return_pct?: number; win: boolean }>;
+      const rows = points as Array<{ holding_days?: number; holding_bars?: number; return_pct?: number; win: boolean }>;
       option = {
         grid, tooltip: { ...tooltip, trigger: "item" },
         xAxis: { ...valueAxis, name: i18n.t("runDetail.chartAxisHoldingDays" as any), ...middleName },
@@ -1195,7 +1208,7 @@ function AnalysisChartCard({
         series: [{
           type: "scatter",
           data: rows.map((r) => ({
-            value: [r.holding_days ?? 0, r.return_pct ?? 0],
+            value: [r.holding_bars ?? r.holding_days ?? 0, r.return_pct ?? 0],
             itemStyle: { color: r.win ? ANALYSIS_RED : ANALYSIS_GREEN },
           })),
           symbolSize: 9,
@@ -1254,11 +1267,20 @@ function AnalysisChartCard({
     const ro = new ResizeObserver(() => chart.resize());
     ro.observe(ref.current!);
     return () => { ro.disconnect(); chart.dispose(); };
-  }, [chartKey, points, dark]);
+  }, [chartKey, points, heatGranularity, dark]);
 
   return (
     <div className="rounded-md border border-border/60 bg-card p-3">
-      <h3 className="mb-2 text-sm font-medium">{title}</h3>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <h3 className="text-sm font-medium">{title}</h3>
+        {chartKey === "monthly_heatmap" && (
+          <div className="flex gap-0.5">
+            {(["day", "week", "month"] as const).map((g) => (
+              <button key={g} onClick={() => setHeatGranularity(g)} className={cn("px-1.5 py-0.5 rounded text-[10px] font-mono transition-colors", heatGranularity === g ? "bg-primary/15 text-primary font-medium" : "text-muted-foreground/50 hover:text-muted-foreground")}>{i18n.t(`runDetail.heatmap${g === "day" ? "Day" : g === "week" ? "Week" : "Month"}` as any)}</button>
+            ))}
+          </div>
+        )}
+      </div>
       {hasData ? (
         <div ref={ref} className="h-72 w-full" />
       ) : pngUrl ? (

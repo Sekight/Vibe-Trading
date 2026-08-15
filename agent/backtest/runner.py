@@ -967,6 +967,13 @@ def main(run_dir: Path, with_analysis: bool = False) -> None:
     engine_type = config.get("engine", "daily")
     signal_engine = engine_cls()
 
+    # Optional execution window: strategy reads trade_start/trade_end instead of
+    # hard-coding a signal start, while the engine truncates the run window.
+    if config.get("backtest_start"):
+        setattr(signal_engine, "trade_start", config["backtest_start"])
+    if config.get("backtest_end"):
+        setattr(signal_engine, "trade_end", config["backtest_end"])
+
     # Annualization bars
     effective_source = _detect_primary_source(codes, source)
     from backtest.metrics import calc_bars_per_year

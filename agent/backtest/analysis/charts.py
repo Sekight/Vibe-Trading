@@ -11,6 +11,23 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from backtest.analysis.digest import load_digest
+from datetime import datetime
+
+
+def _default_heatmap_granularity(digest: Dict[str, Any]) -> str:
+    """Pick day/week/month heatmap granularity from the backtest window."""
+    cfg = digest.get("config") or {}
+    start = str(cfg.get("backtest_start") or cfg.get("start_date") or "")[:10]
+    end = str(cfg.get("backtest_end") or cfg.get("end_date") or "")[:10]
+    try:
+        days = (datetime.strptime(end, "%Y-%m-%d") - datetime.strptime(start, "%Y-%m-%d")).days
+    except (ValueError, TypeError):
+        return "month"
+    if days <= 7:
+        return "day"
+    if days <= 31:
+        return "week"
+    return "month"
 
 logger = logging.getLogger(__name__)
 
@@ -23,10 +40,10 @@ CHART_SPECS: List[Dict[str, str]] = [
     {"key": "equity_return", "filename": "equity_return.png", "title": "净值曲线（累计收益率 %）"},
     {"key": "drawdown", "filename": "drawdown.png", "title": "策略净值回撤瀑布图（水下曲线 %）"},
     {"key": "pnl_scatter", "filename": "pnl_scatter.png", "title": "单笔盈亏散点（红赚绿亏）"},
-    {"key": "monthly_heatmap", "filename": "monthly_heatmap.png", "title": "月度损益热力图（红赚绿亏）"},
-    {"key": "pnl_vs_holding", "filename": "pnl_vs_holding.png", "title": "盈亏 vs 持仓时长（自然日）"},
+    {"key": "monthly_heatmap", "filename": "monthly_heatmap.png", "title": "损益热力图（红赚绿亏）"},
+    {"key": "pnl_vs_holding", "filename": "pnl_vs_holding.png", "title": "盈亏 vs 持仓时长（bar）"},
     {"key": "mae_mfe", "filename": "mae_mfe.png", "title": "MAE/MFE 散点（金标准图）"},
-    {"key": "holding_buckets", "filename": "holding_buckets.png", "title": "持仓分桶盈亏与胜率（自然日）"},
+    {"key": "holding_buckets", "filename": "holding_buckets.png", "title": "持仓分桶盈亏与胜率（bar）"},
 ]
 
 CHART_KEYS = [spec["key"] for spec in CHART_SPECS]
@@ -70,9 +87,14 @@ def compute_chart_payload(digest: Dict[str, Any]) -> Dict[str, Any]:
             {"year": item.get("year"), "month": item.get("month"), "pnl": item.get("pnl"), "count": item.get("count")}
             for item in (digest.get("monthly_pnl") or [])
         ],
+        "period_pnl": digest.get("period_pnl") or {
+            "day": [], "week": [], "month": digest.get("monthly_pnl") or []
+        },
+        "heatmap_default": _default_heatmap_granularity(digest),
         "pnl_vs_holding": [
             {
                 "holding_days": trade.get("holding_days"),
+                "holding_bars": trade.get("holding_bars"),
                 "return_pct": trade.get("return_pct"),
                 "pnl": trade.get("pnl"),
                 "win": bool(trade.get("win")),
@@ -196,9 +218,10 @@ def _render_pnl_scatter(plt: Any, payload: Dict[str, Any], path: Path) -> None:
 
 def _render_monthly_heatmap(plt: Any, payload: Dict[str, Any], path: Path) -> None:
     import numpy as np  # noqa: PLC0415
-    from matplotlib.colors import TwoSlopeNorm  # noqa: PLC0415
 
-    points = payload.get("monthly_heatmap") or []
+    granularity = str(payload.get("heatmap_default") or "month")
+    period_data = (payload.get("period_pnl") or {}).get(granularity) or []
+    points = period_data or payload.get("monthly_heatmap") or []
     if not points:
         fig, ax = plt.subplots(figsize=(10, 5), dpi=120)
         ax.text(0.5, 0.5, "无交易数据", ha="center", va="center")
@@ -208,24 +231,35 @@ def _render_monthly_heatmap(plt: Any, payload: Dict[str, Any], path: Path) -> No
         plt.close(fig)
         return
 
-    years = sorted({p["year"] for p in points})
-    months = list(range(1, 13))
-    matrix = np.full((len(years), 12), float("nan"))
-    for point in points:
-        if point["year"] in years and 1 <= point["month"] <= 12:
-            matrix[years.index(point["year"])][point["month"] - 1] = point["pnl"]
-
     fig, ax = plt.subplots(figsize=(10, 5), dpi=120)
-    finite = matrix[~np.isnan(matrix)]
-    vmax = max(abs(float(finite.max())) if len(finite) else 1.0, 1.0)
-    norm = TwoSlopeNorm(vmin=-vmax, vcenter=0.0, vmax=vmax)
-    im = ax.imshow(matrix, cmap="RdYlGn", norm=norm, aspect="auto")
-    ax.set_yticks(range(len(years)), labels=[str(year) for year in years])
-    ax.set_xticks(range(12), labels=[str(m) for m in months])
-    ax.set_xlabel("月份")
-    ax.set_ylabel("年份")
-    ax.set_title("月度损益热力图（红=盈利，绿=亏损）")
-    fig.colorbar(im, ax=ax, label="盈亏")
+    if granularity == "month":
+        from matplotlib.colors import TwoSlopeNorm  # noqa: PLC0415
+        years = sorted({p["year"] for p in points})
+        months = list(range(1, 13))
+        matrix = np.full((len(years), 12), float("nan"))
+        for point in points:
+            if point["year"] in years and 1 <= point["month"] <= 12:
+                matrix[years.index(point["year"])][point["month"] - 1] = point["pnl"]
+        finite = matrix[~np.isnan(matrix)]
+        vmax = max(abs(float(finite.max())) if len(finite) else 1.0, 1.0)
+        norm = TwoSlopeNorm(vmin=-vmax, vcenter=0.0, vmax=vmax)
+        im = ax.imshow(matrix, cmap="RdYlGn", norm=norm, aspect="auto")
+        ax.set_yticks(range(len(years)), labels=[str(year) for year in years])
+        ax.set_xticks(range(12), labels=[str(m) for m in months])
+        ax.set_xlabel("月份")
+        ax.set_ylabel("年份")
+        ax.set_title("月度损益热力图（红=盈利，绿=亏损）")
+        fig.colorbar(im, ax=ax, label="盈亏")
+    else:
+        labels = [str(p.get("date") or p.get("week") or "") for p in points]
+        values = [float(p.get("pnl") or 0.0) for p in points]
+        colors = [RED if value >= 0 else GREEN for value in values]
+        ax.bar(labels, values, color=colors, alpha=0.85)
+        ax.axhline(0, color="#94a3b8", linewidth=0.8)
+        plt.setp(ax.get_xticklabels(), rotation=45, ha="right")
+        ax.set_xlabel("日期/周" if granularity == "day" else "周" )
+        ax.set_title(f"{('日' if granularity == 'day' else '周')}度损益（红=盈利，绿=亏损）")
+        fig.colorbar = None
     fig.tight_layout()
     fig.savefig(path)
     plt.close(fig)
@@ -297,11 +331,11 @@ def _render_holding_buckets(plt: Any, payload: Dict[str, Any], path: Path) -> No
         ax_twin.set_ylabel("胜率 %")
         ax_twin.set_ylim(0, 105)
         ax.set_xticks(x_positions, labels)
-        ax.set_xlabel("持仓天数分桶（自然日）")
+        ax.set_xlabel("持仓 bar 数分桶")
         lines, line_labels = ax.get_legend_handles_labels()
         lines2, labels2 = ax_twin.get_legend_handles_labels()
         ax.legend(lines + lines2, line_labels + labels2, loc="upper right")
-    ax.set_title("持仓分桶：平均收益率与胜率（自然日）")
+    ax.set_title("持仓分桶：平均收益率与胜率（bar）")
     ax.grid(True, alpha=0.25, axis="y")
     fig.tight_layout()
     fig.savefig(path)

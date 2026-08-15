@@ -273,12 +273,23 @@ def build_trade_markers(
             continue
         side = str(row.get("side") or "").upper()
         timestamp = str(row.get("timestamp") or "")
+        side_lower = side.lower()
+        pnl = _safe_float(row.get("pnl")) or 0.0
+        holding_bars = _safe_float(row.get("holding_bars")) or 0.0
+        holding_days = _safe_float(row.get("holding_days")) or 0.0
+        is_close = abs(pnl) > 1e-9 or holding_bars > 0 or holding_days > 0
+        if is_close:
+            direction = "long" if side_lower == "sell" else "short"
+        else:
+            direction = "long" if side_lower == "buy" else "short"
         markers.append(
             {
-                "time": timestamp[:10],
+                "time": timestamp,
                 "timestamp": timestamp,
                 "code": row.get("code"),
                 "side": side,
+                "action": "close" if is_close else "open",
+                "direction": direction,
                 "price": _safe_float(row.get("price")),
                 "qty": _safe_float(row.get("qty")),
                 "reason": row.get("reason"),
@@ -326,7 +337,7 @@ def build_indicator_series(
             (
                 {
                     **row,
-                    "time": str(row.get("time") or format_run_date(row.get("timestamp")) or ""),
+                    "time": str(row.get("time") or row.get("timestamp") or ""),
                 }
                 for row in rows
             ),
@@ -375,7 +386,7 @@ def _load_ohlcv_artifacts(run_dir: Path) -> List[Dict[str, Any]]:
     for f in ohlcv_files:
         code = f.stem.removeprefix("ohlcv_")
         for r in load_csv_records(f):
-            ts = r.get("trade_date") or r.get("timestamp") or r.get("time") or r.get("")
+            ts = r.get("timestamp") or r.get("time") or r.get("trade_date") or r.get("")
             if not ts:
                 continue
             rows.append({
@@ -383,6 +394,7 @@ def _load_ohlcv_artifacts(run_dir: Path) -> List[Dict[str, Any]]:
                 "open": r.get("open", 0), "high": r.get("high", 0),
                 "low": r.get("low", 0), "close": r.get("close", 0),
                 "volume": r.get("volume", 0),
+                "trade_date": r.get("trade_date"),
             })
     return _normalize_price_rows(rows)
 
@@ -583,7 +595,7 @@ def _normalize_price_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """
     normalized: List[Dict[str, Any]] = []
     for row in rows:
-        timestamp = format_run_date(row.get("timestamp") or row.get("time"))
+        timestamp = str(row.get("timestamp") or row.get("time") or "").strip()
         if not timestamp:
             continue
         normalized.append(
@@ -596,6 +608,7 @@ def _normalize_price_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
                 "low": float(row.get("low") or 0.0),
                 "close": float(row.get("close") or 0.0),
                 "volume": float(row.get("volume") or 0.0),
+                "trade_date": row.get("trade_date"),
             }
         )
     return sorted(normalized, key=lambda item: (item["code"], item["time"]))
@@ -625,14 +638,15 @@ def _flatten_data_map(data_map: Dict[str, Any], start_date: str) -> List[Dict[st
         for timestamp, row in current.iterrows():
             rows.append(
                 {
-                    "time": pd.Timestamp(timestamp).strftime("%Y-%m-%d"),
-                    "timestamp": pd.Timestamp(timestamp).strftime("%Y-%m-%d"),
+                    "time": pd.Timestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S"),
+                    "timestamp": pd.Timestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S"),
                     "code": code,
                     "open": round(float(row.get("open") or 0.0), 6),
                     "high": round(float(row.get("high") or 0.0), 6),
                     "low": round(float(row.get("low") or 0.0), 6),
                     "close": round(float(row.get("close") or 0.0), 6),
                     "volume": round(float(row.get("volume") or 0.0), 6),
+                    "trade_date": row.get("trade_date") if "trade_date" in row else None,
                 }
             )
 

@@ -24,7 +24,8 @@ def test_compute_chart_payload_contains_all_chart_keys(tmp_path: Path) -> None:
     digest = build_digest(run_dir)
     payload = compute_chart_payload(digest)
 
-    assert set(payload.keys()) == set(CHART_KEYS)
+    assert set(CHART_KEYS) <= set(payload.keys())
+    assert set(payload.keys()) >= {"period_pnl", "heatmap_default"}
     assert len(payload["equity_return"]) == 3
     assert len(payload["pnl_scatter"]) == 2
     assert len(payload["monthly_heatmap"]) == 2
@@ -77,6 +78,6 @@ def test_compute_chart_payload_includes_benchmark_series(tmp_path: Path) -> None
 
 def test_chart_spec_titles_clarify_units() -> None:
     titles = {spec["key"]: spec["title"] for spec in CHART_SPECS}
-    assert "自然日" in titles["pnl_vs_holding"]
-    assert "自然日" in titles["holding_buckets"]
+    assert "bar" in titles["pnl_vs_holding"]
+    assert "bar" in titles["holding_buckets"]
     assert "策略净值" in titles["drawdown"]
