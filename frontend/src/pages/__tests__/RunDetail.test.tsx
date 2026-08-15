@@ -161,7 +161,7 @@ describe("RunDetail page", () => {
     expect(screen.getByRole("columnheader", { name: "Time" })).toHaveClass("ps-4");
   });
 
-  it("renders the commission column in the trades table", async () => {
+  it("renders the commission column between return and holding days", async () => {
     apiMock.getRun.mockResolvedValue({
       status: "success",
       run_id: "commission",
@@ -173,7 +173,10 @@ describe("RunDetail page", () => {
         price: "200",
         qty: "2",
         pnl: "5",
+        return_pct: "2.5",
         commission: "0.8",
+        holding_days: "3",
+        holding_bars: "3",
         reason: "signal",
       }],
     });
@@ -184,7 +187,11 @@ describe("RunDetail page", () => {
     await screen.findByText("Commission run");
     fireEvent.click(screen.getByRole("tab", { name: "Trades" }));
 
-    expect(screen.getByRole("columnheader", { name: "Commission" })).toBeInTheDocument();
+    const headers = screen.getAllByRole("columnheader").map((h) => h.textContent);
+    expect(headers).toEqual([
+      "Time", "Code", "Side", "Price", "Qty",
+      "P&L", "Return", "Commission", "Held (days)", "Held (bars)", "Reason",
+    ]);
     expect(screen.getByText("0.8")).toBeInTheDocument();
   });
 

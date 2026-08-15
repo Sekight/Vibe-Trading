@@ -859,8 +859,8 @@ function TradesTab({ run }: { run: RunData }) {
               {hasLots && <th className="py-2 pr-4 text-right">{i18n.t("runDetail.lots")}</th>}
               {hasWeight && <th className="py-2 pr-4 text-right">{i18n.t("runDetail.positionWeight")}</th>}
               {hasPnl && <th className="py-2 pr-4 text-right">{i18n.t("runDetail.pnl")}</th>}
-              {hasCommission && <th className="py-2 pr-4 text-right">{i18n.t("runDetail.commission")}</th>}
               {hasReturnPct && <th className="py-2 pr-4 text-right">{i18n.t("runDetail.returnPct")}</th>}
+              {hasCommission && <th className="py-2 pr-4 text-right">{i18n.t("runDetail.commission")}</th>}
               {hasHoldingDays && <th className="py-2 pr-4 text-right">{i18n.t("runDetail.holdingDays")}</th>}
               {hasHoldingBars && <th className="py-2 pr-4 text-right">{i18n.t("runDetail.holdingBars")}</th>}
               <th className="py-2">{i18n.t("runDetail.reason")}</th>
@@ -910,17 +910,17 @@ function TradesTab({ run }: { run: RunData }) {
                       {pnl != null ? formatSigned(pnl) : "—"}
                     </td>
                   )}
+                  {hasReturnPct && (
+                    <td className={cn("py-2 pr-4 text-right font-mono tabular-nums", signedNumberClass(returnPct))}>
+                      {returnPct != null ? formatSigned(returnPct, "%") : "—"}
+                    </td>
+                  )}
                   {hasCommission && (
                     <td className="py-2 pr-4 text-right font-mono tabular-nums text-muted-foreground">
                       {(() => {
                         const commission = parseTradeNumber(tr.commission);
                         return commission != null ? commission.toLocaleString(undefined, { maximumFractionDigits: 2 }) : "—";
                       })()}
-                    </td>
-                  )}
-                  {hasReturnPct && (
-                    <td className={cn("py-2 pr-4 text-right font-mono tabular-nums", signedNumberClass(returnPct))}>
-                      {returnPct != null ? formatSigned(returnPct, "%") : "—"}
                     </td>
                   )}
                   {hasHoldingDays && (
