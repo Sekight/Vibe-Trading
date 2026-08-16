@@ -23,3 +23,4 @@
 | P-20260814-total_commission | 已完成 | 2026-08-14 | 总手续费与单边手续费落盘展示 | P-20260814-total_commission.md | V024 |
 | P-20260815-futures_stop_tick | 已完成 | 2026-08-15 | 期货止损成交价按最小变动价位取整 | P-20260815-futures_stop_tick.md | V026 |
 | P-20260816-chart_window_preserve | 已完成 | 2026-08-16 | 图表页保持行情可视时间窗口 | P-20260816-chart_window_preserve.md | V027 / V028 |
+| P-20260816-contract_switch_auto | 讨论中 | 2026-08-16 | 换约规则自动识别主连切换日 | P-20260816-contract_switch_auto.md | 待填 |
