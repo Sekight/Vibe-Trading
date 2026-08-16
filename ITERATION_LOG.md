@@ -42,6 +42,7 @@
 | V027 | 2026-08-16 | 图表页保持行情可视时间窗口 | 调指标/切副图/切标签/加标的不再重置 K 线窗口；共享窗口机制 + ChartTab 保持挂载 |
 | V028 | 2026-08-16 | 图表页多标的共享图表设置 | 指标/副图/周期/窗口提升为 run 级共享，切标的全保持；换 run 显式重置不串 |
 | V029 | 2026-08-16 | 行情副图新增 ATR 指标 | 副图按钮新增 atr（14 周期 Wilder 平滑），纯前端增量、性能无感 |
+| V030 | 2026-08-16 | 回测提速：默认跳过 PNG + loader 缓存 | 7 张 PNG 占回测 93%（约 557s）是唯一瓶颈；runner 默认不生图（--with-charts 才生），配合 VIBE_TRADING_DATA_CACHE 三年 15m 回测 596s→11s |
 > 补录说明：V001-V009 为补录条目，依据 git 历史、HowToUse、全局复利与踩坑日志、`C:\Users\mumu\.codex\sessions` 会话记录回溯整理；当时未留痕的字段标“待补”。从下一条起，每次迭代收尾直接写正文。
 
 ## 模板
@@ -357,3 +358,11 @@
 - 关键细节：纯前端——后端 `charts.py` 只生成 PNG 静态图、digest 不参与行情指标，前端本就 `void indicators`（只用前端重算）。①`lib/indicators.ts` 新增 `calcATR(highs, lows, closes, period=14)`：TR = max(高−低, |高−前收|, |低−前收|)，首个 ATR = 前 14 个 TR 均值，此后 Wilder 平滑 `(ATR×(n−1)+TR)/n`，period 索引前返回 null（与 calcRSI 同风格）；②`lib/chartWindow.ts` 的 `Sub` 类型加 `"atr"`；③`CandlestickChart.tsx` 三处：indicatorCache 加 `atr`（与其余指标同批无条件预计算，每次数据变更仅多一次 O(n) 遍历，毫秒级无感）、渲染分支 `else if (sub === "atr")` 单折线（复用 RSI 写法）、副图按钮数组加 `"atr"`。i18n 无需改（副图按钮为硬编码小写 id + CSS uppercase）；tooltip 走通用分支自动显示 ATR 值；多标的共享 `ChartView.sub` 使 ATR 自动随切标的全图保持。
 - 验证：`npx vitest run` 前端全量 449 passed（新增 calcATR 单测 5 个 + CandlestickChart atr 渲染用例 1 个）、`tsc --noEmit` 通过。交互验证（点 atr 按钮看折线）由用户浏览器目视确认。
 - 关联：commit `eaa15b0`；run 无（纯前端改动）。
+
+### V030 · 回测提速：默认跳过 PNG 图表 + loader 缓存（2026-08-16）
+- 一句话总结：runner 默认不再生成 7 张 `analysis_charts/*.png`（加 `--with-charts` 才生图），配合 `VIBE_TRADING_DATA_CACHE=1`，三年 15m 回测从 596s 降到约 11s。
+- 为什么：分段计时（cProfile + 分阶段计时）拆出 7 张 PNG（matplotlib）占全程 93%（约 557s），是唯一瓶颈；WebUI 分析图读 `analysis.digest.json` 算 ECharts、PNG 只是兜底图片（HowToUse 8.36 已注明）；数据侧由 loader 缓存（8.35）覆盖。
+- 关键细节：`runner.py` 的 `main`/`_finalize_run_analysis` 新增 `with_charts` 参数（默认 False），`__main__` 加 `--with-charts`；digest 仍默认生成（WebUI 依赖）。耗时拆解（3 年 15m、缓存命中）：数据加载+聚合 0.6s、策略 generate 0.3s、引擎 run_backtest ~3s（其中逐 bar 执行约 2s；trades.csv/metrics/run_card 写入合计 <0.6s，不是耗时项）、digest ~5s、7 张 PNG ~557s。各阶段耗时已记入 HowToUse 8.38。
+- 验证：默认跑 11s 且输出无 analysis_charts；`--with-charts` 才生成 PNG（约 557s）；指标/trades/digest 与生图版完全一致（回测确定性不受影响）。
+- 影响/注意：命令行回测默认行为变化（以前自动生成 PNG）；需要 PNG 的场合（报告/贴图）加 `--with-charts`。HowToUse 8.38 已同步（含"每次回测自动生成 PNG"旧描述修正）。
+- 关联：commit `4621fb3`；HowToUse 8.38/8.35；run `_cmp_v3_15m_v32_2022_2025`。

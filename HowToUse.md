@@ -529,6 +529,7 @@ sources:
 - `columns`：把文件列名映射成标准 `date/open/high/low/close/volume`，缺省即按标准列名读取。
 - `date_format`：可选，如 `%Y-%m-%d`、`%Y-%m-%d %H:%M:%S`。
 - 校验：文件必须含日期列和 `open/high/low/close`；`volume` 缺省自动补 0。配置为空或文件不存在时，local loader 不可用且不会静默回退到网络数据源。
+- 期货代码后缀（2026-08-16 踩坑）：国内期货 symbol 的交易所后缀按引擎约定的缩写写，郑商所必须用 `.ZCE`（如 `FG0000.ZCE`、`RM0000.ZCE`），不要写 `.CZCE`。引擎的市场识别正则只认 `ZCE|DCE|SHFE|INE|CFFEX|GFEX`，写 `.CZCE` 匹配不上会被误判成 A 股引擎：数据能正常加载、回测能跑完，但所有开仓订单被拒——症状是回测 **0 笔交易、无任何报错/警告**（`metrics.csv` 里 `trade_count=0` 但 `rebalance_count>0`）。把 config 和 `config.json` 的 codes 都改成 `.ZCE` 即可；乘数/涨跌停/手续费等随后按品种表自动生效（如 FG=20、RM=10，见 8.41 的心忆期货流程）。
 
 `date_format` 常用格式（Python strftime/strptime 规则，local loader 用 `pd.to_datetime(..., format=date_format)` 解析）：
 
@@ -820,7 +821,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 5. 最后才烧 LLM：挑出 2-3 个候选后，再 `python -m backtest.runner "<候选目录>" --with-analysis` 补分析报告，或 `vibe-trading --continue <run_id> "..."` 继续精调。
 
 常见坑：改 `config.json` / `signal_engine.py` 后必须重跑 runner 才生效；`local:` 是 codes 前缀（`local:600097.SH`），不要写 `source: local`；runner 要在 `agent` 目录下跑；trades.csv 被 Excel/WPS 占用时会 PermissionError（8.37）。
-调参产物清理：每次回测都会在副本里自动生成 `analysis_charts/*.png` 和完整 `artifacts/`（含行情快照 `ohlcv_*.csv`、equity、trades、metrics、validation 等）；即使数据来自本地 data-bridge，`ohlcv_*.csv` 也会把内存里的行情快照再落一份到每个副本，10 标的 × 10 组约 3MB。批量调参后建议手动清理：删除 `exp_*/analysis_charts` 和 `exp_*/artifacts/ohlcv_*.csv`，保留 `metrics.csv` / `trades.csv` / `equity.csv` 等；删除行情快照后，digest 的 ohlcv 概览、MAE/MFE、regime 会缺失，回测指标和 run card 不受影响。另外 `VIBE_TRADING_DATA_CACHE=1` 时 local 数据还会在 `<vibe_home>\cache\loaders\local` 落 parquet，不需要可去掉该环境变量。
+调参产物清理：每次回测都会在副本里生成完整 `artifacts/`（含行情快照 `ohlcv_*.csv`、equity、trades、metrics、validation 等）；7 张 `analysis_charts/*.png` 默认不再生成（见下“回测提速”，需要时加 `--with-charts`）。即使数据来自本地 data-bridge，`ohlcv_*.csv` 也会把内存里的行情快照再落一份到每个副本，10 标的 × 10 组约 3MB。批量调参后建议手动清理：删除 `exp_*/analysis_charts` 和 `exp_*/artifacts/ohlcv_*.csv`，保留 `metrics.csv` / `trades.csv` / `equity.csv` 等；删除行情快照后，digest 的 ohlcv 概览、MAE/MFE、regime 会缺失，回测指标和 run card 不受影响。另外 `VIBE_TRADING_DATA_CACHE=1` 时 local 数据还会在 `<vibe_home>\cache\loaders\local` 落 parquet，不需要可去掉该环境变量。
 
 规模分档：1-5 组手动复制 + 改 `code/signal_engine.py` + 跑即可；6-20 组写简单循环脚本；几十上百组用网格脚本（复制模板目录 → 改参数 → 跑 runner → 汇总 metrics）。
 参数改法二选一：
@@ -830,6 +831,21 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 - 硬过滤：trade_count 至少 10-20、max_drawdown 可接受、风控字段合规、换手可执行、蒙特卡洛 p 值不能太差。
 - 综合排序：calmar / sharpe / sortino / profit_factor；相邻参数结果平滑才算稳（尖峰多半是过拟合）。
 - 最后只对 top 3-5 个跑 --with-analysis 详细对比。
+
+回测提速（2026-08-16 起）：大区间反复调参时，两件事把一次回测从 10 分钟压到 10 秒——
+- **默认跳过 PNG 图表**：runner 默认不再生成 7 张 `analysis_charts/*.png`（WebUI 分析图读 `analysis.digest.json` 算 ECharts，PNG 只是兜底图片），需要时加 `--with-charts`。3 年 15m 回测里 7 张 PNG 约 557 秒，占全程 93%，是唯一瓶颈。
+- **loader 缓存**：`VIBE_TRADING_DATA_CACHE=1`（8.35）缓存同一 数据源 + 标的 + 周期 + 区间 的行情，命中后数据加载仅 0.6 秒。
+- 实测耗时分布（3 年 15m、缓存命中、含本地 1m 数据）：完整跑 596s → 默认跑约 11s。
+
+  | 阶段 | 耗时 | 说明 |
+  |---|---|---|
+  | 数据加载 + 聚合（缓存命中） | 0.6s | 46 万根 1m → 1.7 万根 15m |
+  | 策略 generate() 信号扫描 | 0.3s | 全量信号 + 过滤条件 |
+  | 引擎 run_backtest | ~3s | 其中逐 bar 执行约 2s；写 trades.csv / metrics / run_card 合计 <0.6s，不是耗时项 |
+  | digest 生成 | ~5s | WebUI 分析图数据源，不可省 |
+  | 7 张 PNG（仅 `--with-charts`） | ~557s | matplotlib 渲染，WebUI 兜底图片 |
+
+  结论：反复调参请用 `python -m backtest.runner "<副本>"`（不带 `--with-charts`），配合缓存即可秒级出指标；PNG 只在需要贴图/报告时用 `--with-charts` 补生成。
 
 ### 8.39 策略不变，怎么换一批标的 / 换数据源快速重跑？
 
