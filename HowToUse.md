@@ -769,6 +769,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 
 - 是什么：回测 loader 的“可选本地行情缓存”。开启后，各数据源（tencent / tushare / akshare / mootdx / eastmoney / yfinance / ccxt / okx / futu / finnhub / tiingo / fmp / baostock / local 等）把“已完全结算的历史 K 线”按 key 存成 parquet；下次同一请求直接读本地，不联网。
 - 怎么开：在 `<vibe_home>\.env` 加 `VIBE_TRADING_DATA_CACHE=1`（`true/yes/on` 也行），默认关闭，不设或写 `0` 即关。默认目录是 `<vibe_home>\cache\loaders`；想换位置再加 `VIBE_TRADING_DATA_CACHE_ROOT=E:\...\loader-cache`。改完重启 `serve` / `dev` 后端，或新开 CLI 进程。
+- 待优化（2026-08-16）：设计上是"只配置一次"——在 `<vibe_home>\.env` 写好即可，不该每次手动带。但直接跑 `python -m backtest.runner <run_dir>` 时，runner 里的 `load_dotenv()` 无参数只找 `agent/.env` / 当前目录 `.env`，**不会加载 `<vibe_home>\.env`**，所以直跑路径下缓存实际一直是关的（症状：换标的/换区间每次都重新取数，`<vibe_home>\cache\loaders` 下不产生新 parquet；`VIBE_TRADING_DATA_CACHE` 写在 `.env` 里也无效）。当前 workaround：命令前显式带环境变量，例如 `VIBE_TRADING_DATA_CACHE=1 ..\.venv\Scripts\python.exe -m backtest.runner "<run_dir>"`。修复计划见 `documents/plans/P-20260816-cache_env_once.md`（拟让 runner 复用现有 `_ensure_dotenv()` 加载 `<vibe_home>/.env`，恢复"只配置一次"）。
 - 缓存了什么：只有 loader 返回的行情 DataFrame（OHLCV + 你请求的 `extra_fields`）。不缓存 run card、策略代码、LLM 分析、token 用量，也不含 API key。目录结构为 `cache\loaders\<source>\<sha256>.parquet` + 同名 `.parquet.json` 元数据。
 - key 怎么算：`缓存版本 + source + symbol + timeframe + start_date + end_date + fields`。所以只有“同一数据源 + 同一标的 + 同一周期 + 同一区间 + 同一字段”才会命中。
 - 增量吗：不做增量。区间从 2023-01-01~2023-12-28 改成 ~2023-12-31 时，key 变了，会全量重拉并写一个新文件，旧文件仍留在磁盘，不会只补 3 天。
