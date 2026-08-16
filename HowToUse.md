@@ -962,6 +962,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 
 - 项目规则：见 [AGENTS.md](AGENTS.md)
 - 迭代记忆：见 [ITERATION_LOG.md](ITERATION_LOG.md)
+- 坑的认知与状态：见 [Mistake_Journal.md](Mistake_Journal.md)（8.x 只保留解法；坑是否修复以账本为准）
 - 开工前计划：见 documents/plans/
 
 ## 12. 小周期回测分析口径（2026-08-14 起）
