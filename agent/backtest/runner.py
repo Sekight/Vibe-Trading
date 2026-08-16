@@ -873,7 +873,7 @@ def _maybe_inject_fundamentals_for_factor_panel(
 
 # --- Main entry ---
 
-def main(run_dir: Path, with_analysis: bool = False) -> None:
+def main(run_dir: Path, with_analysis: bool = False, with_charts: bool = False) -> None:
     """Load config, fetch data, run the selected backtest engine.
 
     With ``source="auto"``, routes each code through the appropriate loader.
@@ -1001,10 +1001,10 @@ def main(run_dir: Path, with_analysis: bool = False) -> None:
     # opt-in so the agent path (which writes analysis.md itself via
     # write_run_analysis) never double-charges tokens.
     if (run_dir / "run_card.json").exists():
-        _finalize_run_analysis(run_dir, with_analysis=with_analysis)
+        _finalize_run_analysis(run_dir, with_analysis=with_analysis, with_charts=with_charts)
 
 
-def _finalize_run_analysis(run_dir: Path, *, with_analysis: bool = False) -> None:
+def _finalize_run_analysis(run_dir: Path, *, with_analysis: bool = False, with_charts: bool = False) -> None:
     """Generate deterministic charts and optional LLM report after a run."""
     # Persist the digest once artifacts are final so the Web UI, PNGs and the
     # LLM report all read the same cached snapshot. Rebuilding it on every
@@ -1015,12 +1015,13 @@ def _finalize_run_analysis(run_dir: Path, *, with_analysis: bool = False) -> Non
         print(json.dumps({"analysis_digest": {"status": "ok", "path": str(run_dir / "analysis.digest.json")}}, ensure_ascii=False))
     except Exception as exc:  # noqa: BLE001 - digest is best-effort
         print(json.dumps({"warning": "analysis digest failed", "details": str(exc)[:500]}, ensure_ascii=False))
-    try:
-        from backtest.analysis.charts import generate_chart_artifacts
-        chart_result = generate_chart_artifacts(run_dir)
-        print(json.dumps({"analysis_charts": chart_result["generated"], "png_count": len(chart_result["pngs"])}, ensure_ascii=False))
-    except Exception as exc:  # noqa: BLE001 - charts are best-effort
-        print(json.dumps({"warning": "analysis charts failed", "details": str(exc)[:500]}, ensure_ascii=False))
+    if with_charts:
+        try:
+            from backtest.analysis.charts import generate_chart_artifacts
+            chart_result = generate_chart_artifacts(run_dir)
+            print(json.dumps({"analysis_charts": chart_result["generated"], "png_count": len(chart_result["pngs"])}, ensure_ascii=False))
+        except Exception as exc:  # noqa: BLE001 - charts are best-effort
+            print(json.dumps({"warning": "analysis charts failed", "details": str(exc)[:500]}, ensure_ascii=False))
     if with_analysis:
         try:
             from backtest.analysis.report import generate_analysis_report
@@ -1402,5 +1403,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(prog="backtest.runner", description="Run a backtest from a run directory")
     parser.add_argument("run_dir", help="Path to the run directory")
     parser.add_argument("--with-analysis", "--withAnalysis", dest="with_analysis", action="store_true", help="Generate the LLM analysis report after a successful backtest")
+    parser.add_argument("--with-charts", dest="with_charts", action="store_true", help="Generate PNG chart artifacts (default skipped; WebUI uses digest, PNGs are only fallback images)")
     args = parser.parse_args()
-    main(Path(args.run_dir), with_analysis=args.with_analysis)
+    main(Path(args.run_dir), with_analysis=args.with_analysis, with_charts=args.with_charts)
