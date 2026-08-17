@@ -926,6 +926,18 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
   3. 不要用 1m 文件 + `interval: 1D` 跑日线：local 按自然日聚合会把夜盘分到前一天，日线直接用 skill `--period daily` 生成。
 - open_oi 不会传给 SignalEngine，主连选择在解析时完成即可。
 
+### 8.42 回测引擎支持哪些 K 线周期？想跑 20m / 2H 等没列出的周期怎么办？
+
+- 引擎目前**只支持 7 个固定周期**（`agent/backtest/runner.py` 的 `_VALID_INTERVALS`）：`1m` / `5m` / `15m` / `30m` / `1H` / `4H` / `1D`。
+- **大小写敏感**：小时/日必须写大写（`1H` / `4H` / `1D`），写 `1h` / `4h` / `1d` 会被校验直接拒绝（`unsupported interval` 报错），不是自动兼容。分钟周期写小写（`15m` 等）。
+- 校验发生在 `config.json` 解析阶段（runner 的 pydantic validator），不支持的周期**直接报错、不会降级**。
+- 想在回测里用 `20m`、`2H` 等未列出的周期：需要改引擎侧代码，共三处——
+  1. `agent/backtest/runner.py` 的 `_VALID_INTERVALS` 集合加对应周期（如 `"20m"`）——这是"能不能跑"的闸门，不加必报错；
+  2. `agent/backtest/loaders/local_loader.py` 的 `_RESAMPLE_RULES` 加映射（如 `"20m": "20min"`）——local 数据是按目标周期从 1m 现场聚合的，不加就只会警告并原样返回源 bar，等于没聚合；
+  3. `agent/backtest/metrics.py` 的 `_BARS_PER_DAY` 年化表和 `_normalize_interval` 加对应映射——不加的话年化收益/夏普等按默认 1 bar/天折算，**指标失真**（回测执行和交易不受影响）。
+  前两处决定"能不能跑"，第三处决定"年化指标准不准"。
+- 前端 K 线图上的周期按钮（5m/15m/20m/1h/2h/1D/1W/1M/1Y）是**前端本地聚合展示**，与回测 `interval` 无关——页面能切 20m 不代表回测能跑 20m。
+
 ## 10. 命令速查表
 
 | 目的 | 命令 |
