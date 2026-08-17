@@ -27,4 +27,5 @@
 | P-20260816-cache_env_once | 讨论中 | 2026-08-16 | loader 缓存只配置一次（直跑 runner 也加载 vibe_home/.env） | P-20260816-cache_env_once.md | 待填 |
 | P-20260817-reports_dir_selector | 讨论中 | 2026-08-17 | WebUI 报告页目录选择器（支持 runs 子目录分类） | P-20260817-reports_dir_selector.md | 待填 |
 | P-20260817-trade_log_full_load | 讨论中 | 2026-08-17 | WebUI 交易明细一键加载全部（统计刷新，默认仍截断 500） | P-20260817-trade_log_full_load.md | 待填 |
+| P-20260817-fastrun | 讨论中 | 2026-08-17 | 回测 fastrun：--without-regime / --without-mae-mfe / --fastrun 跳过 digest 分析 | P-20260817-fastrun.md | 待填 |
 
