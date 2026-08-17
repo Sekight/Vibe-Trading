@@ -24,6 +24,8 @@
 | Mistake_Journal.md | 项目专属坑的认知与状态账本（坑的入口） | 主动维护：坑先入账本、状态权威、单向指针 |
 | documents/plans/ | 开工前计划（README=状态与索引入口；_template.md=新建计划模板） | 主动维护 |
 
+> 通读顺序：README_zh → HowToUse → ITERATION_LOG 索引 → documents/plans/README → Mistake_Journal 索引
+
 ## 三、查找规则
 
 - 新需求 / 新迭代 / 未完成需求：先看计划目录（README 为入口，新建计划用 _template.md）
