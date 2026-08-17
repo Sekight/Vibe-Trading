@@ -25,3 +25,4 @@
 | P-20260816-chart_window_preserve | 已完成 | 2026-08-16 | 图表页保持行情可视时间窗口 | P-20260816-chart_window_preserve.md | V027 / V028 |
 | P-20260816-contract_switch_auto | 讨论中 | 2026-08-16 | 换约规则自动识别主连切换日 | P-20260816-contract_switch_auto.md | 待填 |
 | P-20260816-cache_env_once | 讨论中 | 2026-08-16 | loader 缓存只配置一次（直跑 runner 也加载 vibe_home/.env） | P-20260816-cache_env_once.md | 待填 |
+| P-20260817-reports_dir_selector | 讨论中 | 2026-08-17 | WebUI 报告页目录选择器（支持 runs 子目录分类） | P-20260817-reports_dir_selector.md | 待填 |
