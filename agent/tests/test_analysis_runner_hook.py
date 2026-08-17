@@ -12,7 +12,8 @@ from src.tools.write_run_analysis_tool import WriteRunAnalysisTool
 from tests._analysis_fixtures import write_run_dir
 
 
-def test_finalize_generates_charts_without_llm_by_default(tmp_path, monkeypatch) -> None:
+def test_finalize_skips_charts_and_report_by_default(tmp_path, monkeypatch) -> None:
+    """V030 后默认只写 digest：不生成 PNG 图表、不调 LLM 报告。"""
     run_dir = write_run_dir(tmp_path)
     calls: list[str] = []
     monkeypatch.setattr(
@@ -27,6 +28,25 @@ def test_finalize_generates_charts_without_llm_by_default(tmp_path, monkeypatch)
     )
 
     _finalize_run_analysis(run_dir, with_analysis=False)
+
+    assert calls == []
+
+
+def test_finalize_generates_charts_with_flag_without_llm(tmp_path, monkeypatch) -> None:
+    run_dir = write_run_dir(tmp_path)
+    calls: list[str] = []
+    monkeypatch.setattr(
+        charts_module,
+        "generate_chart_artifacts",
+        lambda _run_dir: calls.append("charts") or {"generated": True, "pngs": []},
+    )
+    monkeypatch.setattr(
+        report_module,
+        "generate_analysis_report",
+        lambda *args, **kwargs: calls.append("report"),
+    )
+
+    _finalize_run_analysis(run_dir, with_charts=True)
 
     assert calls == ["charts"]
 
@@ -45,7 +65,7 @@ def test_finalize_with_analysis_calls_report_after_charts(tmp_path, monkeypatch)
         lambda *args, **kwargs: calls.append("report"),
     )
 
-    _finalize_run_analysis(run_dir, with_analysis=True)
+    _finalize_run_analysis(run_dir, with_analysis=True, with_charts=True)
 
     assert calls == ["charts", "report"]
 

@@ -209,11 +209,17 @@ def _artifact_fingerprint(run_dir: Path) -> Dict[str, Any]:
 
 
 def write_digest_json(
-    run_dir: Path, digest: Optional[Dict[str, Any]] = None
+    run_dir: Path,
+    digest: Optional[Dict[str, Any]] = None,
+    *,
+    include_regime: bool = True,
+    include_mae_mfe: bool = True,
 ) -> Dict[str, Any]:
     """Persist the deterministic analysis digest as JSON."""
     if digest is None:
-        digest = build_digest(run_dir)
+        digest = build_digest(
+            run_dir, include_regime=include_regime, include_mae_mfe=include_mae_mfe
+        )
     path = Path(run_dir) / DIGEST_FILENAME
     payload = {
         "schema_version": DIGEST_SCHEMA_VERSION,
@@ -618,15 +624,28 @@ def _metrics_from_run(run_dir: Path) -> Dict[str, Any]:
     return dict(card.get("metrics") or {})
 
 
-def build_digest(run_dir: Path) -> Dict[str, Any]:
-    """Build the full deterministic analysis digest for a run directory."""
+def build_digest(
+    run_dir: Path,
+    *,
+    include_regime: bool = True,
+    include_mae_mfe: bool = True,
+) -> Dict[str, Any]:
+    """Build the deterministic analysis digest for a run directory.
+
+    ``include_regime`` / ``include_mae_mfe`` let callers skip the two
+    expensive analysis components (used by the runner's ``--fastrun`` family
+    of flags). Skipped sections are omitted from the digest entirely so
+    consumers can distinguish "not computed" from "no data".
+    """
     run_dir = Path(run_dir)
     config = load_json(run_dir / "config.json") or {}
     run_card = load_json(run_dir / "run_card.json") or {}
     risk_xray = load_json(run_dir / "artifacts" / "risk_xray.json") or {}
 
     raw_trades = load_csv(run_dir / "artifacts" / "trades.csv")
-    trades = add_mae_mfe(run_dir, pair_trades(raw_trades))
+    trades = pair_trades(raw_trades)
+    if include_mae_mfe:
+        trades = add_mae_mfe(run_dir, trades)
     trades_sorted = sorted(trades, key=lambda t: (t.get("entry_ts") or "", t.get("exit_ts") or ""))
 
     equity_rows = load_csv(run_dir / "artifacts" / "equity.csv")
@@ -660,18 +679,19 @@ def build_digest(run_dir: Path) -> Dict[str, Any]:
     for key in ("avg_holding_bars", "avg_holding_days"):
         if key in metrics and metrics[key] is not None:
             summary[key] = metrics[key]
-    mae_values = [t["mae_pct"] for t in trades if t.get("mae_pct") is not None]
-    mfe_values = [t["mfe_pct"] for t in trades if t.get("mfe_pct") is not None]
+    if include_mae_mfe:
+        mae_values = [t["mae_pct"] for t in trades if t.get("mae_pct") is not None]
+        mfe_values = [t["mfe_pct"] for t in trades if t.get("mfe_pct") is not None]
     top_winners = sorted([t for t in trades if t["win"]], key=lambda t: t["pnl"], reverse=True)[:5]
     top_losers = sorted([t for t in trades if not t["win"]], key=lambda t: t["pnl"])[:5]
     validation = load_json(run_dir / "artifacts" / "validation.json") or {}
 
-    regime = _regime_from_run(run_dir, config)
+    regime = _regime_from_run(run_dir, config) if include_regime else None
     if regime and not regime.get("skipped"):
         fused_by_date = dict(zip(regime.get("dates") or [], regime.get("fused") or []))
         regime["trade_summary"] = _regime_trade_summary(trades_sorted, fused_by_date)
 
-    return {
+    digest: Dict[str, Any] = {
         "run_id": run_dir.name,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "config": {
@@ -688,17 +708,20 @@ def build_digest(run_dir: Path) -> Dict[str, Any]:
         "monthly_pnl": monthly_pnl(trades_sorted),
         "period_pnl": period_pnl(trades_sorted),
         "buckets": holding_buckets(trades_sorted),
-        "mae_mfe_summary": {
-            "with_data": len(mae_values),
-            "avg_mae_pct": round(sum(mae_values) / len(mae_values), 4) if mae_values else None,
-            "avg_mfe_pct": round(sum(mfe_values) / len(mfe_values), 4) if mfe_values else None,
-        },
         "top_winners": top_winners,
         "top_losers": top_losers,
         "ohlcv_summary": ohlcv_summary(run_dir),
         "reproducibility": run_card.get("reproducibility") or {},
-        "regime": regime,
     }
+    if include_mae_mfe:
+        digest["mae_mfe_summary"] = {
+            "with_data": len(mae_values),
+            "avg_mae_pct": round(sum(mae_values) / len(mae_values), 4) if mae_values else None,
+            "avg_mfe_pct": round(sum(mfe_values) / len(mfe_values), 4) if mfe_values else None,
+        }
+    if include_regime:
+        digest["regime"] = regime
+    return digest
 
 
 def _markdown_cell(value: Any) -> str:
@@ -784,14 +807,15 @@ def render_digest_for_llm(digest: Dict[str, Any], max_trades: int = 20) -> str:
                 f"| {_markdown_cell(trade.get('return_pct'))} | {trade.get('holding_bars', trade.get('holding_days'))} |"
             )
 
-    mae_mfe = digest.get("mae_mfe_summary") or {}
-    lines.extend([
-        "",
-        "## MAE/MFE（bar 级，入场 bar 不计）",
-        f"- 有效样本: {mae_mfe.get('with_data', 0)}",
-        f"- 平均 MAE: {_markdown_cell(mae_mfe.get('avg_mae_pct'))}%",
-        f"- 平均 MFE: {_markdown_cell(mae_mfe.get('avg_mfe_pct'))}%",
-    ])
+    if "mae_mfe_summary" in digest:
+        mae_mfe = digest.get("mae_mfe_summary") or {}
+        lines.extend([
+            "",
+            "## MAE/MFE（bar 级，入场 bar 不计）",
+            f"- 有效样本: {mae_mfe.get('with_data', 0)}",
+            f"- 平均 MAE: {_markdown_cell(mae_mfe.get('avg_mae_pct'))}%",
+            f"- 平均 MFE: {_markdown_cell(mae_mfe.get('avg_mfe_pct'))}%",
+        ])
 
     risk = digest.get("risk_xray") or {}
     if risk:
@@ -813,20 +837,21 @@ def render_digest_for_llm(digest: Dict[str, Any], max_trades: int = 20) -> str:
             f"| {item['code']} | {item['rows']} | {item.get('first_date') or '-'} ~ {item.get('last_date') or '-'} |"
         )
 
-    regime = digest.get("regime") or {}
-    lines.extend(["", "## Regime 摘要"])
-    if regime.get("skipped"):
-        lines.append(f"- 无数据: {regime['skipped']}")
-    else:
-        lines.append(f"- FUSED 时间占比: {_markdown_cell(regime.get('fused_pct'))}")
-        lines.append(f"- FUSED 段数: {len(regime.get('episodes') or [])}")
-        trade_regime = regime.get("trade_summary") or {}
-        for label in ("fused", "defused", "unknown"):
-            item = trade_regime.get(label) or {}
-            lines.append(
-                f"- {label}: {item.get('count', 0)} 笔 / 盈亏 {_markdown_cell(item.get('pnl'))} "
-                f"/ 胜率 {_markdown_cell(item.get('win_rate'))}"
-            )
+    if "regime" in digest:
+        regime = digest.get("regime") or {}
+        lines.extend(["", "## Regime 摘要"])
+        if regime.get("skipped"):
+            lines.append(f"- 无数据: {regime['skipped']}")
+        else:
+            lines.append(f"- FUSED 时间占比: {_markdown_cell(regime.get('fused_pct'))}")
+            lines.append(f"- FUSED 段数: {len(regime.get('episodes') or [])}")
+            trade_regime = regime.get("trade_summary") or {}
+            for label in ("fused", "defused", "unknown"):
+                item = trade_regime.get(label) or {}
+                lines.append(
+                    f"- {label}: {item.get('count', 0)} 笔 / 盈亏 {_markdown_cell(item.get('pnl'))} "
+                    f"/ 胜率 {_markdown_cell(item.get('win_rate'))}"
+                )
 
     lines.append("")
     if len(digest.get("trades") or []) > max_trades:

@@ -1320,7 +1320,7 @@ function AnalysisChartCard({
         <img src={pngUrl} alt={title} className="h-72 w-full object-contain" />
       ) : (
         <div className="flex h-72 items-center justify-center text-sm text-muted-foreground">
-          {i18n.t("runDetail.chartNoData")}
+          {chartKey === "mae_mfe" ? i18n.t("runDetail.chartMaeMfeNoData") : i18n.t("runDetail.chartNoData")}
         </div>
       )}
     </div>

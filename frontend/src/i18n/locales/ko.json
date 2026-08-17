@@ -544,6 +544,7 @@
     "noAnalysis": "분석 보고서가 없습니다",
     "noAnalysisDesc": "이 실행에는 analysis.md가 없습니다. python -m backtest.runner <run_dir> --with-analysis로 생성할 수 있습니다.",
     "chartNoData": "이 차트에 데이터가 없습니다",
+    "chartMaeMfeNoData": "MAE/MFE가 계산되지 않았습니다(fastrun 모드 또는 분석 가능한 구간 없음)",
     "analysisStatus": "상태",
     "analysisGeneratedBy": "생성 경로",
     "analysisGeneratedAt": "생성 시각",

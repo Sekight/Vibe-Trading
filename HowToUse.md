@@ -836,6 +836,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 回测提速（2026-08-16 起）：大区间反复调参时，两件事把一次回测从 10 分钟压到 10 秒——
 - **默认跳过 PNG 图表**：runner 默认不再生成 7 张 `analysis_charts/*.png`（WebUI 分析图读 `analysis.digest.json` 算 ECharts，PNG 只是兜底图片），需要时加 `--with-charts`。3 年 15m 回测里 7 张 PNG 约 557 秒，占全程 93%，是唯一瓶颈。
 - **loader 缓存**：`VIBE_TRADING_DATA_CACHE=1`（8.35）缓存同一 数据源 + 标的 + 周期 + 区间 的行情，命中后数据加载仅 0.6 秒。
+- **`--fastrun` 跳过 digest 慢分析（2026-08-17 起）**：3 年 5m 场景下回测后 digest 的 regime（相关性）与 MAE/MFE 分析是新的耗时大头（约 750s，占 98%）。加 `--fastrun` 跳过这两项（等价 `--without-regime --without-mae-mfe`，以后新增耗时步骤也会并入 fastrun 跳表）；digest 不再含 regime / mae_mfe 字段，WebUI 分析图里 MAE/MFE 卡片显示"未计算"占位、LLM 报告不含这两段。注意：fastrun 重跑会**覆盖**该 run 已有 digest 为精简版，MAE/MFE 图与报告 Regime 段随之降级，完整重跑可恢复；digest 文件缺失或 artifacts 变化时 WebUI 会按完整版重建（该场景不加速）。
 - 实测耗时分布（3 年 15m、缓存命中、含本地 1m 数据）：完整跑 596s → 默认跑约 11s。
 
   | 阶段 | 耗时 | 说明 |
@@ -846,7 +847,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
   | digest 生成 | ~5s | WebUI 分析图数据源，不可省 |
   | 7 张 PNG（仅 `--with-charts`） | ~557s | matplotlib 渲染，WebUI 兜底图片 |
 
-  结论：反复调参请用 `python -m backtest.runner "<副本>"`（不带 `--with-charts`），配合缓存即可秒级出指标；PNG 只在需要贴图/报告时用 `--with-charts` 补生成。
+  结论：反复调参请用 `python -m backtest.runner "<副本>"`（不带 `--with-charts`），大区间小周期再叠 `--fastrun`，配合缓存即可秒级出指标；PNG 只在需要贴图/报告时用 `--with-charts` 补生成。
 
 ### 8.39 策略不变，怎么换一批标的 / 换数据源快速重跑？
 

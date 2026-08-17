@@ -873,7 +873,14 @@ def _maybe_inject_fundamentals_for_factor_panel(
 
 # --- Main entry ---
 
-def main(run_dir: Path, with_analysis: bool = False, with_charts: bool = False) -> None:
+def main(
+    run_dir: Path,
+    with_analysis: bool = False,
+    with_charts: bool = False,
+    *,
+    without_regime: bool = False,
+    without_mae_mfe: bool = False,
+) -> None:
     """Load config, fetch data, run the selected backtest engine.
 
     With ``source="auto"``, routes each code through the appropriate loader.
@@ -884,6 +891,10 @@ def main(run_dir: Path, with_analysis: bool = False, with_charts: bool = False) 
             (``VIBE_TRADING_ALLOWED_RUN_ROOTS`` plus the defaults) before any
             file is read so an arbitrary filesystem location cannot be used
             to source ``code/signal_engine.py``.
+        without_regime: Skip correlation-regime analysis when building the
+            analysis digest (see ``--fastrun`` in ``__main__``).
+        without_mae_mfe: Skip MAE/MFE analysis when building the analysis
+            digest (see ``--fastrun`` in ``__main__``).
     """
     # Guard the CLI entry point with the same root whitelist the MCP
     # ``backtest`` tool already uses (src/tools/backtest_tool.py:23). Without
@@ -1001,17 +1012,34 @@ def main(run_dir: Path, with_analysis: bool = False, with_charts: bool = False) 
     # opt-in so the agent path (which writes analysis.md itself via
     # write_run_analysis) never double-charges tokens.
     if (run_dir / "run_card.json").exists():
-        _finalize_run_analysis(run_dir, with_analysis=with_analysis, with_charts=with_charts)
+        _finalize_run_analysis(
+            run_dir,
+            with_analysis=with_analysis,
+            with_charts=with_charts,
+            without_regime=without_regime,
+            without_mae_mfe=without_mae_mfe,
+        )
 
 
-def _finalize_run_analysis(run_dir: Path, *, with_analysis: bool = False, with_charts: bool = False) -> None:
+def _finalize_run_analysis(
+    run_dir: Path,
+    *,
+    with_analysis: bool = False,
+    with_charts: bool = False,
+    without_regime: bool = False,
+    without_mae_mfe: bool = False,
+) -> None:
     """Generate deterministic charts and optional LLM report after a run."""
     # Persist the digest once artifacts are final so the Web UI, PNGs and the
     # LLM report all read the same cached snapshot. Rebuilding it on every
     # request costs tens of seconds for large runs.
     try:
         from backtest.analysis.digest import write_digest_json
-        write_digest_json(run_dir)
+        write_digest_json(
+            run_dir,
+            include_regime=not without_regime,
+            include_mae_mfe=not without_mae_mfe,
+        )
         print(json.dumps({"analysis_digest": {"status": "ok", "path": str(run_dir / "analysis.digest.json")}}, ensure_ascii=False))
     except Exception as exc:  # noqa: BLE001 - digest is best-effort
         print(json.dumps({"warning": "analysis digest failed", "details": str(exc)[:500]}, ensure_ascii=False))
@@ -1397,6 +1425,12 @@ class _AutoLoader:
         return {c: df for c, df in self._data.items() if c in codes}
 
 
+# Analysis components that ``--fastrun`` skips. New expensive post-backtest
+# steps should be appended here so ``--fastrun`` covers them without touching
+# the flag plumbing.
+FASTRUN_SKIPS = frozenset({"regime", "mae_mfe"})
+
+
 if __name__ == "__main__":
     import argparse
 
@@ -1404,5 +1438,21 @@ if __name__ == "__main__":
     parser.add_argument("run_dir", help="Path to the run directory")
     parser.add_argument("--with-analysis", "--withAnalysis", dest="with_analysis", action="store_true", help="Generate the LLM analysis report after a successful backtest")
     parser.add_argument("--with-charts", dest="with_charts", action="store_true", help="Generate PNG chart artifacts (default skipped; WebUI uses digest, PNGs are only fallback images)")
+    parser.add_argument("--without-regime", action="store_true", help="Skip correlation-regime analysis (digest omits the regime field and report section)")
+    parser.add_argument("--without-mae-mfe", action="store_true", help="Skip MAE/MFE analysis (digest omits the mae_mfe_summary field and report section)")
+    parser.add_argument("--fastrun", action="store_true", help="Skip all skippable analysis (currently regime + MAE/MFE) to surface metrics/trades/run_card quickly")
     args = parser.parse_args()
-    main(Path(args.run_dir), with_analysis=args.with_analysis, with_charts=args.with_charts)
+    skips: set[str] = set()
+    if args.fastrun:
+        skips |= set(FASTRUN_SKIPS)
+    if args.without_regime:
+        skips.add("regime")
+    if args.without_mae_mfe:
+        skips.add("mae_mfe")
+    main(
+        Path(args.run_dir),
+        with_analysis=args.with_analysis,
+        with_charts=args.with_charts,
+        without_regime="regime" in skips,
+        without_mae_mfe="mae_mfe" in skips,
+    )

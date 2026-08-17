@@ -544,6 +544,7 @@
     "noAnalysis": "لا يوجد تقرير تحليل",
     "noAnalysisDesc": "لا يوجد analysis.md لهذا التشغيل. يمكن إنشاؤه عبر: python -m backtest.runner <run_dir> --with-analysis",
     "chartNoData": "لا توجد بيانات لهذا المخطط",
+    "chartMaeMfeNoData": "لم يتم حساب MAE/MFE (وضع fastrun أو لا توجد نافذة قابلة للتحليل)",
     "analysisStatus": "الحالة",
     "analysisGeneratedBy": "أنشئ بواسطة",
     "analysisGeneratedAt": "وقت الإنشاء",

@@ -544,6 +544,7 @@
     "noAnalysis": "分析レポートがありません",
     "noAnalysisDesc": "この実行には analysis.md がありません。python -m backtest.runner <run_dir> --with-analysis で生成できます。",
     "chartNoData": "このチャートのデータはありません",
+    "chartMaeMfeNoData": "MAE/MFE は計算されていません（fastrun モードまたは分析可能なウィンドウなし）",
     "analysisStatus": "ステータス",
     "analysisGeneratedBy": "生成元",
     "analysisGeneratedAt": "生成日時",

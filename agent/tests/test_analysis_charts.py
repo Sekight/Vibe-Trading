@@ -81,3 +81,15 @@ def test_chart_spec_titles_clarify_units() -> None:
     assert "bar" in titles["pnl_vs_holding"]
     assert "bar" in titles["holding_buckets"]
     assert "策略净值" in titles["drawdown"]
+
+
+def test_compute_chart_payload_mae_mfe_empty_when_skipped(tmp_path: Path) -> None:
+    run_dir = write_run_dir(tmp_path, "20260817_000000_00_fastcharts")
+    full = compute_chart_payload(build_digest(run_dir))
+    assert len(full["mae_mfe"]) == 2
+
+    skipped = compute_chart_payload(build_digest(run_dir, include_regime=False, include_mae_mfe=False))
+    assert skipped["mae_mfe"] == []
+    for key in full:
+        if key != "mae_mfe":
+            assert skipped[key] == full[key]

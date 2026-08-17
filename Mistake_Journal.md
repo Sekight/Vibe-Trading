@@ -225,5 +225,5 @@
 ### M027 · 回测后 digest 的 regime / MAE-MFE 分析对小周期大区间极慢（2026-08-17）· 🟡坑
 - 现象：3 年 5m 回测缓存命中后总耗时 766s，其中回测后 digest（分析数据生成）约 750s 占 98%（引擎执行仅 ~14s）；1 个月 5m 全程只要 16s。digest 慢在：①相关性 regime（`compute_edge_density`：每个 bar 做一次 60-bar 窗口的 pandas 滚动相关性，O(bar×window)，5m 三年 52,626 bar 要算 5 万多次 corr）；②MAE/MFE（`add_mae_mfe`：每笔交易遍历该标的全量 bar 筛持仓窗口，O(trades×bars)，1753×52,626≈9 千万次 Python 循环）。
 - 教训：digest 的分析组件对 bar 数/交易数敏感，成本可远超回测本身（3 年 5m 从 15m 的几秒膨胀到 750s）；WebUI 分析图依赖 digest，但 regime（相关性状态）对单标的/伪单位组合价值有限、MAE-MFE 属诊断性指标，大区间小周期调参时可整体跳过。
-- 状态：有效（计划 P-20260817-fastrun 讨论中）
+- 状态：有效（缓解：P-20260817-fastrun 已实现 --fastrun / --without-regime / --without-mae-mfe 跳过这两项，3 年 5m 回测 766s→约 32s）
 - 关联：计划 P-20260817-fastrun；同全局 E010

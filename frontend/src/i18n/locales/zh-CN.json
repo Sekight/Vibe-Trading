@@ -544,6 +544,7 @@
     "noAnalysis": "暂无分析报告",
     "noAnalysisDesc": "该运行没有 analysis.md，可用 python -m backtest.runner <run_dir> --with-analysis 生成。",
     "chartNoData": "该图表暂无数据",
+    "chartMaeMfeNoData": "该 run 未计算 MAE/MFE（fastrun 模式或无可分析窗口）",
     "analysisStatus": "状态",
     "analysisGeneratedBy": "生成方式",
     "analysisGeneratedAt": "生成时间",

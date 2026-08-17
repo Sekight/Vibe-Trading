@@ -272,6 +272,28 @@ describe("RunDetail page", () => {
     expect(drawdownOption?.yAxis?.nameLocation).toBe("start");
   });
 
+  it("labels an empty MAE/MFE chart as not computed instead of a generic no-data card", async () => {
+    apiMock.getRun.mockResolvedValue({
+      status: "success", run_id: "an-fastrun", prompt: "Fastrun run",
+    });
+    apiMock.getRunCode.mockResolvedValue({});
+    apiMock.getRunAnalysisCharts.mockResolvedValue({
+      run_id: "an-fastrun",
+      available: true,
+      charts: {
+        equity_return: [], drawdown: [], pnl_scatter: [], monthly_heatmap: [],
+        pnl_vs_holding: [], mae_mfe: [], holding_buckets: [],
+      },
+      pngs: [],
+    });
+
+    renderRunDetail("/runs/an-fastrun");
+    await screen.findByText("Fastrun run");
+    fireEvent.click(screen.getByRole("tab", { name: "Analysis Charts" }));
+
+    expect(await screen.findByText(/MAE\/MFE not computed/)).toBeInTheDocument();
+  });
+
   it("renders the analysis report tab with markdown and status", async () => {
     apiMock.getRun.mockResolvedValue({
       status: "success", run_id: "an-report", prompt: "Report run",

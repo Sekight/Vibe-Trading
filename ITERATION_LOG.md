@@ -44,6 +44,7 @@
 | V029 | 2026-08-16 | 行情副图新增 ATR 指标 | 副图按钮新增 atr（14 周期 Wilder 平滑），纯前端增量、性能无感 |
 | V030 | 2026-08-16 | 回测提速：默认跳过 PNG + loader 缓存 | 7 张 PNG 占回测 93%（约 557s）是唯一瓶颈；runner 默认不生图（--with-charts 才生），配合 VIBE_TRADING_DATA_CACHE 三年 15m 回测 596s→11s |
 | V031 | 2026-08-16 | 建立项目踩坑日志 Mistake_Journal | 新建项目专属坑的认知与状态账本（M001-M020 存量收录）；坑先入账本、状态权威、单向指针；AGENTS/HowToUse 同步入口 |
+| V032 | 2026-08-17 | 回测 fastrun：跳过 digest 慢分析 | runner 新增 --fastrun / --without-regime / --without-mae-mfe，跳过 regime/MAE-MFE；3 年 5m 回测 766s→32s（digest 构建 750s→1.1s）；digest 省略对应字段、报告整段跳过、前端 MAE/MFE 卡片占位 |
 > 补录说明：V001-V009 为补录条目，依据 git 历史、HowToUse、全局复利与踩坑日志、`C:\Users\mumu\.codex\sessions` 会话记录回溯整理；当时未留痕的字段标“待补”。从下一条起，每次迭代收尾直接写正文。
 
 ## 模板
@@ -374,3 +375,19 @@
 - 关键细节：分工判据=跨项目通用→全局日志、使用解法→HowToUse、迭代叙事→ITERATION_LOG、vibe-trading 专属坑认知与状态→账本；维护规则=坑先入账本（入口）、状态权威在账本（HowToUse 日期标注仅为时效提示）、单向指针（账本→外部，不反向逐条）、修复/废弃条目内标注留痕、每周日自动任务确认后的坑清单入账本；存量 20 条从 HowToUse 8.x 与 ITERATION_LOG 提炼，状态抄自 HowToUse 现有日期标注；不收录全局日志条目（重叠坑一句话指回 E 号，如 M018→E003）；AGENTS 规则 2（收尾先入账本）/4（文档分流）、文档地图、查找规则同步。
 - 验证：账本 M001-M020 编号连续、索引与正文一致；AGENTS（规则 2/4、地图、查找）/ HowToUse 第 11 节 / ITERATION_LOG 索引与正文读回一致。
 - 关联：无计划文档；commit `914be47`。
+
+### V032 · 回测 fastrun：--fastrun 跳过 digest 慢分析（2026-08-17）
+- 一句话总结：给 `python -m backtest.runner <run_dir>` 增加 `--fastrun` / `--without-regime` / `--without-mae-mfe` 三个 CLI flag 控制回测后 digest 的计算内容；`--fastrun` 跳过 regime（相关性）与 MAE/MFE 分析，3 年 5m 回测从 766s 降到约 32s（端到端），digest 构建本身 750s→1.1s。
+- 为什么：3 年 5m 缓存命中回测 766s 中 digest 约 750s 占 98%（cProfile 定位：`compute_edge_density` 每 bar 做一次 60-bar 窗口滚动 corr，`add_mae_mfe` 每笔交易遍历该标的全量 bar 筛持仓窗口，O(trades×bars)）；regime 对单标的/伪单位组合价值有限、MAE/MFE 属诊断性指标，调参场景可整体跳过（Mistake_Journal M027、全局 E010）。
+- 关键细节：
+  - `digest.py`：`build_digest` / `write_digest_json` 新增 `include_regime` / `include_mae_mfe`（默认 True）；跳过时 digest **整体省略** `regime` / `mae_mfe_summary` key（区分"未计算"与"无数据"）；`render_digest_for_llm` 两段改条件渲染（key 缺失整段跳过，完整版渲染与改动前逐字一致）。
+  - `runner.py`：`__main__` 加三个 flag；`FASTRUN_SKIPS = {"regime", "mae_mfe"}` 模块级跳表常量（后续新增耗时步骤只追加集合）；`main` / `_finalize_run_analysis` 关键字参数透传。
+  - 前端：RunDetail AnalysisChartsTab 的 mae_mfe 卡片在 payload 为空时显示"未计算（fastrun 模式或无可分析窗口）"占位而非空图；5 语言包新增 `chartMaeMfeNoData` 键。
+  - 拍板边界：fastrun 重跑覆盖该 run 已有完整 digest（完整重跑可恢复）；`load_digest` 惰性重建=完整版（不写 digest 标记）；MCP backtest 工具不透传 flag（本次只覆盖 CLI）。
+- 验证：
+  - 新增单测：`build_digest` 跳过后无 regime/mae_mfe_summary key 且其余字段与完整版一致、`write_digest_json` 透传、`render_digest_for_llm` 精简 digest 不输出两段、`compute_chart_payload["mae_mfe"]==[]`；前端 mae_mfe 空 payload 占位测试。
+  - 后端 pytest（analysis digest/charts/report/api + runner 相关）全绿（除 2 个存量失败，见下）；前端 vitest 450 passed + `npm run build` 通过。
+  - 真实 run（3 年 5m ta_turtle）：同一 run 完整版 vs `--fastrun`——`metrics.csv`/`trades.csv`/`equity.csv` 字节一致（引擎不受影响）；digest 排除 generated_at/run_id/regime/mae_mfe_summary/trades 的 mae-mfe 字段后逐字段一致；CLI `--fastrun` 端到端 31.7s。
+  - 存量修复：`test_analysis_runner_hook.py` 2 个用例在 HEAD 即失败（`_finalize_run_analysis` 的 `with_charts` 默认 False，V030 行为变更后测试仍断言默认生成图表）——已同步为三个用例：默认跳过 charts/report、`with_charts=True` 生成 charts 不调 LLM、`with_charts=True + with_analysis=True` 顺序 charts→report。
+- 影响/注意：命令行默认行为不变；fastrun run 在 WebUI 的 MAE/MFE 卡片显示占位、LLM 报告不含 Regime/MAE-MFE 段（属预期降级）；HowToUse 8.38 已同步（含"fastrun 覆盖 digest 可完整重跑恢复"）。
+- 关联：计划 P-20260817-fastrun；Mistake_Journal M027；全局 E010；commit 待补（提交后回填）。

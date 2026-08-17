@@ -331,3 +331,59 @@ def test_build_digest_includes_regime_summary_for_two_assets(tmp_path: Path) -> 
     prompt = render_digest_for_llm(digest)
     assert "## Regime 摘要" in prompt
     assert "FUSED 时间占比" in prompt
+
+
+def test_build_digest_skips_regime_and_mae_mfe_when_disabled(tmp_path: Path) -> None:
+    run_dir = write_run_dir(tmp_path, "20260817_000000_00_fastrun")
+    digest = build_digest(run_dir, include_regime=False, include_mae_mfe=False)
+
+    assert "regime" not in digest
+    assert "mae_mfe_summary" not in digest
+    assert all("mae_pct" not in trade and "mfe_pct" not in trade for trade in digest["trades"])
+    # The untouched sections are still present and identical to the full build.
+    # top_winners/top_losers are excluded: they embed trade rows whose
+    # mae_pct/mfe_pct legitimately differ between the two builds.
+    full = build_digest(run_dir)
+    for key in (
+        "metrics", "equity", "trade_summary", "monthly_pnl", "period_pnl",
+        "buckets", "ohlcv_summary", "reproducibility",
+    ):
+        assert digest[key] == full[key]
+    assert full["mae_mfe_summary"]["with_data"] == 2
+
+
+def test_build_digest_skip_flags_are_independent(tmp_path: Path) -> None:
+    run_dir = write_run_dir(tmp_path, "20260817_000000_00_partial")
+    only_regime = build_digest(run_dir, include_mae_mfe=False)
+    assert "mae_mfe_summary" not in only_regime
+    assert "regime" in only_regime
+
+    only_mae_mfe = build_digest(run_dir, include_regime=False)
+    assert "regime" not in only_mae_mfe
+    assert "mae_mfe_summary" in only_mae_mfe
+
+
+def test_render_digest_for_llm_omits_skipped_sections(tmp_path: Path) -> None:
+    run_dir = write_run_dir(tmp_path, "20260817_000000_00_render")
+    full = build_digest(run_dir)
+    prompt_full = render_digest_for_llm(full)
+    assert "## MAE/MFE（bar 级，入场 bar 不计）" in prompt_full
+    assert "## Regime 摘要" in prompt_full
+
+    skipped = build_digest(run_dir, include_regime=False, include_mae_mfe=False)
+    prompt_skipped = render_digest_for_llm(skipped)
+    assert "## MAE/MFE（bar 级，入场 bar 不计）" not in prompt_skipped
+    assert "## Regime 摘要" not in prompt_skipped
+    assert "## 交易概览" in prompt_skipped
+    assert "## 持仓分桶" in prompt_skipped
+
+
+def test_write_digest_json_forwards_include_params(tmp_path: Path) -> None:
+    run_dir = write_run_dir(tmp_path, "20260817_000000_00_persist")
+    write_digest_json(run_dir, include_regime=False, include_mae_mfe=False)
+    payload = json.loads((run_dir / "analysis.digest.json").read_text(encoding="utf-8"))
+    assert "regime" not in payload["digest"]
+    assert "mae_mfe_summary" not in payload["digest"]
+    # A fresh load still returns the persisted (skipped) digest, not a rebuild.
+    assert "regime" not in load_digest(run_dir)
+
