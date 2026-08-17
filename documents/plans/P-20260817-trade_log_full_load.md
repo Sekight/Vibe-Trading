@@ -56,7 +56,7 @@
 - `cd frontend && npm test -- RunDetail`（组件测试）
 - 构建后打开 v1 run（ta_turtle_15m_v1_2021_2023）WebUI 报告-交易：默认显示 500 笔 / 总盈亏 -1,150；点"加载全部"后显示 621 笔 / 总盈亏 -17,640（与 trades.csv 全量一致）
 - 点击后下载 CSV 行数 = trades.csv 行数（1242 行）
-- **跑一遍回撤验证（改动不得影响权益/回撤链路）**：重跑 v1 run（数据走缓存，秒级取数），核对 run_card/metrics 的 `max_drawdown = -34.50%`、`total_return = -23.03%`、`final_value = 76,972` 与重跑结果一致，且 WebUI 报告页的权益/回撤曲线、指标卡与 run_card 一致（本改动只动交易明细展示，指标与回撤链路必须原样）
+- **跑回归测试（改动不得破坏既有功能）**：`cd frontend && npm test`（全量前端测试套件，覆盖既有 RunDetail 组件用例与新增按钮用例）；本改动仅前端展示层，构建（`npm run build`）通过且全量测试绿即可
 
 ## 讨论记录
 
