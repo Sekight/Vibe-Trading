@@ -21,6 +21,7 @@ import {
   CircleSlash,
   ChartScatter,
   FileText,
+  Gauge,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -55,7 +56,7 @@ const analysisProseClassName =
   "prose-li:my-1.5 prose-ul:my-3 prose-ol:my-3 prose-table:my-4 " +
   "prose-blockquote:my-4 prose-code:font-mono prose-pre:my-4 prose-hr:my-6";
 
-type Tab = "chart" | "analysisCharts" | "analysis" | "trades" | "runCard" | "code" | "validation";
+type Tab = "chart" | "analysisCharts" | "positions" | "analysis" | "trades" | "runCard" | "code" | "validation";
 type ChartPayload = Pick<RunData, "price_series" | "indicator_series" | "trade_markers">;
 type ChartCache = Record<string, ChartPayload>;
 type ChartLoadProgress = { done: number; total: number };
@@ -142,6 +143,7 @@ export function RunDetail() {
   const TABS: { id: Tab; label: string; icon: typeof BarChart3; hidden?: boolean }[] = [
     { id: "chart", label: i18n.t("runDetail.chart"), icon: BarChart3 },
     { id: "analysisCharts", label: i18n.t("runDetail.analysisCharts"), icon: ChartScatter },
+    { id: "positions", label: i18n.t("runDetail.positions"), icon: Gauge },
     { id: "analysis", label: i18n.t("runDetail.analysis"), icon: FileText },
     { id: "trades", label: i18n.t("runDetail.trades"), icon: List },
     { id: "runCard", label: i18n.t("runDetail.runCard"), icon: FileCheck2, hidden: !hasRunCard },
@@ -413,6 +415,7 @@ export function RunDetail() {
             />
           </div>
           {tab === "analysisCharts" && runId && <AnalysisChartsTab runId={runId} />}
+          {tab === "positions" && runId && <PositionsRiskTab runId={runId} />}
           {tab === "analysis" && runId && <AnalysisTab runId={runId} />}
           {tab === "trades" && <TradesTab run={run} />}
           {tab === "validation" && run.validation && <ValidationPanel data={run.validation} />}
@@ -1094,6 +1097,174 @@ function AnalysisChartsTab({ runId }: { runId: string }) {
       {ANALYSIS_CHART_ORDER.map(({ key, titleKey }) => (
         <AnalysisChartCard key={key} chartKey={key} title={i18n.t(titleKey as any)} payload={data.charts} pngUrl={pngUrls[key]} benchmarkLabel={data.benchmark_label ?? undefined} />
       ))}
+    </div>
+  );
+}
+
+function PositionsRiskTab({ runId }: { runId: string }) {
+  const [data, setData] = useState<RunAnalysisCharts | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    api.getRunAnalysisCharts(runId)
+      .then((charts) => { if (!cancelled) setData(charts); })
+      .catch((err) => { if (!cancelled) setError(err instanceof Error ? err.message : String(err)); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [runId]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 p-8 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" /> {i18n.t("runDetail.loadingPositionsRisk" as any)}
+      </div>
+    );
+  }
+  if (error) return <div className="p-8 text-sm text-red-500">{error}</div>;
+  if (!data || !data.available) {
+    return (
+      <div className="p-8 space-y-1">
+        <p className="font-medium text-sm">{i18n.t("runDetail.noPositionsRisk" as any)}</p>
+        <p className="text-sm text-muted-foreground">{i18n.t("runDetail.noPositionsRiskDesc" as any)}</p>
+      </div>
+    );
+  }
+  const position = data.charts.daily_position ?? [];
+  const risk = data.charts.daily_risk ?? [];
+  if (position.length === 0 && risk.length === 0) {
+    return (
+      <div className="p-8 space-y-1">
+        <p className="font-medium text-sm">{i18n.t("runDetail.noPositionsRisk" as any)}</p>
+        <p className="text-sm text-muted-foreground">{i18n.t("runDetail.noPositionsRiskDesc" as any)}</p>
+      </div>
+    );
+  }
+  return (
+    <div className="grid gap-4 p-4 lg:grid-cols-2">
+      <DailyPositionChart points={position} />
+      <DailyRiskChart points={risk} />
+    </div>
+  );
+}
+
+function DailyPositionChart({ points }: { points: Array<{ date: string; gross_pct: number; net_pct: number; single_pct: number }> }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const dark = useThemeDark();
+
+  useEffect(() => {
+    if (!ref.current || points.length === 0) return;
+    const t = getChartTheme();
+    echarts.getInstanceByDom(ref.current)?.dispose();
+    const chart = echarts.init(ref.current);
+    const axis = {
+      axisLine: { lineStyle: { color: t.axisColor } },
+      axisLabel: { color: t.textColor, fontSize: 10 },
+    };
+    chart.setOption({
+      grid: { left: 18, right: 18, top: 60, bottom: 56, containLabel: true },
+      tooltip: {
+        trigger: "axis", backgroundColor: t.tooltipBg, borderColor: t.tooltipBorder,
+        textStyle: { color: t.tooltipText, fontSize: 11 },
+      },
+      legend: {
+        top: 0, textStyle: { color: t.textColor, fontSize: 10 },
+        selected: { [i18n.t("runDetail.positionsGross" as any)]: true, [i18n.t("runDetail.positionsNet" as any)]: false, [i18n.t("runDetail.positionsSingle" as any)]: false },
+      },
+      xAxis: { type: "category", data: points.map((p) => p.date), ...axis },
+      yAxis: {
+        type: "value", name: "%", splitLine: { lineStyle: { color: t.gridColor } },
+        axisLabel: { color: t.textColor, fontSize: 10 },
+      },
+      series: [
+        {
+          type: "line", name: i18n.t("runDetail.positionsGross" as any),
+          data: points.map((p) => p.gross_pct), showSymbol: false,
+          lineStyle: { color: t.infoColor, width: 2 }, areaStyle: { color: `${t.infoColor}22` },
+        },
+        {
+          type: "line", name: i18n.t("runDetail.positionsNet" as any),
+          data: points.map((p) => p.net_pct), showSymbol: false,
+          lineStyle: { color: t.warningColor, width: 1.6 },
+        },
+        {
+          type: "line", name: i18n.t("runDetail.positionsSingle" as any),
+          data: points.map((p) => p.single_pct), showSymbol: false,
+          lineStyle: { color: ANALYSIS_GREEN, width: 1.6, type: "dashed" },
+        },
+      ],
+    });
+    const onResize = () => chart.resize();
+    window.addEventListener("resize", onResize);
+    return () => { window.removeEventListener("resize", onResize); chart.dispose(); };
+  }, [points, dark]);
+
+  return (
+    <div className="rounded-lg border bg-card p-4">
+      <h3 className="mb-1 text-sm font-medium">
+        {i18n.t("runDetail.positionsDailyPositionTitle" as any)}
+        <span className="ml-2 text-xs text-muted-foreground">{i18n.t("runDetail.positionsDailyPeakNote" as any)}</span>
+      </h3>
+      <div ref={ref} className="h-72 w-full" />
+    </div>
+  );
+}
+
+function DailyRiskChart({ points }: { points: Array<{ date: string; risk_pct: number }> }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const dark = useThemeDark();
+
+  useEffect(() => {
+    if (!ref.current || points.length === 0) return;
+    const t = getChartTheme();
+    echarts.getInstanceByDom(ref.current)?.dispose();
+    const chart = echarts.init(ref.current);
+    const axis = {
+      axisLine: { lineStyle: { color: t.axisColor } },
+      axisLabel: { color: t.textColor, fontSize: 10 },
+    };
+    chart.setOption({
+      grid: { left: 18, right: 18, top: 60, bottom: 56, containLabel: true },
+      tooltip: {
+        trigger: "axis", backgroundColor: t.tooltipBg, borderColor: t.tooltipBorder,
+        textStyle: { color: t.tooltipText, fontSize: 11 },
+      },
+      xAxis: { type: "category", data: points.map((p) => p.date), ...axis },
+      yAxis: {
+        type: "value", name: "%", splitLine: { lineStyle: { color: t.gridColor } },
+        axisLabel: { color: t.textColor, fontSize: 10 },
+      },
+      series: [{
+        type: "line", name: i18n.t("runDetail.positionsRisk" as any),
+        data: points.map((p) => ({
+          value: p.risk_pct,
+          itemStyle: p.risk_pct >= 100 ? { color: ANALYSIS_RED } : undefined,
+        })),
+        showSymbol: false,
+        lineStyle: { color: t.infoColor, width: 2 }, areaStyle: { color: `${t.infoColor}22` },
+        markLine: {
+          silent: true, symbol: "none",
+          lineStyle: { color: ANALYSIS_RED, type: "dashed", width: 1.5 },
+          label: { formatter: i18n.t("runDetail.positionsRisk100Line" as any), color: t.textColor, fontSize: 10, position: "end" },
+          data: [{ yAxis: 100 }],
+        },
+      }],
+    });
+    const onResize = () => chart.resize();
+    window.addEventListener("resize", onResize);
+    return () => { window.removeEventListener("resize", onResize); chart.dispose(); };
+  }, [points, dark]);
+
+  return (
+    <div className="rounded-lg border bg-card p-4">
+      <h3 className="mb-1 text-sm font-medium">
+        {i18n.t("runDetail.positionsRiskTitle" as any)}
+        <span className="ml-2 text-xs text-muted-foreground">{i18n.t("runDetail.positionsDailyPeakNote" as any)}</span>
+      </h3>
+      <div ref={ref} className="h-72 w-full" />
     </div>
   );
 }

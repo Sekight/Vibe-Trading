@@ -643,6 +643,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 > - WebUI 交易明细新增两列：`持仓占比`（position_weight = 成交金额 / 当日总权益）和 `手数`（lots，仅 A 股按 100 股/手，其他市场留空）。
 > - 新 run 的 `artifacts/trades.csv` 直接带 `position_weight`、`lots` 两列；旧 run 没有这两列时，WebUI 会用 `qty × price / equity.csv 当日权益` 现算占比、A 股用 `qty / 100` 现算手数。
 > - 指标区新增 `avg_portfolio_weight`（平均组合仓位）、`max_portfolio_weight`（最大组合仓位）、`max_single_weight`（单票最大目标仓位，新 run 默认 0.4）。旧名 `avg_position_weight` / `max_position_weight` 已于 2026-08-11 弃用：新 run 不再写入这两个字段，旧 run 的指标仍按旧名显示（前端兼容回退）。`positions.csv` 仍是每日目标权重（0=空仓，1=满仓），`risk_xray_avg_invested` 与平均组合仓位同值。
+> - 口径说明（`avg_portfolio_weight` vs `max_portfolio_weight`）：两者**都是净敞口**（每日各 code 权重带符号求和，多正空负），区别只在聚合方式——`avg_portfolio_weight` 取**平均**（可为负：多空镜像策略空头日多/空头仓位重时，平均值会是负的，如 -0.49% 表示"平均而言净空 0.49%"，不是仓位大小为负；毛口径的仓位大小看「持仓与风险」tab 图 1）；`max_portfolio_weight` 取**最大正值**（只看多头侧最重的日子，空头侧最重的日子在它里面看不到——空头风险要看去图 2 账户风险度 / 单边口径）。真正的"毛持仓"（`sum|w|`，恒正）和"单边"（按 weight_groups 组内取多空大边）是另两种口径，见 8.45；TA 海龟这类恒同向策略四种口径数值一致。
 
   ---
 
@@ -790,7 +791,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 ### 8.36 回测分析报告（analysis.md）和 7 张分析图是什么？
 
 - 每次回测成功后，runner 都会自动生成 `analysis_charts/*.png`（7 张：净值曲线、回撤瀑布、单笔盈亏散点、月度损益热力图、盈亏 vs 持仓时长、MAE/MFE、持仓分桶），不需要额外参数、不烧 LLM token；单张图失败不阻塞回测。
-- 每次回测成功后，runner 会生成 `analysis.digest.json`（2026-08-12 起恢复落库，解决大 run 分析图加载慢）：digest 由回测现场构建并持久化；前端/后端读取时先校验 artifacts 指纹（config/run_card/metrics/trades/equity/validation/risk_xray/OHLCV 统计），一致则直接用缓存，不一致才重建。里面包含：全量指标按“性能 / 基准相对 / 风险 / 仓位与换手 / 再平衡 / 其他”分组、逐日权益与基准序列（`equity` 每行含 `benchmark_cum_return_pct` / `benchmark_drawdown_pct`）、`validation`（蒙特卡洛）、交易明细、月度损益、持仓分桶、MAE/MFE 摘要、Regime 摘要（至少 2 个标的时：FUSED 时间占比 / episodes / 按入场日归因的交易盈亏）等。LLM 报告和前端“分析图”都从这份 digest 取数（优先缓存），保证口径一致；benchmark 未配置时统一记 `equal-weight(universe)`；`benchmark: "auto"` 按 `.SH/.SZ/.BJ` 后缀识别为 a_share 并尝试取市场默认基准（A股=000300.SH），失败时降级为等权基准，并在 run_card warnings 记录 `benchmark fetch failed`。
+- 每次回测成功后，runner 会生成 `analysis.digest.json`（2026-08-12 起恢复落库，解决大 run 分析图加载慢）：digest 由回测现场构建并持久化；前端/后端读取时先校验 artifacts 指纹（config/run_card/metrics/trades/equity/positions/validation/risk_xray/OHLCV 统计），一致则直接用缓存，不一致才重建。2026-08-18（V034）起指纹源新增 `positions.csv`；对**旧 run**（此前生成的 digest）读取时会做**增量兼容**——只缺 positions.csv 指纹时仅补算每日持仓/风险序列（约 0.15s），保留原 digest 的 regime/MAE-MFE 等字段，不会触发全量重建（10 年 4H 全量重建约 11s，已避免）。里面包含：全量指标按“性能 / 基准相对 / 风险 / 仓位与换手 / 再平衡 / 其他”分组、逐日权益与基准序列（`equity` 每行含 `benchmark_cum_return_pct` / `benchmark_drawdown_pct`）、`validation`（蒙特卡洛）、交易明细、月度损益、持仓分桶、每日持仓与风险序列（`daily_position` 毛/净/单边、`daily_risk` 账户风险度，口径见 8.45）、MAE/MFE 摘要、Regime 摘要（至少 2 个标的时：FUSED 时间占比 / episodes / 按入场日归因的交易盈亏）等。LLM 报告和前端“分析图 / 持仓与风险”都从这份 digest 取数（优先缓存），保证口径一致；benchmark 未配置时统一记 `equal-weight(universe)`；`benchmark: "auto"` 按 `.SH/.SZ/.BJ` 后缀识别为 a_share 并尝试取市场默认基准（A股=000300.SH），失败时降级为等权基准，并在 run_card warnings 记录 `benchmark fetch failed`。
 - LLM 分析报告 `analysis.md` 是可选产物，由两条路径生成，行为一致（同一份 digest 同一套 prompt）：
   1. agent 路径：回测成功后 agent 自动调用 `write_run_analysis` 工具写 `analysis.md` + `analysis.status.json`，最终回复只引用文件路径，不再重复长篇归因（省 token）。
   2. runner 路径：在 `agent` 目录下执行 `..\.venv\Scripts\python.exe -m backtest.runner "<vibe_home>\runs\<run_id>" --with-analysis`（也支持 `--withAnalysis`），回测成功后会补生成同一份分析（会调用一次 LLM；`VIBE_TRADING_ANALYSIS_TIMEOUT` 可调超时，默认 120 秒）。
@@ -938,6 +939,50 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
   3. `agent/backtest/metrics.py` 的 `_BARS_PER_DAY` 年化表和 `_normalize_interval` 加对应映射——不加的话年化收益/夏普等按默认 1 bar/天折算，**指标失真**（回测执行和交易不受影响）。
   前两处决定"能不能跑"，第三处决定"年化指标准不准"。
 - 前端 K 线图上的周期按钮（5m/15m/20m/1h/2h/1D/1W/1M/1Y）是**前端本地聚合展示**，与回测 `interval` 无关——页面能切 20m 不代表回测能跑 20m。
+
+### 8.43 加仓怎么算成"单标的"持仓？（max_single_weight 按策略声明分组）
+
+- **背景**：一个标的的金字塔加仓如果拆成多个 code（伪单位）表达（如 TA 策略的 TA0001-0004.ZCE 共享同一主连行情），引擎默认**按单 code**算"单票仓位"：`max_single_weight` 只是 4 个单位里权重最大的那一个 code（如 4.88%），而 `max_portfolio_weight` 是 4 个单位权重之和（如 14.18%）。两者不矛盾，只是口径不同——单票没算上"加仓的其它单位"。
+- **想让"单票"也按整个标的聚合**：在策略文件 `code/signal_engine.py` 的 `SignalEngine` 类里声明 `weight_groups` 类属性，声明哪些 code 属于同一标的：
+
+  ```python
+  class SignalEngine:
+      weight_groups = {
+          "TA": ["TA0001.ZCE", "TA0002.ZCE", "TA0003.ZCE", "TA0004.ZCE"],
+      }
+  ```
+
+  声明后 `max_single_weight` = 组内所有 code 权重之和的峰值（带符号求和）。4 个伪单位同向加仓时，`max_single_weight` 会自然等于 `max_portfolio_weight`（14.18%）。
+- **注意**：
+  1. `weight_groups` 是**策略代码里的硬编码声明**——换标的 / 换分组必须同步改，否则聚合口径是错的；声明里的 code 要和 config.json 的 codes 对得上；
+  2. 没声明进任何组的 code 保持原"单 code"口径（向后兼容，现有策略不声明行为完全不变）；
+  3. 同一 code 声明进多个组：取最后一个，回测时会打印 warning（属于策略声明错误）；
+  4. 该声明**只影响 `max_single_weight`**，`max_portfolio_weight`、`risk_xray`、`by_symbol`、positions.csv 等仍按原 code 口径；
+  5. 只影响**新跑**的 run（metrics.csv / run_card.json / run_card.md 同步刷新）；旧 run 的产物保持原值。
+
+### 8.44 同一标的同时持有多、空两个方向，仓位怎么算？
+
+- **引擎口径**：仓位权重（`max_portfolio_weight` / `max_single_weight`）都是**带符号求和（净敞口）**——多单为正、空单为负，同标的同组内多空会互相抵消。
+- **和真实期货结算一致**：国内商品期货（含郑商所 TA）对**同一合约**的多空对锁持仓，结算时保证金按**单边**收取——等量多空时按一边算，不重复占用保证金。所以引擎里"多空对冲后净敞口≈0 → 单票仓位显示≈0"，对应现实里"锁仓不额外占用保证金、价格波动多空盈亏互相抵消"，是符合实际的。
+- **但锁仓 ≠ 平仓**：多空两条持仓都还挂账（持仓量/额度占用都在），只是结算保证金按净额算；锁仓要付两次开仓手续费，且极端行情（涨跌停无法平仓、交易所临时上调保证金）下仍有流动性/强平风险。
+- **容易误会的点**：单票（组内净敞口）可能**大于**组合净敞口——比如组合里两个标的一多一空相抵，但其中某个标的多头没被对冲，此时单票仓位显示 5%、组合仓位显示 0%，两个口径不要混着比。
+- 实际影响：TA 海龟策略 4 个单位恒同向（全多或全空），永远不会出现同标的多空并存；本条适用于将来可能出现双向持仓的策略。
+
+### 8.45 WebUI「持仓与风险」tab 的两张图是怎么算的？（每天最大组合持仓 / 每天账户风险度）
+
+- 位置：报告页「分析图」右边、「分析」左边的「持仓与风险」tab，含两张图。数据源都是 `artifacts/positions.csv`（引擎每 bar 每个 code 的目标权重）+ `artifacts/equity.csv`（每 bar 总权益），由 digest 按**交易日**聚合（当天所有 bar 中取**峰值**，图内已标注"日取峰值"）。
+- **图 1「每天最大组合持仓」**：三条线可叠加，默认只显示**毛持仓**（点图例可切换显示净持仓 / 单边最大持仓）：
+  - **毛持仓** = 所有 code 权重绝对值之和（`sum|w|`），恒为正，表示总仓位占用量；
+  - **净持仓** = 带符号求和（`sum w`），正=净多、负=净空，表示对市场的净风险暴露；
+  - **单边最大持仓** = 按策略 `weight_groups` 分组，组内取"多头和 / |空头和| 的大边"再跨组合计，等于真实期货"同一合约对锁按单边收保证金"的口径。
+  - 三者的区别用一个例子说明：同一标的多空各 20% 时——毛 40%（总占用量）、净 0%（风险对冲）、单边 20%（真实保证金占用）。恒同向的策略（如 TA 海龟）三者完全相等。
+- **图 2「每天账户风险度」**：**单边口径**（= 单边最大持仓 ÷ 权益，百分比），对应真实期货"风险度 = 占用保证金 ÷ 客户权益"；行业规则：风险度 > 100% 追保、100%~120% 强平（各期货公司风控线不同），图内画了 100% 强平参考虚线，超过 100% 的点标红。
+- **必须知道的模型口径差异**：
+  1. 引擎保证金按**开仓价**固定计算，真实期货按**每日结算价**逐日盯市——引擎的风险度曲线比真实略平滑，但主趋势（浮亏侵蚀权益 → 风险度被动上升）一致；
+  2. 引擎**执行模型**按每个 code 独立全额占用保证金（多空都扣可用资金），比真实期货"对锁单边收取"保守——这只影响回测的资金约束，不影响展示指标；
+  3. 由于引擎是"目标权重"模型，这些图反映的是**策略目标仓位水平**（每天设定的权重），不是逐笔成交后的真实持仓明细——对以损定量、权重即保证金占比的策略（如 TA 海龟）与真实口径一致。
+- LLM 报告里只给**派生摘要**（毛持仓/风险度的最大、平均、超 50%/80%/100% 的天数与占比、风险度最高日期），不给全量日序列（防 token 爆炸）；完整日序列在 digest（`daily_position` / `daily_risk`）供图表使用。
+- **二期可迭代点（已记录）**：逐标的持仓展示 + 下拉框按需加载（组合级序列 2400 点可进 digest；100 标的全序列约 24 万点 8.9MB，必须走 API 现读 positions.csv 按需返回，不能进 digest）。
 
 ## 10. 命令速查表
 

@@ -311,6 +311,38 @@ def _load_optimizer(config: Dict[str, Any]) -> Optional[Callable]:
     return optimize
 
 
+def _single_weight_by_group(
+    target_pos: pd.DataFrame,
+    weight_groups: Any,
+) -> pd.DataFrame:
+    """Aggregate per-code target weights into per-logical-symbol groups.
+
+    ``weight_groups`` maps a group name to the codes that share one underlying
+    instrument (e.g. several pseudo-unit codes standing for the pyramid adds
+    of a single futures contract).  Weights within a group are summed with
+    their sign, so the aggregated weight is the net exposure to that
+    underlying — the same signed-sum semantics as the portfolio weight.
+    Codes not listed in any group stay as single-symbol columns.
+
+    Returns ``target_pos`` unchanged when ``weight_groups`` is empty/None.
+    """
+    if not weight_groups:
+        return target_pos
+    if not isinstance(weight_groups, dict):
+        print(f"[WARN] signal_engine.weight_groups must be a dict, "
+              f"got {type(weight_groups).__name__}; falling back to per-code weights")
+        return target_pos
+    group_of: Dict[str, str] = {}
+    for group, members in weight_groups.items():
+        for code in members:
+            if code in group_of:
+                print(f"[WARN] code {code!r} declared in multiple weight_groups "
+                      f"({group_of[code]!r} and {group!r}); using {group!r}")
+            group_of[code] = group
+    keys = [group_of.get(code, code) for code in target_pos.columns]
+    return target_pos.T.groupby(keys).sum().T
+
+
 def _normalise_fundamental_fields(config: Dict[str, Any]) -> dict[str, list[str]]:
     """Read the optional statement-table field map from backtest config."""
     raw_fields = config.get("fundamental_fields")
@@ -913,7 +945,13 @@ class BaseEngine(ABC):
         if len(position_weight_series):
             m["avg_portfolio_weight"] = float(position_weight_series.mean())
             m["max_portfolio_weight"] = float(position_weight_series.max())
-            m["max_single_weight"] = float(target_pos.max(axis=1).max())
+            # When the strategy declares weight_groups (codes of one logical
+            # instrument, e.g. pyramid-add pseudo units), max_single_weight is
+            # the peak net weight per group instead of per code. No declaration
+            # keeps the historical per-code semantics.
+            groups = getattr(signal_engine, "weight_groups", None)
+            single_pos = _single_weight_by_group(target_pos, groups)
+            m["max_single_weight"] = float(single_pos.max(axis=1).max())
         m["by_symbol"] = by_symbol_stats(self.trades)
         m["by_exit_reason"] = by_exit_reason_stats(self.trades)
 

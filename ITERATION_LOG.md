@@ -45,6 +45,8 @@
 | V030 | 2026-08-16 | 回测提速：默认跳过 PNG + loader 缓存 | 7 张 PNG 占回测 93%（约 557s）是唯一瓶颈；runner 默认不生图（--with-charts 才生），配合 VIBE_TRADING_DATA_CACHE 三年 15m 回测 596s→11s |
 | V031 | 2026-08-16 | 建立项目踩坑日志 Mistake_Journal | 新建项目专属坑的认知与状态账本（M001-M020 存量收录）；坑先入账本、状态权威、单向指针；AGENTS/HowToUse 同步入口 |
 | V032 | 2026-08-17 | 回测 fastrun：跳过 digest 慢分析 | runner 新增 --fastrun / --without-regime / --without-mae-mfe，跳过 regime/MAE-MFE；3 年 5m 回测 766s→32s（digest 构建 750s→1.1s）；digest 省略对应字段、报告整段跳过、前端 MAE/MFE 卡片占位 |
+| V033 | 2026-08-18 | max_single_weight 按策略声明分组合并 | 策略声明 weight_groups（伪单位归属同一标的），单票仓位按组带符号求和（净敞口）；TA 4 单位同向时 max_single == max_portfolio；无声明保持单 code 口径；HowToUse 8.43/8.44 |
+| V034 | 2026-08-18 | WebUI 新 tab「持仓与风险」：每天最大组合持仓 + 每天账户风险度 | digest 新增每日毛/净/单边三口径序列与 LLM 派生摘要；图 1 毛持仓默认可叠加净/单边，图 2 单边口径+100% 强平线标红；单边按 weight_groups 取大边（M028）；二期可迭代点：逐标的+下拉框按需加载 |
 > 补录说明：V001-V009 为补录条目，依据 git 历史、HowToUse、全局复利与踩坑日志、`C:\Users\mumu\.codex\sessions` 会话记录回溯整理；当时未留痕的字段标“待补”。从下一条起，每次迭代收尾直接写正文。
 
 ## 模板
@@ -391,3 +393,32 @@
   - 存量修复：`test_analysis_runner_hook.py` 2 个用例在 HEAD 即失败（`_finalize_run_analysis` 的 `with_charts` 默认 False，V030 行为变更后测试仍断言默认生成图表）——已同步为三个用例：默认跳过 charts/report、`with_charts=True` 生成 charts 不调 LLM、`with_charts=True + with_analysis=True` 顺序 charts→report。
 - 影响/注意：命令行默认行为不变；fastrun run 在 WebUI 的 MAE/MFE 卡片显示占位、LLM 报告不含 Regime/MAE-MFE 段（属预期降级）；HowToUse 8.38 已同步（含"fastrun 覆盖 digest 可完整重跑恢复"）。
 - 关联：计划 P-20260817-fastrun；Mistake_Journal M027；全局 E010；commit 待补（提交后回填）。
+
+### V033 · max_single_weight 按策略声明分组合并（单标的口径）（2026-08-18）
+- 一句话总结：引擎 `max_single_weight` 支持按"逻辑标的"聚合——策略在 `signal_engine.py` 声明 `weight_groups`（哪些 code 属于同一标的，如 TA 的 4 个伪单位），引擎按组**带符号求和**取峰值；无声明保持原"单 code"口径。TA 4 伪单位 run 实测 `max_single_weight == max_portfolio_weight`（0.14098），metrics.csv / run_card.json / run_card.md 三处同步。
+- 为什么：V438 WebUI 报告 `max_portfolio_weight`(14.18%) 与 `max_single_weight`(4.88%) 数值差引起疑问——4 个伪单位（TA0001-0004.ZCE 共享同一 TA_1m.csv）其实是同一标的的加仓，单票口径应算整个标的；`max_single_weight` 按单 code 取峰值（4.88%）而组合按 4 单位之和（14.18%），不是 bug 但口径易误解。用户要求"加仓视为同一标的"，单票也变 14.18%，RUNCARD/metrics.csv 同步。
+- 关键细节：
+  - 分组来源拍板（方案 B）：策略文件声明 `weight_groups` 类属性（`{"TA": ["TA0001.ZCE", ...]}`），不用 config.json 字段（per-run 重复维护、config 塞策略语义）、不在引擎写死 TA（通用引擎不为单品种开特例）；`_validate_signal_engine_class` 只校验 __init__/generate，新增类属性无校验风险。
+  - 聚合口径拍板：**带符号求和（净敞口）**，与 `max_portfolio_weight` 一致；依据是国内商品期货（含郑商所 TA）同一合约对锁保证金按单边收取，实际占用资金与风险 = 净敞口；锁仓 ≠ 平仓（持仓挂账、结算保证金按净额）。TA 策略 4 单位恒同向，该拍板对 TA 无实际数字影响。
+  - 实现：`agent/backtest/engines/base.py` 新增模块级 `_single_weight_by_group(target_pos, weight_groups)`——空/非 dict 原样返回（向后兼容）；code→组映射未声明者以自身为组名；同一 code 声明多组取最后 + warning；`target_pos.T.groupby(keys).sum().T` 带符号合并。metrics 段（912-916 行）`getattr(signal_engine, "weight_groups", None)` 接入，改一处 metrics.csv / run_card 自动同步（digest 与 WebUI 只读产物）。
+  - digest.py 释义更新：`max_single_weight` 注明"策略声明 weight_groups 时按组分组合并、带符号净敞口；未声明按单代码"。
+- 验证：
+  - 新增 6 个测试（`test_engine_robustness.py` TestSingleWeightGroup）：同组同向求和、同组反向净抵消、未声明 code 保持单 code、无/非 dict 声明原样返回、端到端 run 断言 `max_single == max_portfolio`。全量 `test_engine_robustness.py` 55 passed 1 skipped；digest/runner_hook 24 passed。
+  - 真实 run：复制 v438（4H 10 年）加 `weight_groups` 声明 fastrun 重跑——`max_single_weight = max_portfolio_weight = 0.14098`（改动前单 code 4.88%）；metrics.csv / run_card.md 值一致。
+- 影响/注意：默认行为零变化（无声明 run 与改动前一致）；只影响新 run；只影响 `max_single_weight`（by_symbol/risk_xray/positions.csv 仍按 code 口径）。策略侧声明是硬编码（换标的需同步）；同标的反向持仓时单票净敞口可能大于组合净敞口，口径易混——HowToUse 8.43/8.44 已写明。
+- 关联：计划 P-20260818-single_weight_group；HowToUse 8.43/8.44；run `ta_turtle_4h_v438_swg_2014_2023`；commit 待补（提交后回填）。
+
+### V034 · WebUI 新 tab「持仓与风险」：每天最大组合持仓 + 每天账户风险度（2026-08-18）
+- 一句话总结：WebUI 报告页「分析图」右边、「分析」左边新增「持仓与风险」tab，两张图——①每天最大组合持仓（毛/净/单边三口径日取峰值，默认只显示毛持仓、图例可叠加）；②每天账户风险度（单边口径 = 保证金/权益，100% 强平虚线、超线标红）。digest 新增 `daily_position` / `daily_risk` 全量时序 + `position_risk_summary` 派生摘要（LLM 只拿摘要，不进全量序列）。
+- 为什么：用户看不到"每天最大持仓"和"每天账户风险"两个关键风控图。行业规则调研确认：风险度 = 占用保证金 ÷ 客户权益 ×100%（客户权益含浮盈浮亏），>100% 追保、100%~120% 强平（各公司不同）。用户拍板：图 1 用毛/净/单边三口径（单边 = 真实期货对锁单边保证金）、图 2 用单边口径、日取峰值、单独开 tab；digest 去留经调研后确认写入（耗时 148ms + 156KB 可忽略，且 `compute_chart_payload` 签名不变、图表/LLM 单点同源）。
+- 关键细节：
+  - digest.py：`daily_position_and_risk(run_dir, weight_groups)` 读 positions.csv 按交易日聚合——毛 `sum|w|`、净 `sum w`（取 |净| 最大那根带符号）、单边按 `weight_groups` 组内取 `max(多头和, |空头和|)` 跨组合计，日取峰值；`daily_risk` = 单边（引擎保证金恒 = |权重|×权益，杠杆在 size/margin 两步抵消，故风险度 = 单边权重）。`_strategy_weight_groups` 从 code/signal_engine.py 读策略 weight_groups（无则单边=毛）；`_DIGEST_SOURCE_FILES` 加入 positions.csv（指纹联动重建）；`load_digest` 对旧 digest 做**增量兼容**——指纹只差 positions.csv 时仅补算持仓/风险序列（~0.15s），保留 regime/MAE-MFE 不触发全量重建（否则旧 run 首次访问 10 年 4H 约 11s）。
+  - LLM 摘要：`position_risk_summary`（毛/风险 max、avg、超 50/80/100% 天数与占比、风险度最高日期），`render_digest_for_llm` 新增「仓位与风险摘要」段，**不渲染全量日序列**（测试断言字段名不出现在 prompt）。
+  - 前端：RunDetail.tsx 新增 `PositionsRiskTab`（复用 charts API 的 daily_position/daily_risk）+ `DailyPositionChart`（legend 默认只显示毛、点图例叠加净/单边）+ `DailyRiskChart`（markLine 100% + 超线标红）；Tab 类型/按钮顺序改（analysisCharts → positions → analysis）；5 语言包 i18n（12 个新 key）。
+  - 坑（M028）：单边实现初版写成 `pos_sum + |neg_sum|`，恒等于毛持仓（数学恒等式），锁仓样本应 20% 却得 40%；改为 `max(多头和, |空头和|)`。测试含锁仓日断言（gross=40/net=0/single=20）防回归。
+- 验证：
+  - 后端：test_analysis_digest.py 新增 4 用例（三口径日聚合含空头/锁仓日、缺 positions.csv 容错、build_digest/payload 字段、LLM 摘要段且不含全量序列字段名）——digest/charts/runner_hook/run_card 45 passed。
+  - 前端：tsc 通过；vitest 450 passed；`npm run build` 成功（32.8s）。
+  - 真实 run：v438 复制加 weight_groups（swg2）fastrun 端到端——digest 落盘 daily_position/daily_risk 各 2433 天，空头日 2014-01-09 gross=21.77/net=-21.77/single=21.77，risk max 21.77 / avg 1.42，over100 0 天，与手工核对一致。
+- 影响/注意：新 tab 数据来自 digest（组合级序列 2400 点常驻，fastrun 也生成，不进跳表）；LLM 报告新增「仓位与风险摘要」段（token 增量极小）；口径差异（开仓价 vs 结算价、引擎逐 code 全额占用、目标权重口径）写进 HowToUse 8.45；**二期可迭代点**：逐标的持仓 + 下拉框按需加载（100 标的全量 8.9MB 不得进 digest，需 API 现读 positions.csv）。
+- 关联：计划 P-20260818-daily_position_risk_charts；Mistake_Journal M028；HowToUse 8.36/8.45；run `ta_turtle_4h_v438_swg2_2014_2023`；commit 待补（提交后回填）。

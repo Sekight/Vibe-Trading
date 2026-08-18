@@ -8,6 +8,7 @@ large series are summarized/capped here.
 from __future__ import annotations
 
 import csv
+import importlib.util
 import json
 from collections import deque
 from datetime import datetime, timezone
@@ -32,6 +33,7 @@ _DIGEST_SOURCE_FILES = (
     "artifacts/metrics.csv",
     "artifacts/trades.csv",
     "artifacts/equity.csv",
+    "artifacts/positions.csv",
     "artifacts/validation.json",
     "artifacts/risk_xray.json",
     "artifacts/rebalance_notes.json",
@@ -117,7 +119,7 @@ METRIC_MEANINGS: Dict[str, str] = {
     # 仓位与换手
     "avg_portfolio_weight": "平均组合仓位（全组合目标仓位均值）",
     "max_portfolio_weight": "最大组合仓位（全组合目标仓位峰值）",
-    "max_single_weight": "单票最大目标仓位",
+    "max_single_weight": "单标的最大目标仓位（策略声明 weight_groups 时按组分组合并、带符号净敞口；未声明时按单代码）",
     "avg_turnover": "平均换手率", "total_turnover": "累计换手率",
     "rebalance_turnover_mean": "再平衡平均换手", "rebalance_turnover_max": "再平衡最大换手",
     # 交易成本
@@ -233,6 +235,27 @@ def write_digest_json(
     return digest
 
 
+def _missing_only_positions(
+    old_sources: Any,
+    fresh: Dict[str, Any],
+) -> bool:
+    """True when a stored digest's fingerprint only lacks positions.csv.
+
+    ``_DIGEST_SOURCE_FILES`` gained ``artifacts/positions.csv`` (2026-08-18,
+    V034).  Older digests were written without that key, so a strict
+    fingerprint compare would force a full rebuild (10y 4H ≈ 11s, dominated by
+    MAE/MFE).  When every key the old digest *did* record still matches and the
+    only new key is positions.csv, the caller can incrementally back-fill the
+    daily position/risk series instead of rebuilding everything.
+    """
+    if not isinstance(old_sources, dict) or not old_sources:
+        return False
+    for key, value in old_sources.items():
+        if fresh.get(key) != value:
+            return False
+    return set(fresh) - set(old_sources) <= {"artifacts/positions.csv"}
+
+
 def load_digest(run_dir: Path) -> Dict[str, Any]:
     """Return a digest, preferring a fresh persisted copy when available."""
     path = Path(run_dir) / DIGEST_FILENAME
@@ -243,9 +266,25 @@ def load_digest(run_dir: Path) -> Dict[str, Any]:
                 isinstance(payload, dict)
                 and payload.get("schema_version") == DIGEST_SCHEMA_VERSION
                 and isinstance(payload.get("digest"), dict)
-                and payload.get("sources") == _artifact_fingerprint(run_dir)
             ):
-                return payload["digest"]
+                fresh = _artifact_fingerprint(run_dir)
+                if payload.get("sources") == fresh:
+                    return payload["digest"]
+                if _missing_only_positions(payload.get("sources"), fresh):
+                    digest = dict(payload["digest"])
+                    daily_position, daily_risk = daily_position_and_risk(
+                        run_dir, _strategy_weight_groups(run_dir)
+                    )
+                    digest["daily_position"] = daily_position
+                    digest["daily_risk"] = daily_risk
+                    digest["position_risk_summary"] = _position_risk_summary(
+                        daily_position, daily_risk
+                    )
+                    try:
+                        write_digest_json(run_dir, digest)
+                    except (OSError, ValueError):  # pragma: no cover
+                        pass
+                    return digest
         except (OSError, ValueError):
             pass
     digest = build_digest(run_dir)
@@ -542,6 +581,144 @@ def ohlcv_summary(run_dir: Path) -> List[Dict[str, Any]]:
     return summary
 
 
+def _strategy_weight_groups(run_dir: Path) -> Any:
+    """Best-effort read of the strategy's ``weight_groups`` class attribute.
+
+    ``max_single_weight`` aggregation (single-sided exposure) needs the
+    strategy's grouping of pseudo-unit codes into logical instruments. The
+    digest builds from a run directory without a live engine, so load the
+    strategy module just to read the class attribute. Any failure (missing
+    file, import error) yields None, meaning "no grouping declared" and the
+    single-sided exposure falls back to the gross exposure.
+    """
+    path = run_dir / "code" / "signal_engine.py"
+    if not path.exists():
+        return None
+    try:
+        spec = importlib.util.spec_from_file_location("_digest_signal_engine", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)  # type: ignore[union-attr]
+        cls = getattr(module, "SignalEngine", None)
+        return getattr(cls, "weight_groups", None)
+    except Exception:
+        return None
+
+
+def daily_position_and_risk(
+    run_dir: Path,
+    weight_groups: Any = None,
+) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Aggregate per-bar target weights into daily (day-peak) series.
+
+    Three exposure measures, each taken at its daily peak (the bar with the
+    largest magnitude for the signed net series, the max for the positive
+    ones):
+      - ``gross``: ``sum(|w|)`` per bar — total position volume, always >= 0;
+      - ``net``: signed ``sum(w)`` — the day value is the bar with the largest
+        ``|net|`` so a net-short day shows as a negative exposure (direction
+        kept);
+      - ``single``: single-sided margin-style exposure — within each
+        ``weight_groups`` group take ``max(long-sum, |short-sum|)`` and add
+        across groups. Equals gross for same-direction strategies; equals the
+        real futures single-sided margin for locked (long + short) positions
+        of one instrument. Without a declared grouping it equals gross.
+
+    ``daily_risk`` is the single exposure in percent. In the target-weight
+    model the engine margin is ``|weight| * equity`` (the leverage factor
+    cancels between sizing and margin), so ``margin / equity == single``.
+
+    Returns ``(daily_position, daily_risk)``; both empty when positions.csv is
+    missing or has no weight columns (consumers treat that as "no data").
+    """
+    path = run_dir / "artifacts" / "positions.csv"
+    if not path.exists():
+        return [], []
+    try:
+        df = pd.read_csv(path, parse_dates=["timestamp"])
+    except Exception:
+        return [], []
+    if df.empty or "timestamp" not in df.columns:
+        return [], []
+    codes = [c for c in df.columns if c != "timestamp"]
+    if not codes:
+        return [], []
+
+    w = df[codes].astype(float)
+    gross = w.abs().sum(axis=1)
+    net = w.sum(axis=1)
+
+    group_of: Dict[str, str] = {}
+    for group, members in (weight_groups or {}).items():
+        for code in members:
+            group_of[code] = group
+    keys = [group_of.get(code, code) for code in codes]
+    # Single-sided exposure per group: max(long-side sum, |short-side sum|).
+    # Note: summing the two would equal the gross exposure (a tautology); the
+    # point of "single-sided" is that locked (long + short) positions of one
+    # instrument only charge margin on the bigger side, like real futures.
+    pos_sum = w.clip(lower=0.0).T.groupby(keys).sum().T
+    neg_sum = w.clip(upper=0.0).T.groupby(keys).sum().T
+    single_by_group = pos_sum.where(pos_sum >= neg_sum.abs(), neg_sum.abs())
+    single = single_by_group.sum(axis=1)
+
+    daily = pd.DataFrame({
+        "date": df["timestamp"].dt.date.astype(str),
+        "gross": gross,
+        "net": net,
+        "single": single,
+    })
+    agg = daily.groupby("date").agg(
+        gross=("gross", "max"),
+        net=("net", lambda s: s.loc[s.abs().idxmax()]),
+        single=("single", "max"),
+    )
+    daily_position: List[Dict[str, Any]] = []
+    daily_risk: List[Dict[str, Any]] = []
+    for date, row in agg.iterrows():
+        item = {
+            "date": date,
+            "gross_pct": round(float(row["gross"]) * 100.0, 2),
+            "net_pct": round(float(row["net"]) * 100.0, 2),
+            "single_pct": round(float(row["single"]) * 100.0, 2),
+        }
+        daily_position.append(item)
+        daily_risk.append({"date": date, "risk_pct": item["single_pct"]})
+    return daily_position, daily_risk
+
+
+def _position_risk_summary(
+    daily_position: List[Dict[str, Any]],
+    daily_risk: List[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Derive a compact LLM-facing summary from the daily series.
+
+    Never the full series — the daily arrays stay out of the LLM prompt.
+    """
+    if not daily_risk:
+        return None
+    risk = [float(item["risk_pct"]) for item in daily_risk]
+    gross = [float(item["gross_pct"]) for item in daily_position] if daily_position else []
+    total = len(risk)
+
+    def over(threshold: float) -> Dict[str, Any]:
+        days = sum(1 for value in risk if value >= threshold)
+        return {"days": days, "pct": round(days / total * 100.0, 2) if total else 0.0}
+
+    peak = sorted(daily_risk, key=lambda item: item["risk_pct"], reverse=True)[:3]
+    return {
+        "gross_max_pct": round(max(gross), 2) if gross else None,
+        "gross_avg_pct": round(sum(gross) / len(gross), 2) if gross else None,
+        "risk_max_pct": round(max(risk), 2),
+        "risk_avg_pct": round(sum(risk) / len(risk), 2),
+        "risk_over_50": over(50.0),
+        "risk_over_80": over(80.0),
+        "risk_over_100": over(100.0),
+        "peak_days": [
+            {"date": item["date"], "risk_pct": item["risk_pct"]} for item in peak
+        ],
+    }
+
+
 def _load_close_prices(run_dir: Path) -> Dict[str, pd.Series]:
     """Load per-symbol close series from run OHLCV artifacts."""
     artifacts = run_dir / "artifacts"
@@ -679,6 +856,10 @@ def build_digest(
     for key in ("avg_holding_bars", "avg_holding_days"):
         if key in metrics and metrics[key] is not None:
             summary[key] = metrics[key]
+    daily_position, daily_risk = daily_position_and_risk(
+        run_dir, _strategy_weight_groups(run_dir)
+    )
+    position_risk_summary = _position_risk_summary(daily_position, daily_risk)
     if include_mae_mfe:
         mae_values = [t["mae_pct"] for t in trades if t.get("mae_pct") is not None]
         mfe_values = [t["mfe_pct"] for t in trades if t.get("mfe_pct") is not None]
@@ -705,6 +886,9 @@ def build_digest(
         "equity": equity_curve,
         "trades": trades_sorted,
         "trade_summary": summary,
+        "daily_position": daily_position,
+        "daily_risk": daily_risk,
+        "position_risk_summary": position_risk_summary,
         "monthly_pnl": monthly_pnl(trades_sorted),
         "period_pnl": period_pnl(trades_sorted),
         "buckets": holding_buckets(trades_sorted),
@@ -772,6 +956,21 @@ def render_digest_for_llm(digest: Dict[str, Any], max_trades: int = 20) -> str:
             f"| {key} | {_metric_meaning(key)} | {_markdown_cell(value)} |"
             for key, value in items
         )
+
+    # 仓位与风险摘要：只出派生统计，不渲染 daily_position/daily_risk 全量时序。
+    risk_summary = digest.get("position_risk_summary") or {}
+    if risk_summary:
+        lines.extend(["", "## 仓位与风险摘要", "| 项 | 值 |", "|---|---|"])
+        lines.append(f"| 毛持仓(日峰值) 最大/平均 | {_markdown_cell(risk_summary.get('gross_max_pct'))}% / {_markdown_cell(risk_summary.get('gross_avg_pct'))}% |")
+        lines.append(f"| 账户风险度(单边) 最大/平均 | {_markdown_cell(risk_summary.get('risk_max_pct'))}% / {_markdown_cell(risk_summary.get('risk_avg_pct'))}% |")
+        for label, key in (("≥50%", "risk_over_50"), ("≥80%", "risk_over_80"), ("≥100%", "risk_over_100")):
+            bucket = risk_summary.get(key) or {}
+            lines.append(f"| 风险度 {label} 天数/占比 | {_markdown_cell(bucket.get('days'))} 天 / {_markdown_cell(bucket.get('pct'))}% |")
+        peaks = risk_summary.get("peak_days") or []
+        if peaks:
+            lines.append("| 风险度最高日期 | " + "；".join(
+                f"{item.get('date')} ({item.get('risk_pct')}%)" for item in peaks
+            ) + " |")
 
     lines.extend([
         "",

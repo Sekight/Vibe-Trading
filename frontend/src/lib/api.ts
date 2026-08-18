@@ -653,6 +653,8 @@ export interface RunAnalysisCharts {
     pnl_vs_holding?: Array<{ holding_days?: number; holding_bars?: number; return_pct?: number; pnl?: number; win: boolean; code?: string }>;
     mae_mfe?: Array<{ entry_ts?: string; code?: string; mae_pct?: number; mfe_pct?: number; win: boolean }>;
     holding_buckets?: Array<{ bucket: string; min_bars: number; max_bars: number | null; count: number; total_pnl: number; avg_return_pct: number; win_rate: number; avg_profit_loss_ratio?: number | null }>;
+    daily_position?: Array<{ date: string; gross_pct: number; net_pct: number; single_pct: number }>;
+    daily_risk?: Array<{ date: string; risk_pct: number }>;
   };
   pngs: AnalysisPngInfo[];
   benchmark_label?: string | null;

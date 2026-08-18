@@ -12,6 +12,7 @@ from backtest.analysis.digest import (
     METRIC_MEANINGS,
     add_mae_mfe,
     build_digest,
+    daily_position_and_risk,
     group_metrics,
     holding_buckets,
     load_digest,
@@ -386,4 +387,122 @@ def test_write_digest_json_forwards_include_params(tmp_path: Path) -> None:
     assert "mae_mfe_summary" not in payload["digest"]
     # A fresh load still returns the persisted (skipped) digest, not a rebuild.
     assert "regime" not in load_digest(run_dir)
+
+
+# ---------------------------------------------------------------------------
+# daily_position / daily_risk — per-day peak of gross/net/single-sided weights
+# ---------------------------------------------------------------------------
+
+
+def test_daily_position_and_risk_aggregation(tmp_path: Path) -> None:
+    """Gross/net/single-sided daily peaks, including a net-short day and a
+    locked (long + short) day where single-sided stays at the bigger side."""
+    run_dir = write_run_dir(tmp_path, "20260818_000000_00_posrisk")
+    (run_dir / "artifacts" / "positions.csv").write_text(
+        "timestamp,AAA,BBB\n"
+        "2024-01-02 09:00:00,0.2,0.1\n"   # day1 bar1: gross .3 net .3 single .3
+        "2024-01-02 14:00:00,0.3,0.1\n"   # day1 bar2: gross .4 net .4 single .4 (peak)
+        "2024-01-03 09:00:00,-0.2,0.1\n"  # day2: gross .3 net -.1 single max(.1,|-.2|)=.2
+        "2024-01-04 09:00:00,0.2,-0.2\n"  # day3 locked: gross .4 net 0 single .2
+        ,
+        encoding="utf-8",
+    )
+    groups = {"G": ["AAA", "BBB"]}
+    daily_position, daily_risk = daily_position_and_risk(run_dir, groups)
+    by_date = {item["date"]: item for item in daily_position}
+    assert by_date["2024-01-02"]["gross_pct"] == 40.0
+    assert by_date["2024-01-02"]["net_pct"] == 40.0
+    assert by_date["2024-01-02"]["single_pct"] == 40.0
+    assert by_date["2024-01-03"]["gross_pct"] == 30.0
+    assert by_date["2024-01-03"]["net_pct"] == -10.0
+    assert by_date["2024-01-03"]["single_pct"] == 20.0
+    assert by_date["2024-01-04"]["gross_pct"] == 40.0
+    assert by_date["2024-01-04"]["net_pct"] == 0.0
+    assert by_date["2024-01-04"]["single_pct"] == 20.0
+    assert daily_risk[0]["risk_pct"] == 40.0
+    assert daily_risk[2]["risk_pct"] == 20.0
+    # Without a grouping, single-sided == gross (no per-group lock handling).
+    dp2, _ = daily_position_and_risk(run_dir, None)
+    assert dp2[0]["single_pct"] == 40.0
+    assert dp2[1]["single_pct"] == 30.0
+
+
+def test_daily_position_missing_positions_csv_returns_empty(tmp_path: Path) -> None:
+    run_dir = write_run_dir(tmp_path, "20260818_000000_00_nopos")
+    assert daily_position_and_risk(run_dir, None) == ([], [])
+
+
+def test_build_digest_includes_daily_series_and_payload(tmp_path: Path) -> None:
+    run_dir = write_run_dir(tmp_path, "20260818_000000_00_digestpos")
+    digest = build_digest(run_dir)  # synthetic run ships no positions.csv
+    assert digest["daily_position"] == []
+    assert digest["daily_risk"] == []
+    assert digest["position_risk_summary"] is None
+
+    from backtest.analysis.charts import compute_chart_payload
+    payload = compute_chart_payload(digest)
+    assert payload["daily_position"] == []
+    assert payload["daily_risk"] == []
+
+
+def test_render_digest_for_llm_risk_summary_without_full_series(tmp_path: Path) -> None:
+    """The LLM prompt gets the derived summary, never the full daily series."""
+    run_dir = write_run_dir(tmp_path, "20260818_000000_00_llmrisk")
+    (run_dir / "artifacts" / "positions.csv").write_text(
+        "timestamp,AAA\n"
+        "2024-01-02 09:00:00,0.2\n"
+        "2024-01-03 09:00:00,-0.2\n"
+        "2024-01-04 09:00:00,1.2\n"   # 120% -> over the 100% liquidation line
+        ,
+        encoding="utf-8",
+    )
+    digest = build_digest(run_dir)
+    summary = digest["position_risk_summary"]
+    assert summary["risk_max_pct"] == 120.0
+    assert summary["risk_over_100"]["days"] == 1
+    assert summary["risk_over_100"]["pct"] == pytest.approx(33.33)
+
+    prompt = render_digest_for_llm(digest)
+    assert "## 仓位与风险摘要" in prompt
+    assert "毛持仓(日峰值) 最大/平均" in prompt
+    assert "风险度 ≥100% 天数/占比" in prompt
+    assert "1 天 / 33.33%" in prompt
+    # Full-series field names and structures must never reach the LLM prompt.
+    assert "gross_pct" not in prompt
+    assert "net_pct" not in prompt
+    assert "single_pct" not in prompt
+    assert "risk_pct" not in prompt
+    assert '"date"' not in prompt
+
+
+def test_load_digest_incrementally_backfills_positions_on_old_digest(tmp_path: Path) -> None:
+    """A V034-era digest (sources without positions.csv) is back-filled fast
+    instead of fully rebuilt: existing regime/MAE-MFE fields survive."""
+    run_dir = write_run_dir(tmp_path, "20260818_000000_00_olddigest")
+    (run_dir / "artifacts" / "positions.csv").write_text(
+        "timestamp,AAA\n2024-01-02 09:00:00,0.2\n",
+        encoding="utf-8",
+    )
+    full = build_digest(run_dir)
+    # Simulate an old persisted digest: drop positions.csv from its sources.
+    from backtest.analysis.digest import _artifact_fingerprint, write_digest_json
+    write_digest_json(run_dir, full)
+    path = run_dir / "analysis.digest.json"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload["sources"].pop("artifacts/positions.csv")
+    payload["digest"].pop("daily_position", None)
+    payload["digest"].pop("daily_risk", None)
+    payload["digest"].pop("position_risk_summary", None)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    loaded = load_digest(run_dir)
+    assert loaded["daily_position"] == full["daily_position"]
+    assert loaded["daily_risk"] == full["daily_risk"]
+    assert loaded["position_risk_summary"] == full["position_risk_summary"]
+    # Slow, expensive sections of the old digest were preserved, not rebuilt.
+    assert "regime" in loaded
+    assert "mae_mfe_summary" in loaded
+    # The back-filled digest is persisted with the new fingerprint (cache hits next time).
+    persisted = json.loads(path.read_text(encoding="utf-8"))
+    assert persisted["sources"] == _artifact_fingerprint(run_dir)
 

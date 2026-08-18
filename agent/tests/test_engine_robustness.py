@@ -20,7 +20,7 @@ import pandas as pd
 import pytest
 
 from backtest.engines.base import _align
-from backtest.engines.base import _benchmark_label, _validation_request
+from backtest.engines.base import _benchmark_label, _single_weight_by_group, _validation_request
 from backtest.engines import base as base_engine
 from backtest.benchmark import _infer_market
 from backtest.engines.china_a import ChinaAEngine
@@ -866,3 +866,88 @@ class TestAutoMonteCarlo:
 
         assert "validation" in metrics
         assert (tmp_path / "artifacts" / "validation.json").exists()
+
+
+# ---------------------------------------------------------------------------
+# 7. max_single_weight — per-logical-symbol grouping (strategy weight_groups)
+# ---------------------------------------------------------------------------
+
+
+class TestSingleWeightGroup:
+    """``_single_weight_by_group`` and the engine metric it feeds.
+
+    A strategy can declare ``weight_groups = {group: [codes...]}`` when several
+    codes stand for the adds of one underlying instrument (pseudo units).
+    ``max_single_weight`` then reports the peak *net* weight per group (signed
+    sum, same semantics as portfolio weight); codes not listed in any group
+    keep the historical per-code behavior.
+    """
+
+    def test_group_sums_same_direction(self) -> None:
+        pos = pd.DataFrame({"AAA": [0.05, 0.0], "BBB": [0.06, 0.0]})
+        out = _single_weight_by_group(pos, {"T": ["AAA", "BBB"]})
+        assert out.columns.tolist() == ["T"]
+        assert out["T"].iloc[0] == pytest.approx(0.11)
+        assert out["T"].max() == pytest.approx(0.11)
+
+    def test_group_net_offset_opposite_direction(self) -> None:
+        """Opposite-direction holdings on one underlying net out (signed sum)."""
+        pos = pd.DataFrame({"AAA": [0.05, 0.0], "BBB": [-0.04, 0.0]})
+        out = _single_weight_by_group(pos, {"T": ["AAA", "BBB"]})
+        assert out["T"].iloc[0] == pytest.approx(0.01)
+
+    def test_unlisted_code_stays_single(self) -> None:
+        pos = pd.DataFrame({"AAA": [0.05], "CCC": [0.09]})
+        out = _single_weight_by_group(pos, {"T": ["AAA", "BBB"]})
+        assert set(out.columns) == {"T", "CCC"}
+        assert out["T"].iloc[0] == pytest.approx(0.05)
+        assert out["CCC"].iloc[0] == pytest.approx(0.09)
+
+    def test_no_groups_returns_unchanged(self) -> None:
+        pos = pd.DataFrame({"AAA": [0.05, 0.06]})
+        assert _single_weight_by_group(pos, None).equals(pos)
+        assert _single_weight_by_group(pos, {}).equals(pos)
+
+    def test_non_dict_groups_ignored(self) -> None:
+        pos = pd.DataFrame({"AAA": [0.05]})
+        assert _single_weight_by_group(pos, ["AAA"]).equals(pos)
+
+    def test_backtest_metric_grouped_same_direction(self, tmp_path: Path) -> None:
+        """End-to-end: same-direction pseudo units in one group make
+        max_single_weight equal max_portfolio_weight (all codes are the group)."""
+        dates = pd.bdate_range("2024-04-01", periods=20)
+        bars = pd.DataFrame(
+            {
+                "open": [10.0] * 20, "high": [11.0] * 20,
+                "low": [9.0] * 20, "close": [10.0] * 20,
+                "volume": [1000] * 20,
+            },
+            index=dates,
+        )
+
+        class FakeLoader:
+            def fetch(self, *args, **kwargs):
+                return {"AAA": bars.copy(), "BBB": bars.copy()}
+
+        class SignalEngine:
+            weight_groups = {"T": ["AAA", "BBB"]}
+
+            def generate(self, data_map):
+                return {c: pd.Series(0.05, index=data_map[c].index) for c in data_map}
+
+        run_dir = tmp_path / "run"
+        run_dir.mkdir()
+        engine = ChinaAEngine({"initial_cash": 1_000_000})
+        metrics = engine.run_backtest(
+            {
+                "codes": ["AAA", "BBB"],
+                "start_date": "2024-04-01",
+                "end_date": "2024-04-30",
+                "source": "tushare",
+                "initial_cash": 1_000_000,
+            },
+            FakeLoader(),
+            SignalEngine(),
+            run_dir,
+        )
+        assert metrics["max_single_weight"] == pytest.approx(metrics["max_portfolio_weight"])

@@ -114,6 +114,8 @@ def compute_chart_payload(digest: Dict[str, Any]) -> Dict[str, Any]:
             if trade.get("mae_pct") is not None and trade.get("mfe_pct") is not None
         ],
         "holding_buckets": list(digest.get("buckets") or []),
+        "daily_position": digest.get("daily_position") or [],
+        "daily_risk": digest.get("daily_risk") or [],
     }
 
 
