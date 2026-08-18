@@ -446,4 +446,4 @@
   - 前端：`SingleSymbolPositionCard`（下拉框 + 收盘/峰值切换 + 三线 ECharts；峰值模式单线=单边峰值，与图 2 同口径）；tab 顶部常驻三口径说明条（`positionsLegendNote`：毛=总占用 / 净=净敞口可负 / 单边=对锁取大边，5 语言）；i18n 5 语言新增 3 key。
 - 验证：test_analysis_digest.py 新增 2 用例（position_groups 伪单位合并/多组独立/组合级跨组求和；缺 positions.csv 容错）——27 passed；前端 tsc + vitest 450 + build 全过；v437fixB 实测 groups=[TA(4 伪单位, 峰值 41.28)]，单标的 close 2432 天/peak 2433 天，与组合级逐字段一致。
 - 影响/注意：单标的数据不进 digest（100 标的 ≈ 14MB）；收盘/峰值口径与组合级图 1/图 2 完全一致；无 weight_groups 时按原始 code 分组（V033 回退语义）。HowToUse 8.45 更新（三张图 + 多标的角度 + 可迭代点：多标的叠加对比模式）。
-- 关联：计划 P-20260818-daily_position_risk_charts_v2；HowToUse 8.45；run `ta_turtle_4h_v437fixB_2014_2023`；commit 待补。
+- 关联：计划 P-20260818-daily_position_risk_charts_v2；HowToUse 8.36/8.45；run `ta_turtle_4h_v437fixB_2014_2023`；commit `4c66f87`。
