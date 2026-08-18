@@ -4,7 +4,7 @@
 > 状态：已完成
 > 日期：2026-08-18
 > 关联迭代：V034
-> 关联：run `ta_turtle_4h_v438_swg2_2014_2023`（commit 提交后回填）
+> 关联：commit `8ee5f0b`；run `ta_turtle_4h_v438_swg2_2014_2023`
 
 ## 项目调研
 

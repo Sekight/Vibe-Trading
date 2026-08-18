@@ -392,7 +392,7 @@
   - 真实 run（3 年 5m ta_turtle）：同一 run 完整版 vs `--fastrun`——`metrics.csv`/`trades.csv`/`equity.csv` 字节一致（引擎不受影响）；digest 排除 generated_at/run_id/regime/mae_mfe_summary/trades 的 mae-mfe 字段后逐字段一致；CLI `--fastrun` 端到端 31.7s。
   - 存量修复：`test_analysis_runner_hook.py` 2 个用例在 HEAD 即失败（`_finalize_run_analysis` 的 `with_charts` 默认 False，V030 行为变更后测试仍断言默认生成图表）——已同步为三个用例：默认跳过 charts/report、`with_charts=True` 生成 charts 不调 LLM、`with_charts=True + with_analysis=True` 顺序 charts→report。
 - 影响/注意：命令行默认行为不变；fastrun run 在 WebUI 的 MAE/MFE 卡片显示占位、LLM 报告不含 Regime/MAE-MFE 段（属预期降级）；HowToUse 8.38 已同步（含"fastrun 覆盖 digest 可完整重跑恢复"）。
-- 关联：计划 P-20260817-fastrun；Mistake_Journal M027；全局 E010；commit 待补（提交后回填）。
+- 关联：计划 P-20260817-fastrun；Mistake_Journal M027；全局 E010；commit `41e52dd`。
 
 ### V033 · max_single_weight 按策略声明分组合并（单标的口径）（2026-08-18）
 - 一句话总结：引擎 `max_single_weight` 支持按"逻辑标的"聚合——策略在 `signal_engine.py` 声明 `weight_groups`（哪些 code 属于同一标的，如 TA 的 4 个伪单位），引擎按组**带符号求和**取峰值；无声明保持原"单 code"口径。TA 4 伪单位 run 实测 `max_single_weight == max_portfolio_weight`（0.14098），metrics.csv / run_card.json / run_card.md 三处同步。
@@ -406,7 +406,7 @@
   - 新增 6 个测试（`test_engine_robustness.py` TestSingleWeightGroup）：同组同向求和、同组反向净抵消、未声明 code 保持单 code、无/非 dict 声明原样返回、端到端 run 断言 `max_single == max_portfolio`。全量 `test_engine_robustness.py` 55 passed 1 skipped；digest/runner_hook 24 passed。
   - 真实 run：复制 v438（4H 10 年）加 `weight_groups` 声明 fastrun 重跑——`max_single_weight = max_portfolio_weight = 0.14098`（改动前单 code 4.88%）；metrics.csv / run_card.md 值一致。
 - 影响/注意：默认行为零变化（无声明 run 与改动前一致）；只影响新 run；只影响 `max_single_weight`（by_symbol/risk_xray/positions.csv 仍按 code 口径）。策略侧声明是硬编码（换标的需同步）；同标的反向持仓时单票净敞口可能大于组合净敞口，口径易混——HowToUse 8.43/8.44 已写明。
-- 关联：计划 P-20260818-single_weight_group；HowToUse 8.43/8.44；run `ta_turtle_4h_v438_swg_2014_2023`；commit 待补（提交后回填）。
+- 关联：计划 P-20260818-single_weight_group；HowToUse 8.43/8.44；run `ta_turtle_4h_v438_swg_2014_2023`；commit `8ee5f0b`（含 V034 同批提交）。
 
 ### V034 · WebUI 新 tab「持仓与风险」：每天最大组合持仓 + 每天账户风险度（2026-08-18）
 - 一句话总结：WebUI 报告页「分析图」右边、「分析」左边新增「持仓与风险」tab，两张图——①每天最大组合持仓（毛/净/单边三口径日取峰值，默认只显示毛持仓、图例可叠加）；②每天账户风险度（单边口径 = 保证金/权益，100% 强平虚线、超线标红）。digest 新增 `daily_position` / `daily_risk` 全量时序 + `position_risk_summary` 派生摘要（LLM 只拿摘要，不进全量序列）。
@@ -421,4 +421,4 @@
   - 前端：tsc 通过；vitest 450 passed；`npm run build` 成功（32.8s）。
   - 真实 run：v438 复制加 weight_groups（swg2）fastrun 端到端——digest 落盘 daily_position/daily_risk 各 2433 天，空头日 2014-01-09 gross=21.77/net=-21.77/single=21.77，risk max 21.77 / avg 1.42，over100 0 天，与手工核对一致。
 - 影响/注意：新 tab 数据来自 digest（组合级序列 2400 点常驻，fastrun 也生成，不进跳表）；LLM 报告新增「仓位与风险摘要」段（token 增量极小）；口径差异（开仓价 vs 结算价、引擎逐 code 全额占用、目标权重口径）写进 HowToUse 8.45；**二期可迭代点**：逐标的持仓 + 下拉框按需加载（100 标的全量 8.9MB 不得进 digest，需 API 现读 positions.csv）。
-- 关联：计划 P-20260818-daily_position_risk_charts；Mistake_Journal M028；HowToUse 8.36/8.45；run `ta_turtle_4h_v438_swg2_2014_2023`；commit 待补（提交后回填）。
+- 关联：计划 P-20260818-daily_position_risk_charts；Mistake_Journal M028；HowToUse 8.36/8.45；run `ta_turtle_4h_v438_swg2_2014_2023`；commit `8ee5f0b`（含 V033 同批提交）。
