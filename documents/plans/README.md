@@ -29,5 +29,6 @@
 | P-20260817-trade_log_full_load | 讨论中 | 2026-08-17 | WebUI 交易明细一键加载全部（统计刷新，默认仍截断 500） | P-20260817-trade_log_full_load.md | 待填 |
 | P-20260817-fastrun | 已完成 | 2026-08-17 | 回测 fastrun：--without-regime / --without-mae-mfe / --fastrun 跳过 digest 分析 | P-20260817-fastrun.md | V032 |
 | P-20260818-single_weight_group | 已完成 | 2026-08-18 | max_single_weight 按策略声明 weight_groups 分组合并（加仓计单标的口径） | P-20260818-single_weight_group.md | V033 |
-| P-20260818-daily_position_risk_charts | 已完成 | 2026-08-18 | 新 tab「持仓与风险」：每天最大组合持仓（毛/净/单边叠加）+ 账户风险度（单边口径+100%线） | P-20260818-daily_position_risk_charts.md | V034 |
+| P-20260818-daily_position_risk_charts | 已完成 | 2026-08-18 | 新 tab「持仓与风险」：每日组合持仓（收盘口径）+ 账户风险度（单边+100%线）；上线后迭代图 1 改收盘口径 | P-20260818-daily_position_risk_charts.md | V034 / V035 |
+| P-20260818-position_weight_magnitude | 讨论中 | 2026-08-18 | 组合/单票仓位指标改毛/单边口径（不关乎多空）+ 多标的账户观察支持 | P-20260818-position_weight_magnitude.md | 待填 |
 

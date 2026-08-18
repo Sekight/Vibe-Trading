@@ -648,14 +648,15 @@
     "loadingPositionsRisk": "ポジションとリスクを読み込み中...",
     "noPositionsRisk": "ポジション・リスクデータなし",
     "noPositionsRiskDesc": "この実行にはポジションデータがありません。新しいバックテストで自動生成されます。",
-    "positionsDailyPositionTitle": "日次最大ポートフォリオポジション",
+    "positionsDailyPositionTitle": "日次ポートフォリオポジション",
     "positionsDailyPeakNote": "日次ピーク",
     "positionsRiskTitle": "日次口座リスク",
     "positionsGross": "グロス",
     "positionsNet": "ネット",
     "positionsSingle": "片側最大",
     "positionsRisk": "口座リスク",
-    "positionsRisk100Line": "強制決済 100%"
+    "positionsRisk100Line": "強制決済 100%",
+    "positionsCloseNote": "終値ベース"
   },
   "compare": {
     "title": "戦略比較",

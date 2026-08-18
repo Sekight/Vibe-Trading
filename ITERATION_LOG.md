@@ -47,6 +47,7 @@
 | V032 | 2026-08-17 | 回测 fastrun：跳过 digest 慢分析 | runner 新增 --fastrun / --without-regime / --without-mae-mfe，跳过 regime/MAE-MFE；3 年 5m 回测 766s→32s（digest 构建 750s→1.1s）；digest 省略对应字段、报告整段跳过、前端 MAE/MFE 卡片占位 |
 | V033 | 2026-08-18 | max_single_weight 按策略声明分组合并 | 策略声明 weight_groups（伪单位归属同一标的），单票仓位按组带符号求和（净敞口）；TA 4 单位同向时 max_single == max_portfolio；无声明保持单 code 口径；HowToUse 8.43/8.44 |
 | V034 | 2026-08-18 | WebUI 新 tab「持仓与风险」：每天最大组合持仓 + 每天账户风险度 | digest 新增每日毛/净/单边三口径序列与 LLM 派生摘要；图 1 毛持仓默认可叠加净/单边，图 2 单边口径+100% 强平线标红；单边按 weight_groups 取大边（M028）；二期可迭代点：逐标的+下拉框按需加载 |
+| V035 | 2026-08-18 | 持仓与风险 tab 图 1 改「每日组合持仓」收盘口径 | 图 1 三线改取收盘值（同刻快照，夜盘 bar 排除），图 2 保持日峰值（职责分工：图 1 日常、图 2 峰值风险）；HowToUse 8.45 补多标的角度 |
 > 补录说明：V001-V009 为补录条目，依据 git 历史、HowToUse、全局复利与踩坑日志、`C:\Users\mumu\.codex\sessions` 会话记录回溯整理；当时未留痕的字段标“待补”。从下一条起，每次迭代收尾直接写正文。
 
 ## 模板
@@ -422,3 +423,15 @@
   - 真实 run：v438 复制加 weight_groups（swg2）fastrun 端到端——digest 落盘 daily_position/daily_risk 各 2433 天，空头日 2014-01-09 gross=21.77/net=-21.77/single=21.77，risk max 21.77 / avg 1.42，over100 0 天，与手工核对一致。
 - 影响/注意：新 tab 数据来自 digest（组合级序列 2400 点常驻，fastrun 也生成，不进跳表）；LLM 报告新增「仓位与风险摘要」段（token 增量极小）；口径差异（开仓价 vs 结算价、引擎逐 code 全额占用、目标权重口径）写进 HowToUse 8.45；**二期可迭代点**：逐标的持仓 + 下拉框按需加载（100 标的全量 8.9MB 不得进 digest，需 API 现读 positions.csv）。
 - 关联：计划 P-20260818-daily_position_risk_charts；Mistake_Journal M028；HowToUse 8.36/8.45；run `ta_turtle_4h_v438_swg2_2014_2023`；commit `8ee5f0b`（含 V033 同批提交）。
+
+### V035 · 持仓与风险 tab 图 1 改「每日组合持仓」收盘口径（2026-08-18）
+- 一句话总结：图 1 从"每天最大组合持仓（日取峰值）"改为「**每日组合持仓（取收盘值计算）**」——三条线（毛/净/单边）都取每个交易日收盘时（最后一根日盘 bar，夜盘 bar 归下一交易日不参与）的持仓，是同刻快照；图 2「每天账户风险度」保持日峰值（含夜盘）。HowToUse 8.45 补充多标的是怎么看持仓与风险。
+- 为什么：用户指出图 1 的"日取峰值"逻辑复杂（三条线峰值可能来自同一天不同 bar，非同一时刻快照，易误读）；且图 2 账户风险度（日峰值单边）已承担"最大持仓/峰值风险"职责，图 1 只需反映每天大概状态。收盘口径三条线取同一根 bar，职责分工清晰：图 1 看日常状态、图 2 看峰值风险。
+- 关键细节：
+  - digest.py `daily_position_and_risk` 拆分两套聚合：`daily_position` 取每自然日中 bar 时间 < 20:00 的最后一根（夜盘 20:00+ 归下一交易日、排除）；`daily_risk` 取每自然日 single 的 max（峰值，含夜盘）。实测 v437fixB：daily_position 2432 天（1 天纯夜盘无收盘）、daily_risk 2433 天；收盘毛 avg 1.96% < 峰值 single avg 2.08%（逻辑自洽）。
+  - 摘要/LLM 文案：`position_risk_summary` 的 gross 系列基于收盘（文案"毛持仓(日峰值)"→"收盘毛持仓"），risk 系列基于峰值；测试同步。
+  - 前端：图 1 标题「每天最大组合持仓」→「每日组合持仓」、标注"日取峰值"→"取收盘值计算"（新增 i18n key `positionsCloseNote`）；图 2 保留"日取峰值"；5 语言包更新。
+  - 多标的角度写入 HowToUse 8.45：毛线看总占用（多标的下单边=毛）、净线只看方向、图 2 看峰值风险、"哪个标的最重"是二期可迭代点。
+- 验证：test_analysis_digest.py 聚合测试改为收盘/峰值双口径断言（含"峰值 bar ≠ 收盘 bar"和夜盘 bar 排除用例）——25 passed；前端 tsc + vitest 450 passed；v437fixB fastrun 重跑核对（2014-01-09/24 收盘毛 41.28%、风险峰值 41.28%、over100 0 天）。
+- 影响/注意：图 1 语义变更（峰值→收盘），新 digest 生效（旧 digest 缓存命中旧口径——需要重跑 run 或等指纹变化重建）；收盘 bar 定义为"非夜盘（<20:00）最后一根"，对 TA 4H（08/12/20 三根）取 12:00 日盘收盘；夜盘归交易日更精确的处理（按 trade_date）留待后续。
+- 关联：计划 P-20260818-daily_position_risk_charts（上线后迭代）；HowToUse 8.45；run `ta_turtle_4h_v437fixB_2014_2023`；commit 待补。

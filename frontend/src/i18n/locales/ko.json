@@ -648,14 +648,15 @@
     "loadingPositionsRisk": "포지션 및 리스크 로딩 중...",
     "noPositionsRisk": "포지션/리스크 데이터 없음",
     "noPositionsRiskDesc": "이 실행에는 포지션 데이터가 없습니다. 새 백테스트에서 자동 생성됩니다.",
-    "positionsDailyPositionTitle": "일일 최대 포트폴리오 포지션",
+    "positionsDailyPositionTitle": "일일 포트폴리오 포지션",
     "positionsDailyPeakNote": "일일 피크",
     "positionsRiskTitle": "일일 계좌 리스크",
     "positionsGross": "총 포지션",
     "positionsNet": "순 포지션",
     "positionsSingle": "단방향 최대",
     "positionsRisk": "계좌 리스크",
-    "positionsRisk100Line": "강제 청산 100%"
+    "positionsRisk100Line": "강제 청산 100%",
+    "positionsCloseNote": "종가 기준"
   },
   "compare": {
     "title": "전략 비교",

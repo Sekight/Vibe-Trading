@@ -1206,7 +1206,7 @@ function DailyPositionChart({ points }: { points: Array<{ date: string; gross_pc
     <div className="rounded-lg border bg-card p-4">
       <h3 className="mb-1 text-sm font-medium">
         {i18n.t("runDetail.positionsDailyPositionTitle" as any)}
-        <span className="ml-2 text-xs text-muted-foreground">{i18n.t("runDetail.positionsDailyPeakNote" as any)}</span>
+        <span className="ml-2 text-xs text-muted-foreground">{i18n.t("runDetail.positionsCloseNote" as any)}</span>
       </h3>
       <div ref={ref} className="h-72 w-full" />
     </div>

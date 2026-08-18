@@ -648,14 +648,15 @@
     "loadingPositionsRisk": "正在加载持仓与风险...",
     "noPositionsRisk": "暂无持仓与风险数据",
     "noPositionsRiskDesc": "该运行没有持仓数据；新完成的回测会自动生成。",
-    "positionsDailyPositionTitle": "每天最大组合持仓",
+    "positionsDailyPositionTitle": "每日组合持仓",
     "positionsDailyPeakNote": "日取峰值",
     "positionsRiskTitle": "每天账户风险度",
     "positionsGross": "毛持仓",
     "positionsNet": "净持仓",
     "positionsSingle": "单边最大持仓",
     "positionsRisk": "账户风险度",
-    "positionsRisk100Line": "强平线 100%"
+    "positionsRisk100Line": "强平线 100%",
+    "positionsCloseNote": "取收盘值计算"
   },
   "compare": {
     "title": "策略对比",

@@ -648,14 +648,15 @@
     "loadingPositionsRisk": "جارٍ تحميل المراكز والمخاطر...",
     "noPositionsRisk": "لا توجد بيانات للمراكز والمخاطر",
     "noPositionsRiskDesc": "لا توجد بيانات مراكز لهذا التشغيل؛ يتم إنشاؤها تلقائيًا في الاختبارات الجديدة.",
-    "positionsDailyPositionTitle": "أقصى مركز محفظة يومي",
+    "positionsDailyPositionTitle": "مركز المحفظة اليومي",
     "positionsDailyPeakNote": "الذروة اليومية",
     "positionsRiskTitle": "مخاطر الحساب اليومية",
     "positionsGross": "إجمالي",
     "positionsNet": "صافي",
     "positionsSingle": "من جانب واحد",
     "positionsRisk": "مخاطر الحساب",
-    "positionsRisk100Line": "تصفية 100%"
+    "positionsRisk100Line": "تصفية 100%",
+    "positionsCloseNote": "عند الإغلاق"
   },
   "compare": {
     "title": "مقارنة الاستراتيجيات",

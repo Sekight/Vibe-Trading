@@ -653,14 +653,15 @@
     "loadingPositionsRisk": "Loading positions & risk...",
     "noPositionsRisk": "No positions & risk data",
     "noPositionsRiskDesc": "This run has no position data; new backtests generate it automatically.",
-    "positionsDailyPositionTitle": "Max Daily Portfolio Position",
+    "positionsDailyPositionTitle": "Daily Portfolio Position",
     "positionsDailyPeakNote": "daily peak",
     "positionsRiskTitle": "Daily Account Risk",
     "positionsGross": "Gross",
     "positionsNet": "Net",
     "positionsSingle": "Single-sided",
     "positionsRisk": "Account risk",
-    "positionsRisk100Line": "Liquidation 100%"
+    "positionsRisk100Line": "Liquidation 100%",
+    "positionsCloseNote": "close-of-day"
   },
   "compare": {
     "title": "Strategy Comparison",

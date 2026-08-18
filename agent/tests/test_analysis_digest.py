@@ -395,13 +395,16 @@ def test_write_digest_json_forwards_include_params(tmp_path: Path) -> None:
 
 
 def test_daily_position_and_risk_aggregation(tmp_path: Path) -> None:
-    """Gross/net/single-sided daily peaks, including a net-short day and a
-    locked (long + short) day where single-sided stays at the bigger side."""
+    """daily_position = close-of-day snapshot (last day-session bar, evening
+    bars excluded); daily_risk = daily peak of the single exposure (evening
+    bars included). Covers a net-short day, a locked (long + short) day, and a
+    day where the peak bar is NOT the closing bar."""
     run_dir = write_run_dir(tmp_path, "20260818_000000_00_posrisk")
     (run_dir / "artifacts" / "positions.csv").write_text(
         "timestamp,AAA,BBB\n"
-        "2024-01-02 09:00:00,0.2,0.1\n"   # day1 bar1: gross .3 net .3 single .3
-        "2024-01-02 14:00:00,0.3,0.1\n"   # day1 bar2: gross .4 net .4 single .4 (peak)
+        "2024-01-02 09:00:00,0.4,0.0\n"   # day1 bar1: gross .4 (day-session peak)
+        "2024-01-02 14:00:00,0.3,0.0\n"   # day1 bar2: gross .3 (close of day)
+        "2024-01-02 20:00:00,0.5,0.0\n"   # day1 bar3: gross .5 (evening, excluded from close)
         "2024-01-03 09:00:00,-0.2,0.1\n"  # day2: gross .3 net -.1 single max(.1,|-.2|)=.2
         "2024-01-04 09:00:00,0.2,-0.2\n"  # day3 locked: gross .4 net 0 single .2
         ,
@@ -410,20 +413,24 @@ def test_daily_position_and_risk_aggregation(tmp_path: Path) -> None:
     groups = {"G": ["AAA", "BBB"]}
     daily_position, daily_risk = daily_position_and_risk(run_dir, groups)
     by_date = {item["date"]: item for item in daily_position}
-    assert by_date["2024-01-02"]["gross_pct"] == 40.0
-    assert by_date["2024-01-02"]["net_pct"] == 40.0
-    assert by_date["2024-01-02"]["single_pct"] == 40.0
+    risk_by_date = {item["date"]: item["risk_pct"] for item in daily_risk}
+    # Close-of-day values (day-session last bar; 20:00 evening bar excluded).
+    assert by_date["2024-01-02"]["gross_pct"] == 30.0
+    assert by_date["2024-01-02"]["net_pct"] == 30.0
+    assert by_date["2024-01-02"]["single_pct"] == 30.0
     assert by_date["2024-01-03"]["gross_pct"] == 30.0
     assert by_date["2024-01-03"]["net_pct"] == -10.0
     assert by_date["2024-01-03"]["single_pct"] == 20.0
     assert by_date["2024-01-04"]["gross_pct"] == 40.0
     assert by_date["2024-01-04"]["net_pct"] == 0.0
     assert by_date["2024-01-04"]["single_pct"] == 20.0
-    assert daily_risk[0]["risk_pct"] == 40.0
-    assert daily_risk[2]["risk_pct"] == 20.0
+    # Peak risk: the biggest single exposure of the day, evening bar included.
+    assert risk_by_date["2024-01-02"] == 50.0
+    assert risk_by_date["2024-01-03"] == 20.0
+    assert risk_by_date["2024-01-04"] == 20.0
     # Without a grouping, single-sided == gross (no per-group lock handling).
     dp2, _ = daily_position_and_risk(run_dir, None)
-    assert dp2[0]["single_pct"] == 40.0
+    assert dp2[0]["single_pct"] == 30.0
     assert dp2[1]["single_pct"] == 30.0
 
 
@@ -464,7 +471,7 @@ def test_render_digest_for_llm_risk_summary_without_full_series(tmp_path: Path) 
 
     prompt = render_digest_for_llm(digest)
     assert "## 仓位与风险摘要" in prompt
-    assert "毛持仓(日峰值) 最大/平均" in prompt
+    assert "收盘毛持仓 最大/平均" in prompt
     assert "风险度 ≥100% 天数/占比" in prompt
     assert "1 天 / 33.33%" in prompt
     # Full-series field names and structures must never reach the LLM prompt.

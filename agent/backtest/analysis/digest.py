@@ -608,24 +608,28 @@ def daily_position_and_risk(
     run_dir: Path,
     weight_groups: Any = None,
 ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """Aggregate per-bar target weights into daily (day-peak) series.
+    """Aggregate per-bar target weights into daily series.
 
-    Three exposure measures, each taken at its daily peak (the bar with the
-    largest magnitude for the signed net series, the max for the positive
-    ones):
-      - ``gross``: ``sum(|w|)`` per bar — total position volume, always >= 0;
-      - ``net``: signed ``sum(w)`` — the day value is the bar with the largest
-        ``|net|`` so a net-short day shows as a negative exposure (direction
-        kept);
+    Three exposure measures are computed per bar:
+      - ``gross``: ``sum(|w|)`` — total position volume, always >= 0;
+      - ``net``: signed ``sum(w)`` — net direction (positive long, negative
+        short);
       - ``single``: single-sided margin-style exposure — within each
         ``weight_groups`` group take ``max(long-sum, |short-sum|)`` and add
         across groups. Equals gross for same-direction strategies; equals the
         real futures single-sided margin for locked (long + short) positions
         of one instrument. Without a declared grouping it equals gross.
 
-    ``daily_risk`` is the single exposure in percent. In the target-weight
-    model the engine margin is ``|weight| * equity`` (the leverage factor
-    cancels between sizing and margin), so ``margin / equity == single``.
+    ``daily_position`` reports the **close-of-day** values — the last bar of
+    each calendar day whose hour is < 20 (the day-session close; evening-session
+    bars at 20:00+ belong to the next trading day and are excluded). This is a
+    same-instant snapshot of all three measures.
+
+    ``daily_risk`` reports the **daily peak** of the single exposure (the
+    biggest single-sided margin usage of the day, long or short), in percent.
+    In the target-weight model the engine margin is ``|weight| * equity`` (the
+    leverage factor cancels between sizing and margin), so
+    ``margin / equity == single``.
 
     Returns ``(daily_position, daily_risk)``; both empty when positions.csv is
     missing or has no weight columns (consumers treat that as "no data").
@@ -663,26 +667,28 @@ def daily_position_and_risk(
 
     daily = pd.DataFrame({
         "date": df["timestamp"].dt.date.astype(str),
+        "hour": df["timestamp"].dt.hour,
         "gross": gross,
         "net": net,
         "single": single,
     })
-    agg = daily.groupby("date").agg(
-        gross=("gross", "max"),
-        net=("net", lambda s: s.loc[s.abs().idxmax()]),
-        single=("single", "max"),
-    )
+    # Close-of-day snapshot: the last day-session bar (< 20:00) of each day.
+    close_rows = daily[daily["hour"] < 20].groupby("date").tail(1)
+    # Peak risk: the biggest single exposure of each day (long or short).
+    peak_single = daily.groupby("date")["single"].max()
+
     daily_position: List[Dict[str, Any]] = []
     daily_risk: List[Dict[str, Any]] = []
-    for date, row in agg.iterrows():
-        item = {
-            "date": date,
+    for _, row in close_rows.iterrows():
+        daily_position.append({
+            "date": row["date"],
             "gross_pct": round(float(row["gross"]) * 100.0, 2),
             "net_pct": round(float(row["net"]) * 100.0, 2),
             "single_pct": round(float(row["single"]) * 100.0, 2),
-        }
-        daily_position.append(item)
-        daily_risk.append({"date": date, "risk_pct": item["single_pct"]})
+        })
+    for date, value in peak_single.items():
+        daily_risk.append({"date": date, "risk_pct": round(float(value) * 100.0, 2)})
+    daily_risk.sort(key=lambda item: item["date"])
     return daily_position, daily_risk
 
 
@@ -958,10 +964,11 @@ def render_digest_for_llm(digest: Dict[str, Any], max_trades: int = 20) -> str:
         )
 
     # 仓位与风险摘要：只出派生统计，不渲染 daily_position/daily_risk 全量时序。
+    # gross 系列基于收盘口径（daily_position）、risk 系列基于峰值口径（daily_risk）。
     risk_summary = digest.get("position_risk_summary") or {}
     if risk_summary:
         lines.extend(["", "## 仓位与风险摘要", "| 项 | 值 |", "|---|---|"])
-        lines.append(f"| 毛持仓(日峰值) 最大/平均 | {_markdown_cell(risk_summary.get('gross_max_pct'))}% / {_markdown_cell(risk_summary.get('gross_avg_pct'))}% |")
+        lines.append(f"| 收盘毛持仓 最大/平均 | {_markdown_cell(risk_summary.get('gross_max_pct'))}% / {_markdown_cell(risk_summary.get('gross_avg_pct'))}% |")
         lines.append(f"| 账户风险度(单边) 最大/平均 | {_markdown_cell(risk_summary.get('risk_max_pct'))}% / {_markdown_cell(risk_summary.get('risk_avg_pct'))}% |")
         for label, key in (("≥50%", "risk_over_50"), ("≥80%", "risk_over_80"), ("≥100%", "risk_over_100")):
             bucket = risk_summary.get(key) or {}
