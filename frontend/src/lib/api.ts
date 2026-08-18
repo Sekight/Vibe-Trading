@@ -142,6 +142,9 @@ export const api = {
   getRunPine: (id: string) => request<PineScriptResult>(`/runs/${id}/pine`),
   getRunAnalysis: (id: string) => request<RunAnalysis>(`/runs/${id}/analysis`),
   getRunAnalysisCharts: (id: string) => request<RunAnalysisCharts>(`/runs/${id}/analysis/charts`),
+  getRunPositionGroups: (id: string) => request<RunPositionGroups>(`/runs/${id}/analysis/positions/groups`),
+  getRunPositionGroupSeries: (id: string, group: string) =>
+    request<RunPositionGroupSeries>(`/runs/${id}/analysis/positions/${encodeURIComponent(group)}`),
   fetchRunAnalysisPng: async (id: string, filename: string) => {
     const res = await fetch(`${BASE}/runs/${id}/analysis/charts/${filename}`, { headers: authHeaders() });
     if (!res.ok) throw await errorFromResponse(res);
@@ -658,6 +661,17 @@ export interface RunAnalysisCharts {
   };
   pngs: AnalysisPngInfo[];
   benchmark_label?: string | null;
+}
+export interface RunPositionGroups {
+  run_id: string;
+  groups: Array<{ group: string; codes: string[]; peak_pct: number }>;
+}
+export interface RunPositionGroupSeries {
+  run_id: string;
+  group: string;
+  codes: string[];
+  close: Array<{ date: string; gross_pct: number; net_pct: number; single_pct: number }>;
+  peak: Array<{ date: string; risk_pct: number }>;
 }
 export interface BacktestMetrics {
   final_value: number;

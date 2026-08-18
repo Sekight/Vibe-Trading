@@ -656,7 +656,10 @@
     "positionsSingle": "단방향 최대",
     "positionsRisk": "계좌 리스크",
     "positionsRisk100Line": "강제 청산 100%",
-    "positionsCloseNote": "종가 기준"
+    "positionsCloseNote": "종가 기준",
+    "positionsSingleTitle": "단일 종목 일일 포지션",
+    "positionsSinglePeak": "피크",
+    "positionsLegendNote": "총 포지션＝모든 포지션 절대값 합(총 자금 점유) ｜ 순 포지션＝상쇄 후 순 노출(음수 가능, 방향만) ｜ 단방향＝같은 종목 내 대칭 중 큰 쪽의 실제 증거금 점유(항상 단일 방향이면 셋 동일)"
   },
   "compare": {
     "title": "전략 비교",

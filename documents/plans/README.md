@@ -31,5 +31,5 @@
 | P-20260818-single_weight_group | 已完成 | 2026-08-18 | max_single_weight 按策略声明 weight_groups 分组合并（加仓计单标的口径） | P-20260818-single_weight_group.md | V033 |
 | P-20260818-daily_position_risk_charts | 已完成 | 2026-08-18 | 新 tab「持仓与风险」：每日组合持仓（收盘口径）+ 账户风险度（单边+100%线）；上线后迭代图 1 改收盘口径 | P-20260818-daily_position_risk_charts.md | V034 / V035 |
 | P-20260818-position_weight_magnitude | 讨论中 | 2026-08-18 | 组合/单票仓位指标改毛/单边口径（不关乎多空）+ 多标的账户观察支持 | P-20260818-position_weight_magnitude.md | 待填 |
-| P-20260818-daily_position_risk_charts_v2 | 讨论中 | 2026-08-18 | 单标的每日持仓图（持仓与风险 tab v2：下拉框按需加载，收盘默认/峰值切换） | P-20260818-daily_position_risk_charts_v2.md | 待填 |
+| P-20260818-daily_position_risk_charts_v2 | 已完成 | 2026-08-18 | 单标的每日持仓图（持仓与风险 tab v2：下拉框按需加载，收盘默认/峰值切换） | P-20260818-daily_position_risk_charts_v2.md | V036 |
 

@@ -656,7 +656,10 @@
     "positionsSingle": "单边最大持仓",
     "positionsRisk": "账户风险度",
     "positionsRisk100Line": "强平线 100%",
-    "positionsCloseNote": "取收盘值计算"
+    "positionsCloseNote": "取收盘值计算",
+    "positionsSingleTitle": "单标的每日持仓",
+    "positionsSinglePeak": "峰值",
+    "positionsLegendNote": "毛持仓＝全部多空仓位绝对值之和（总资金占用）｜净持仓＝多空相抵后的净敞口（可为负，只看方向）｜单边最大持仓＝同一标的内对锁取大边的真实保证金占用（策略恒同向时三者相等）"
   },
   "compare": {
     "title": "策略对比",

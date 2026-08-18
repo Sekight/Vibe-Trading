@@ -18,7 +18,9 @@ from backtest.analysis.digest import (
     load_digest,
     monthly_pnl,
     pair_trades,
+    position_groups,
     render_digest_for_llm,
+    single_group_daily_series,
     write_digest_json,
 )
 
@@ -513,3 +515,58 @@ def test_load_digest_incrementally_backfills_positions_on_old_digest(tmp_path: P
     persisted = json.loads(path.read_text(encoding="utf-8"))
     assert persisted["sources"] == _artifact_fingerprint(run_dir)
 
+
+
+# ---------------------------------------------------------------------------
+# single-symbol daily position series — position_groups / single_group_daily_series
+# ---------------------------------------------------------------------------
+
+
+def test_position_groups_merges_pseudo_units(tmp_path: Path) -> None:
+    """weight_groups merges pseudo units into one logical group; codes without
+    a declaration stay as their own group; each group reports peak exposure."""
+    run_dir = write_run_dir(tmp_path, "20260818_000000_00_groups")
+    (run_dir / "artifacts" / "positions.csv").write_text(
+        "timestamp,RB01,RB02,TA01\n"
+        "2024-01-02 09:00:00,0.1,0.1,-0.08\n"
+        "2024-01-03 09:00:00,0.2,-0.1,0.0\n",
+        encoding="utf-8",
+    )
+    (run_dir / "code" / "signal_engine.py").write_text(
+        "class SignalEngine:\n"
+        "    weight_groups = {'RB': ['RB01', 'RB02']}\n"
+        "    def generate(self, data_map):\n"
+        "        return {c: __import__('pandas').Series(dtype=float) for c in data_map}\n",
+        encoding="utf-8",
+    )
+    groups = position_groups(run_dir)
+    by_group = {g["group"]: g for g in groups}
+    assert set(by_group) == {"RB", "TA01"}
+    assert by_group["RB"]["codes"] == ["RB01", "RB02"]
+    assert by_group["TA01"]["codes"] == ["TA01"]
+
+    rb = single_group_daily_series(run_dir, by_group["RB"]["codes"])
+    ta = single_group_daily_series(run_dir, by_group["TA01"]["codes"])
+    rb_close = {x["date"]: x for x in rb["close"]}
+    ta_close = {x["date"]: x for x in ta["close"]}
+    # RB group: RB01 + RB02 merged (gross/net/single on the pair).
+    assert rb_close["2024-01-02"]["gross_pct"] == 20.0
+    assert rb_close["2024-01-02"]["net_pct"] == 20.0
+    assert rb_close["2024-01-03"]["net_pct"] == 10.0      # 0.2 - 0.1
+    assert rb_close["2024-01-03"]["single_pct"] == 20.0   # max(0.2, |−0.1|)
+    # TA is its own group (short day).
+    assert ta_close["2024-01-02"]["gross_pct"] == 8.0
+    assert ta_close["2024-01-02"]["net_pct"] == -8.0
+    assert ta_close["2024-01-02"]["single_pct"] == 8.0
+    # Portfolio level sums across groups independently.
+    dp, _ = daily_position_and_risk(run_dir, {"RB": ["RB01", "RB02"]})
+    close = {x["date"]: x for x in dp}
+    assert close["2024-01-02"]["gross_pct"] == 28.0  # 0.1+0.1+0.08
+    assert close["2024-01-02"]["net_pct"] == 12.0   # 0.2 - 0.08
+    assert close["2024-01-02"]["single_pct"] == 28.0  # RB 0.2 + TA 0.08
+
+
+def test_single_group_series_empty_when_positions_missing(tmp_path: Path) -> None:
+    run_dir = write_run_dir(tmp_path, "20260818_000000_00_nosingle")
+    assert position_groups(run_dir) == []
+    assert single_group_daily_series(run_dir, ["AAA"]) == {"close": [], "peak": []}

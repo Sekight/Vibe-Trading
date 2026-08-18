@@ -356,6 +356,41 @@ def register_runs_routes(
             raise HTTPException(status_code=404, detail=f"PNG {name}.png not found for run {run_id}")
         return FileResponse(png_path, media_type="image/png")
 
+    @app.get("/runs/{run_id}/analysis/positions/groups", dependencies=[Depends(require_auth)])
+    async def get_run_position_groups(run_id: str):
+        """List logical position groups (per strategy weight_groups) with the
+        peak single exposure of each, for the per-symbol dropdown."""
+        _host_validate_path_param(run_id, "run_id")
+        run_dir = _host_RUNS_DIR() / run_id
+        if not run_dir.exists():
+            raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+        from backtest.analysis.digest import position_groups  # noqa: PLC0415
+        return {"run_id": run_id, "groups": position_groups(run_dir)}
+
+    @app.get("/runs/{run_id}/analysis/positions/{group}", dependencies=[Depends(require_auth)])
+    async def get_run_position_group_series(run_id: str, group: str):
+        """Daily close/peak series for one logical position group.
+
+        Read directly from positions.csv on demand (never stored in the
+        digest — per-symbol series for many symbols would blow up the digest).
+        """
+        _host_validate_path_param(run_id, "run_id")
+        _host_validate_path_param(group, "group")
+        run_dir = _host_RUNS_DIR() / run_id
+        if not run_dir.exists():
+            raise HTTPException(status_code=404, detail=f"Run {run_id} not found")
+        from backtest.analysis.digest import position_groups, single_group_daily_series  # noqa: PLC0415
+        groups = position_groups(run_dir)
+        target = next((g for g in groups if g["group"] == group), None)
+        if target is None:
+            raise HTTPException(status_code=404, detail=f"Position group {group!r} not found")
+        return {
+            "run_id": run_id,
+            "group": group,
+            "codes": target["codes"],
+            **single_group_daily_series(run_dir, target["codes"]),
+        }
+
     @app.get("/runs/{run_id}", response_model=RunResponse, dependencies=[Depends(require_auth)])
     async def get_run_result(
         run_id: str,

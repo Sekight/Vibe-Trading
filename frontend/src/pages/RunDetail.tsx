@@ -26,7 +26,7 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { DEFAULT_CHART_VIEW, type ChartView, type ZoomWindow } from "@/lib/chartWindow";
-import { api, type BacktestMetrics, type RunAnalysis, type RunAnalysisCharts, type RunCard, type RunData, type ValidationData } from "@/lib/api";
+import { api, type BacktestMetrics, type RunAnalysis, type RunAnalysisCharts, type RunCard, type RunData, type RunPositionGroupSeries, type RunPositionGroups, type ValidationData } from "@/lib/api";
 import ReactMarkdown from "react-markdown";
 import rehypeHighlight from "rehype-highlight";
 import remarkGfm from "remark-gfm";
@@ -1144,9 +1144,17 @@ function PositionsRiskTab({ runId }: { runId: string }) {
     );
   }
   return (
-    <div className="grid gap-4 p-4 lg:grid-cols-2">
-      <DailyPositionChart points={position} />
-      <DailyRiskChart points={risk} />
+    <div className="space-y-4 p-4">
+      <p className="text-xs text-muted-foreground">
+        {i18n.t("runDetail.positionsLegendNote" as any)}
+      </p>
+      <div className="grid gap-4 lg:grid-cols-2">
+        <DailyPositionChart points={position} />
+        <DailyRiskChart points={risk} />
+        <div className="lg:col-span-2">
+          <SingleSymbolPositionCard runId={runId} />
+        </div>
+      </div>
     </div>
   );
 }
@@ -1265,6 +1273,152 @@ function DailyRiskChart({ points }: { points: Array<{ date: string; risk_pct: nu
         <span className="ml-2 text-xs text-muted-foreground">{i18n.t("runDetail.positionsDailyPeakNote" as any)}</span>
       </h3>
       <div ref={ref} className="h-72 w-full" />
+    </div>
+  );
+}
+
+function SingleSymbolPositionCard({ runId }: { runId: string }) {
+  const [groups, setGroups] = useState<RunPositionGroups["groups"]>([]);
+  const [selected, setSelected] = useState("");
+  const [series, setSeries] = useState<RunPositionGroupSeries | null>(null);
+  const [mode, setMode] = useState<"close" | "peak">("close");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const ref = useRef<HTMLDivElement>(null);
+  const dark = useThemeDark();
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    api.getRunPositionGroups(runId)
+      .then((res) => {
+        if (cancelled) return;
+        setGroups(res.groups);
+        if (res.groups.length > 0) setSelected(res.groups[0].group);
+        else setLoading(false);
+      })
+      .catch((err) => {
+        if (!cancelled) { setError(err instanceof Error ? err.message : String(err)); setLoading(false); }
+      });
+    return () => { cancelled = true; };
+  }, [runId]);
+
+  useEffect(() => {
+    if (!selected) return;
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    api.getRunPositionGroupSeries(runId, selected)
+      .then((res) => { if (!cancelled) { setSeries(res); setLoading(false); } })
+      .catch((err) => {
+        if (!cancelled) { setError(err instanceof Error ? err.message : String(err)); setLoading(false); }
+      });
+    return () => { cancelled = true; };
+  }, [runId, selected]);
+
+  const closePoints = series?.close ?? [];
+  const peakPoints = (series?.peak ?? []).map((p) => ({ date: p.date, gross_pct: p.risk_pct, net_pct: p.risk_pct, single_pct: p.risk_pct }));
+  const points = mode === "close" ? closePoints : peakPoints;
+  const hasData = points.length > 0;
+
+  useEffect(() => {
+    if (!ref.current || !hasData) return;
+    const t = getChartTheme();
+    echarts.getInstanceByDom(ref.current)?.dispose();
+    const chart = echarts.init(ref.current);
+    const axis = {
+      axisLine: { lineStyle: { color: t.axisColor } },
+      axisLabel: { color: t.textColor, fontSize: 10 },
+    };
+    const seriesArr = mode === "peak"
+      ? [{
+          type: "line", name: i18n.t("runDetail.positionsSingle" as any),
+          data: points.map((p) => p.single_pct), showSymbol: false,
+          lineStyle: { color: t.warningColor, width: 2 }, areaStyle: { color: `${t.warningColor}22` },
+        }]
+      : [
+          {
+            type: "line", name: i18n.t("runDetail.positionsGross" as any),
+            data: points.map((p) => p.gross_pct), showSymbol: false,
+            lineStyle: { color: t.infoColor, width: 2 }, areaStyle: { color: `${t.infoColor}22` },
+          },
+          {
+            type: "line", name: i18n.t("runDetail.positionsNet" as any),
+            data: points.map((p) => p.net_pct), showSymbol: false,
+            lineStyle: { color: t.warningColor, width: 1.6 },
+          },
+          {
+            type: "line", name: i18n.t("runDetail.positionsSingle" as any),
+            data: points.map((p) => p.single_pct), showSymbol: false,
+            lineStyle: { color: ANALYSIS_GREEN, width: 1.6, type: "dashed" },
+          },
+        ];
+    chart.setOption({
+      grid: { left: 18, right: 18, top: 60, bottom: 56, containLabel: true },
+      tooltip: {
+        trigger: "axis", backgroundColor: t.tooltipBg, borderColor: t.tooltipBorder,
+        textStyle: { color: t.tooltipText, fontSize: 11 },
+      },
+      legend: mode === "close" ? {
+        top: 0, textStyle: { color: t.textColor, fontSize: 10 },
+        selected: { [i18n.t("runDetail.positionsGross" as any)]: true, [i18n.t("runDetail.positionsNet" as any)]: false, [i18n.t("runDetail.positionsSingle" as any)]: false },
+      } : { top: 0, textStyle: { color: t.textColor, fontSize: 10 } },
+      xAxis: { type: "category", data: points.map((p) => p.date), ...axis },
+      yAxis: {
+        type: "value", name: "%", splitLine: { lineStyle: { color: t.gridColor } },
+        axisLabel: { color: t.textColor, fontSize: 10 },
+      },
+      series: seriesArr,
+    });
+    const onResize = () => chart.resize();
+    window.addEventListener("resize", onResize);
+    return () => { window.removeEventListener("resize", onResize); chart.dispose(); };
+  }, [points, mode, dark]);
+
+  return (
+    <div className="rounded-lg border bg-card p-4">
+      <h3 className="mb-2 text-sm font-medium">
+        {i18n.t("runDetail.positionsSingleTitle" as any)}
+        <span className="ml-2 text-xs text-muted-foreground">
+          {mode === "close" ? i18n.t("runDetail.positionsCloseNote" as any) : i18n.t("runDetail.positionsDailyPeakNote" as any)}
+        </span>
+      </h3>
+      <div className="mb-2 flex flex-wrap items-center gap-2">
+        <select
+          className="h-8 rounded border bg-transparent px-2 text-sm"
+          value={selected}
+          onChange={(e) => setSelected(e.target.value)}
+        >
+          {groups.map((g) => (
+            <option key={g.group} value={g.group}>
+              {g.group}（{i18n.t("runDetail.positionsSinglePeak" as any)} {g.peak_pct}%）
+            </option>
+          ))}
+        </select>
+        <div className="flex overflow-hidden rounded border text-xs">
+          {(["close", "peak"] as const).map((m) => (
+            <button
+              key={m}
+              className={cn("px-2 py-1", mode === m ? "bg-primary text-primary-foreground" : "bg-transparent")}
+              onClick={() => setMode(m)}
+            >
+              {m === "close" ? i18n.t("runDetail.positionsCloseNote" as any) : i18n.t("runDetail.positionsDailyPeakNote" as any)}
+            </button>
+          ))}
+        </div>
+      </div>
+      {loading ? (
+        <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" /> {i18n.t("runDetail.loadingPositionsRisk" as any)}
+        </div>
+      ) : error ? (
+        <div className="py-8 text-sm text-red-500">{error}</div>
+      ) : groups.length === 0 ? (
+        <div className="py-8 text-sm text-muted-foreground">{i18n.t("runDetail.noPositionsRisk" as any)}</div>
+      ) : (
+        <div ref={ref} className="h-72 w-full" />
+      )}
     </div>
   );
 }

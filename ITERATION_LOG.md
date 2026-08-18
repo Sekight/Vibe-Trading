@@ -48,6 +48,7 @@
 | V033 | 2026-08-18 | max_single_weight 按策略声明分组合并 | 策略声明 weight_groups（伪单位归属同一标的），单票仓位按组带符号求和（净敞口）；TA 4 单位同向时 max_single == max_portfolio；无声明保持单 code 口径；HowToUse 8.43/8.44 |
 | V034 | 2026-08-18 | WebUI 新 tab「持仓与风险」：每天最大组合持仓 + 每天账户风险度 | digest 新增每日毛/净/单边三口径序列与 LLM 派生摘要；图 1 毛持仓默认可叠加净/单边，图 2 单边口径+100% 强平线标红；单边按 weight_groups 取大边（M028）；二期可迭代点：逐标的+下拉框按需加载 |
 | V035 | 2026-08-18 | 持仓与风险 tab 图 1 改「每日组合持仓」收盘口径 | 图 1 三线改取收盘值（同刻快照，夜盘 bar 排除），图 2 保持日峰值（职责分工：图 1 日常、图 2 峰值风险）；HowToUse 8.45 补多标的角度 |
+| V036 | 2026-08-18 | 持仓与风险 tab 新增「单标的每日持仓」图 | 下拉框选标的（weight_groups 分组+峰值标注），毛/净/单边三线，收盘默认/峰值切换；API 现读 positions.csv 按需加载（不进 digest）；HowToUse 8.45 三图说明 |
 > 补录说明：V001-V009 为补录条目，依据 git 历史、HowToUse、全局复利与踩坑日志、`C:\Users\mumu\.codex\sessions` 会话记录回溯整理；当时未留痕的字段标“待补”。从下一条起，每次迭代收尾直接写正文。
 
 ## 模板
@@ -434,4 +435,15 @@
   - 多标的角度写入 HowToUse 8.45：毛线看总占用（多标的下单边=毛）、净线只看方向、图 2 看峰值风险、"哪个标的最重"是二期可迭代点。
 - 验证：test_analysis_digest.py 聚合测试改为收盘/峰值双口径断言（含"峰值 bar ≠ 收盘 bar"和夜盘 bar 排除用例）——25 passed；前端 tsc + vitest 450 passed；v437fixB fastrun 重跑核对（2014-01-09/24 收盘毛 41.28%、风险峰值 41.28%、over100 0 天）。
 - 影响/注意：图 1 语义变更（峰值→收盘），新 digest 生效（旧 digest 缓存命中旧口径——需要重跑 run 或等指纹变化重建）；收盘 bar 定义为"非夜盘（<20:00）最后一根"，对 TA 4H（08/12/20 三根）取 12:00 日盘收盘；夜盘归交易日更精确的处理（按 trade_date）留待后续。
-- 关联：计划 P-20260818-daily_position_risk_charts（上线后迭代）；HowToUse 8.45；run `ta_turtle_4h_v437fixB_2014_2023`；commit 待补。
+- 关联：计划 P-20260818-daily_position_risk_charts（上线后迭代）；HowToUse 8.45；run `ta_turtle_4h_v437fixB_2014_2023`；commit `15db5e1`。
+
+### V036 · 持仓与风险 tab 新增「单标的每日持仓」图（2026-08-18）
+- 一句话总结：「持仓与风险」tab 新增第三张图「单标的每日持仓」——下拉框选择标的（按策略 `weight_groups` 分组的逻辑标的，伪单位合并，选项标注峰值仓位），显示该标的每日毛/净/单边三线，默认收盘、可切换峰值；数据按需加载（新增 API 现读 positions.csv，单标的 ~140KB/次，不进 digest）。
+- 为什么：V034 二期可迭代点（逐标的 + 下拉框按需加载）——多标的账户（RB/TA/FG 多空混合）需要逐标的观察"哪个标的最重"，组合级图只能看总数。用户拍板：收盘默认+峰值切换、毛/净/单边三线、不做叠加对比、按 weight_groups 分组；默认展示标的=列表第一个 + 下拉框标注峰值。
+- 关键细节：
+  - digest.py 重构抽取共享函数：`_per_bar_exposure`（每 bar 毛/净/单边）、`_daily_close_and_peak`（收盘=非夜盘最后一根/峰值=当日 single max）、`_position_series_pct`、`_load_positions_frame`；新增 `position_groups`（逻辑标的列表+峰值）、`single_group_daily_series`（单标的收盘/峰值序列）。组合级 `daily_position_and_risk` 改用共享函数（口径零变化，25 测试通过）。
+  - API（runs_routes.py）：`GET /runs/{id}/analysis/positions/groups`（标的列表）、`GET /runs/{id}/analysis/positions/{group}`（单标的序列，现读 positions.csv 不落 digest）。
+  - 前端：`SingleSymbolPositionCard`（下拉框 + 收盘/峰值切换 + 三线 ECharts；峰值模式单线=单边峰值，与图 2 同口径）；tab 顶部常驻三口径说明条（`positionsLegendNote`：毛=总占用 / 净=净敞口可负 / 单边=对锁取大边，5 语言）；i18n 5 语言新增 3 key。
+- 验证：test_analysis_digest.py 新增 2 用例（position_groups 伪单位合并/多组独立/组合级跨组求和；缺 positions.csv 容错）——27 passed；前端 tsc + vitest 450 + build 全过；v437fixB 实测 groups=[TA(4 伪单位, 峰值 41.28)]，单标的 close 2432 天/peak 2433 天，与组合级逐字段一致。
+- 影响/注意：单标的数据不进 digest（100 标的 ≈ 14MB）；收盘/峰值口径与组合级图 1/图 2 完全一致；无 weight_groups 时按原始 code 分组（V033 回退语义）。HowToUse 8.45 更新（三张图 + 多标的角度 + 可迭代点：多标的叠加对比模式）。
+- 关联：计划 P-20260818-daily_position_risk_charts_v2；HowToUse 8.45；run `ta_turtle_4h_v437fixB_2014_2023`；commit 待补。

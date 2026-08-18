@@ -604,26 +604,97 @@ def _strategy_weight_groups(run_dir: Path) -> Any:
         return None
 
 
+def _per_bar_exposure(w: pd.DataFrame, group_keys: List[str]) -> pd.DataFrame:
+    """Per-bar gross / net / single-sided exposure for the given code columns.
+
+      - ``gross``: ``sum(|w|)`` — total position volume, always >= 0;
+      - ``net``: signed ``sum(w)`` — net direction (positive long, negative
+        short);
+      - ``single``: single-sided margin-style exposure — within each group
+        (``group_keys``, one label per code column) take
+        ``max(long-sum, |short-sum|)`` and add across groups. Equals gross for
+        same-direction strategies; equals the real futures single-sided margin
+        for locked (long + short) positions of one instrument.
+    """
+    pos_sum = w.clip(lower=0.0).T.groupby(group_keys).sum().T
+    neg_sum = w.clip(upper=0.0).T.groupby(group_keys).sum().T
+    # Note: pos_sum + |neg_sum| would equal gross (a tautology); the point of
+    # "single-sided" is that locked positions only charge the bigger side.
+    single_by_group = pos_sum.where(pos_sum >= neg_sum.abs(), neg_sum.abs())
+    return pd.DataFrame({
+        "gross": w.abs().sum(axis=1),
+        "net": w.sum(axis=1),
+        "single": single_by_group.sum(axis=1),
+    })
+
+
+def _daily_close_and_peak(
+    df: pd.DataFrame,
+    exp: pd.DataFrame,
+) -> tuple[pd.DataFrame, pd.Series]:
+    """Split per-bar exposures into close-of-day rows and daily single peak.
+
+    ``df`` must carry ``timestamp`` (used for the date and the day/evening
+    session split). Close-of-day = the last bar of each calendar day whose hour
+    is < 20 (day-session close; 20:00+ evening bars belong to the next trading
+    day and are excluded). Peak = the biggest single exposure of the day
+    (evening bars included).
+    """
+    daily = pd.DataFrame({
+        "date": df["timestamp"].dt.date.astype(str),
+        "hour": df["timestamp"].dt.hour,
+        "gross": exp["gross"],
+        "net": exp["net"],
+        "single": exp["single"],
+    })
+    close_rows = daily[daily["hour"] < 20].groupby("date").tail(1)
+    peak_single = daily.groupby("date")["single"].max()
+    return close_rows, peak_single
+
+
+def _position_series_pct(close_rows: pd.DataFrame, peak_single: pd.Series) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Format close rows and single peaks as percent dicts (date keyed)."""
+    daily_position = [
+        {
+            "date": row["date"],
+            "gross_pct": round(float(row["gross"]) * 100.0, 2),
+            "net_pct": round(float(row["net"]) * 100.0, 2),
+            "single_pct": round(float(row["single"]) * 100.0, 2),
+        }
+        for _, row in close_rows.iterrows()
+    ]
+    daily_risk = sorted(
+        ({"date": date, "risk_pct": round(float(value) * 100.0, 2)}
+         for date, value in peak_single.items()),
+        key=lambda item: item["date"],
+    )
+    return daily_position, daily_risk
+
+
+def _load_positions_frame(run_dir: Path) -> Optional[pd.DataFrame]:
+    """Load artifacts/positions.csv with a parsed timestamp; None when absent."""
+    path = run_dir / "artifacts" / "positions.csv"
+    if not path.exists():
+        return None
+    try:
+        df = pd.read_csv(path, parse_dates=["timestamp"])
+    except Exception:
+        return None
+    if df.empty or "timestamp" not in df.columns:
+        return None
+    return df
+
+
 def daily_position_and_risk(
     run_dir: Path,
     weight_groups: Any = None,
 ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
-    """Aggregate per-bar target weights into daily series.
-
-    Three exposure measures are computed per bar:
-      - ``gross``: ``sum(|w|)`` — total position volume, always >= 0;
-      - ``net``: signed ``sum(w)`` — net direction (positive long, negative
-        short);
-      - ``single``: single-sided margin-style exposure — within each
-        ``weight_groups`` group take ``max(long-sum, |short-sum|)`` and add
-        across groups. Equals gross for same-direction strategies; equals the
-        real futures single-sided margin for locked (long + short) positions
-        of one instrument. Without a declared grouping it equals gross.
+    """Aggregate per-bar target weights into daily series (portfolio level).
 
     ``daily_position`` reports the **close-of-day** values — the last bar of
     each calendar day whose hour is < 20 (the day-session close; evening-session
     bars at 20:00+ belong to the next trading day and are excluded). This is a
-    same-instant snapshot of all three measures.
+    same-instant snapshot of gross / net / single-sided exposure.
 
     ``daily_risk`` reports the **daily peak** of the single exposure (the
     biggest single-sided margin usage of the day, long or short), in percent.
@@ -634,62 +705,76 @@ def daily_position_and_risk(
     Returns ``(daily_position, daily_risk)``; both empty when positions.csv is
     missing or has no weight columns (consumers treat that as "no data").
     """
-    path = run_dir / "artifacts" / "positions.csv"
-    if not path.exists():
-        return [], []
-    try:
-        df = pd.read_csv(path, parse_dates=["timestamp"])
-    except Exception:
-        return [], []
-    if df.empty or "timestamp" not in df.columns:
+    df = _load_positions_frame(run_dir)
+    if df is None:
         return [], []
     codes = [c for c in df.columns if c != "timestamp"]
     if not codes:
         return [], []
 
     w = df[codes].astype(float)
-    gross = w.abs().sum(axis=1)
-    net = w.sum(axis=1)
-
     group_of: Dict[str, str] = {}
     for group, members in (weight_groups or {}).items():
         for code in members:
             group_of[code] = group
     keys = [group_of.get(code, code) for code in codes]
-    # Single-sided exposure per group: max(long-side sum, |short-side sum|).
-    # Note: summing the two would equal the gross exposure (a tautology); the
-    # point of "single-sided" is that locked (long + short) positions of one
-    # instrument only charge margin on the bigger side, like real futures.
-    pos_sum = w.clip(lower=0.0).T.groupby(keys).sum().T
-    neg_sum = w.clip(upper=0.0).T.groupby(keys).sum().T
-    single_by_group = pos_sum.where(pos_sum >= neg_sum.abs(), neg_sum.abs())
-    single = single_by_group.sum(axis=1)
+    exp = _per_bar_exposure(w, keys)
+    close_rows, peak_single = _daily_close_and_peak(df, exp)
+    return _position_series_pct(close_rows, peak_single)
 
-    daily = pd.DataFrame({
-        "date": df["timestamp"].dt.date.astype(str),
-        "hour": df["timestamp"].dt.hour,
-        "gross": gross,
-        "net": net,
-        "single": single,
-    })
-    # Close-of-day snapshot: the last day-session bar (< 20:00) of each day.
-    close_rows = daily[daily["hour"] < 20].groupby("date").tail(1)
-    # Peak risk: the biggest single exposure of each day (long or short).
-    peak_single = daily.groupby("date")["single"].max()
 
-    daily_position: List[Dict[str, Any]] = []
-    daily_risk: List[Dict[str, Any]] = []
-    for _, row in close_rows.iterrows():
-        daily_position.append({
-            "date": row["date"],
-            "gross_pct": round(float(row["gross"]) * 100.0, 2),
-            "net_pct": round(float(row["net"]) * 100.0, 2),
-            "single_pct": round(float(row["single"]) * 100.0, 2),
-        })
-    for date, value in peak_single.items():
-        daily_risk.append({"date": date, "risk_pct": round(float(value) * 100.0, 2)})
-    daily_risk.sort(key=lambda item: item["date"])
-    return daily_position, daily_risk
+def position_groups(run_dir: Path) -> List[Dict[str, Any]]:
+    """Logical position groups (per ``weight_groups``; codes alone otherwise).
+
+    Each group carries its codes and the peak single exposure percent so the
+    UI can label dropdown options (e.g. ``TA (peak 41%)``).
+    """
+    df = _load_positions_frame(run_dir)
+    if df is None:
+        return []
+    codes = [c for c in df.columns if c != "timestamp"]
+    if not codes:
+        return []
+    w = df[codes].astype(float)
+    group_of: Dict[str, str] = {}
+    for group, members in (_strategy_weight_groups(run_dir) or {}).items():
+        for code in members:
+            group_of[code] = group
+    members: Dict[str, List[str]] = {}
+    for code in codes:
+        members.setdefault(group_of.get(code, code), []).append(code)
+    groups: List[Dict[str, Any]] = []
+    for group, group_codes in sorted(members.items()):
+        keys = [group] * len(group_codes)
+        exp = _per_bar_exposure(w[group_codes], keys)
+        peak_pct = round(float(exp["single"].max()) * 100.0, 2) if len(exp) else 0.0
+        groups.append({"group": group, "codes": group_codes, "peak_pct": peak_pct})
+    return groups
+
+
+def single_group_daily_series(
+    run_dir: Path,
+    group_codes: List[str],
+) -> Dict[str, Any]:
+    """Daily close and peak series for one logical group (single instrument).
+
+    Returns ``{"close": [{date, gross_pct, net_pct, single_pct}],
+    "peak": [{date, risk_pct}]}``. Close = the last day-session bar of each
+    day (same-instant snapshot); peak = daily max of the group's single-sided
+    exposure. Codes not present in positions.csv are ignored.
+    """
+    df = _load_positions_frame(run_dir)
+    empty = {"close": [], "peak": []}
+    if df is None:
+        return empty
+    codes = [c for c in group_codes if c in df.columns]
+    if not codes:
+        return empty
+    w = df[codes].astype(float)
+    exp = _per_bar_exposure(w, [group_codes[0]] * len(codes))
+    close_rows, peak_single = _daily_close_and_peak(df, exp)
+    daily_position, daily_risk = _position_series_pct(close_rows, peak_single)
+    return {"close": daily_position, "peak": daily_risk}
 
 
 def _position_risk_summary(
