@@ -919,6 +919,9 @@ def main(
     # Validate config schema
     try:
         BacktestConfigSchema(**raw_config)
+        from backtest.logical_groups import parse_logical_groups
+
+        parse_logical_groups(raw_config, raw_config.get("codes") or [])
     except Exception as exc:
         errors = str(exc)
         print(json.dumps({"error": f"Invalid config: {errors}"}))

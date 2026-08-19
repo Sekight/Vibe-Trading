@@ -54,6 +54,7 @@ def _json_safe_scalar_metrics(metrics: Dict[str, Any]) -> Dict[str, Any]:
         if not isinstance(v, dict)
     }
 from backtest.models import EquitySnapshot, Position, TradeRecord
+from backtest.logical_groups import groups_as_mapping, parse_logical_groups
 
 logger = logging.getLogger(__name__)
 
@@ -317,26 +318,26 @@ def _single_weight_by_group(
 ) -> pd.DataFrame:
     """Aggregate per-code target weights into per-logical-symbol groups.
 
-    ``weight_groups`` maps a group name to the codes that share one underlying
+    ``logical_groups`` maps a group name to the codes that share one underlying
     instrument (e.g. several pseudo-unit codes standing for the pyramid adds
     of a single futures contract).  Weights within a group are summed with
     their sign, so the aggregated weight is the net exposure to that
     underlying — the same signed-sum semantics as the portfolio weight.
     Codes not listed in any group stay as single-symbol columns.
 
-    Returns ``target_pos`` unchanged when ``weight_groups`` is empty/None.
+    Returns ``target_pos`` unchanged when ``logical_groups`` is empty/None.
     """
     if not weight_groups:
         return target_pos
     if not isinstance(weight_groups, dict):
-        print(f"[WARN] signal_engine.weight_groups must be a dict, "
+        print(f"[WARN] logical_groups must be a dict, "
               f"got {type(weight_groups).__name__}; falling back to per-code weights")
         return target_pos
     group_of: Dict[str, str] = {}
     for group, members in weight_groups.items():
         for code in members:
             if code in group_of:
-                print(f"[WARN] code {code!r} declared in multiple weight_groups "
+                print(f"[WARN] code {code!r} declared in multiple logical_groups "
                       f"({group_of[code]!r} and {group!r}); using {group!r}")
             group_of[code] = group
     keys = [group_of.get(code, code) for code in target_pos.columns]
@@ -945,11 +946,10 @@ class BaseEngine(ABC):
         if len(position_weight_series):
             m["avg_portfolio_weight"] = float(position_weight_series.mean())
             m["max_portfolio_weight"] = float(position_weight_series.max())
-            # When the strategy declares weight_groups (codes of one logical
-            # instrument, e.g. pyramid-add pseudo units), max_single_weight is
-            # the peak net weight per group instead of per code. No declaration
-            # keeps the historical per-code semantics.
-            groups = getattr(signal_engine, "weight_groups", None)
+            # Config is the sole source of logical-instrument grouping. Missing
+            # logical_groups resolves to singleton groups for backward
+            # compatibility; strategy attributes are intentionally ignored.
+            groups = groups_as_mapping(parse_logical_groups(config, valid_codes))
             single_pos = _single_weight_by_group(target_pos, groups)
             m["max_single_weight"] = float(single_pos.max(axis=1).max())
         m["by_symbol"] = by_symbol_stats(self.trades)

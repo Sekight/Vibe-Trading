@@ -247,6 +247,7 @@ export function RunDetail() {
       setRun((prev) => prev ? {
         ...prev,
         chart_symbols: nextRun.chart_symbols?.length ? nextRun.chart_symbols : prev.chart_symbols,
+        chart_groups: nextRun.chart_groups?.length ? nextRun.chart_groups : prev.chart_groups,
         equity_curve: nextRun.equity_curve?.length ? nextRun.equity_curve : prev.equity_curve,
         trade_log: nextRun.trade_log?.length ? nextRun.trade_log : prev.trade_log,
       } : nextRun);
@@ -616,6 +617,8 @@ function ChartTab({
   onCancelLoadAll: () => void;
 }) {
   const chartSymbols = run.chart_symbols || Object.keys(run.price_series || {});
+  const chartGroups = new Map((run.chart_groups || []).map((group) => [group.chart_code, group]));
+  const chartLabel = (symbol: string) => chartGroups.get(symbol)?.display_name || symbol;
   // markers 用 useMemo 稳定引用：避免窗口拖动等无关重渲染时 .filter 生成新数组，
   // 触发 CandlestickChart 的 setOption 效应重跑（拖动被打断的回归根因）。
   const chartEntries = useMemo(() => selectedSymbols
@@ -653,7 +656,7 @@ function ChartTab({
               className="h-8 rounded-md border border-border/60 bg-background px-2 text-sm"
             >
               {chartSymbols.map((symbol) => (
-                <option key={symbol} value={symbol}>{symbol}</option>
+                <option key={symbol} value={symbol}>{chartLabel(symbol)}</option>
               ))}
             </select>
             <button
@@ -696,7 +699,7 @@ function ChartTab({
                   onClick={() => onRemoveSymbol(symbol)}
                   className="rounded-md bg-muted/40 px-2 py-1 text-xs hover:bg-muted/60"
                 >
-                  {symbol} x
+                  {chartLabel(symbol)} x
                 </button>
               ))}
             </div>
@@ -721,7 +724,7 @@ function ChartTab({
       )}
       {chartEntries.map(({ symbol, bars, markers }) => (
         <div key={symbol}>
-          <h3 className="text-sm font-semibold text-muted-foreground mb-1">{symbol}</h3>
+          <h3 className="text-sm font-semibold text-muted-foreground mb-1">{chartLabel(symbol)}</h3>
           <CandlestickChart data={bars} markers={markers} indicators={chartCache[symbol]?.indicator_series?.[symbol]} height={500} baseInterval={String((run.run_card?.backtest as Record<string, unknown> | undefined)?.interval ?? "")} sub={chartView.sub} overlays={chartView.overlays} period={chartView.period} windowRef={chartWindowRef} onViewChange={(patch) => onChartViewChange((prev) => ({ ...prev, ...patch }))} />
         </div>
       ))}
@@ -1392,7 +1395,7 @@ function SingleSymbolPositionCard({ runId }: { runId: string }) {
         >
           {groups.map((g) => (
             <option key={g.group} value={g.group}>
-              {g.group}（{i18n.t("runDetail.positionsSinglePeak" as any)} {g.peak_pct}%）
+              {g.display_name || g.group}（{i18n.t("runDetail.positionsSinglePeak" as any)} {g.peak_pct}%）
             </option>
           ))}
         </select>

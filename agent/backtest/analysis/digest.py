@@ -8,7 +8,6 @@ large series are summarized/capped here.
 from __future__ import annotations
 
 import csv
-import importlib.util
 import json
 from collections import deque
 from datetime import datetime, timezone
@@ -18,6 +17,8 @@ from typing import Any, Dict, List, Optional
 import math
 
 import pandas as pd
+
+from backtest.logical_groups import groups_as_mapping, parse_logical_groups
 
 # The digest is persisted after a successful backtest and read back when its
 # source-artifact fingerprint still matches. A stale or schema-old file is
@@ -119,7 +120,7 @@ METRIC_MEANINGS: Dict[str, str] = {
     # 仓位与换手
     "avg_portfolio_weight": "平均组合仓位（全组合目标仓位均值）",
     "max_portfolio_weight": "最大组合仓位（全组合目标仓位峰值）",
-    "max_single_weight": "单标的最大目标仓位（策略声明 weight_groups 时按组分组合并、带符号净敞口；未声明时按单代码）",
+    "max_single_weight": "单标的最大目标仓位（config.logical_groups 按组聚合、带符号净敞口；未配置时按单代码）",
     "avg_turnover": "平均换手率", "total_turnover": "累计换手率",
     "rebalance_turnover_mean": "再平衡平均换手", "rebalance_turnover_max": "再平衡最大换手",
     # 交易成本
@@ -273,7 +274,7 @@ def load_digest(run_dir: Path) -> Dict[str, Any]:
                 if _missing_only_positions(payload.get("sources"), fresh):
                     digest = dict(payload["digest"])
                     daily_position, daily_risk = daily_position_and_risk(
-                        run_dir, _strategy_weight_groups(run_dir)
+                        run_dir, _logical_group_mapping(run_dir)
                     )
                     digest["daily_position"] = daily_position
                     digest["daily_risk"] = daily_risk
@@ -581,27 +582,17 @@ def ohlcv_summary(run_dir: Path) -> List[Dict[str, Any]]:
     return summary
 
 
-def _strategy_weight_groups(run_dir: Path) -> Any:
-    """Best-effort read of the strategy's ``weight_groups`` class attribute.
-
-    ``max_single_weight`` aggregation (single-sided exposure) needs the
-    strategy's grouping of pseudo-unit codes into logical instruments. The
-    digest builds from a run directory without a live engine, so load the
-    strategy module just to read the class attribute. Any failure (missing
-    file, import error) yields None, meaning "no grouping declared" and the
-    single-sided exposure falls back to the gross exposure.
-    """
-    path = run_dir / "code" / "signal_engine.py"
-    if not path.exists():
-        return None
+def _logical_group_mapping(run_dir: Path, available_codes: Optional[List[str]] = None) -> dict[str, list[str]]:
+    """Read logical instrument groups from config, never from strategy code."""
+    config = load_json(run_dir / "config.json") or {}
     try:
-        spec = importlib.util.spec_from_file_location("_digest_signal_engine", path)
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)  # type: ignore[union-attr]
-        cls = getattr(module, "SignalEngine", None)
-        return getattr(cls, "weight_groups", None)
-    except Exception:
-        return None
+        groups = parse_logical_groups(config, available_codes)
+    except ValueError:
+        # The runner rejects invalid configs. Historical/manual runs should
+        # still be viewable, so the digest falls back to singleton groups.
+        codes = available_codes or config.get("codes") or []
+        groups = parse_logical_groups({}, codes)
+    return groups_as_mapping(groups)
 
 
 def _per_bar_exposure(w: pd.DataFrame, group_keys: List[str]) -> pd.DataFrame:
@@ -724,7 +715,7 @@ def daily_position_and_risk(
 
 
 def position_groups(run_dir: Path) -> List[Dict[str, Any]]:
-    """Logical position groups (per ``weight_groups``; codes alone otherwise).
+    """Logical position groups from config (codes alone otherwise).
 
     Each group carries its codes and the peak single exposure percent so the
     UI can label dropdown options (e.g. ``TA (peak 41%)``).
@@ -737,9 +728,18 @@ def position_groups(run_dir: Path) -> List[Dict[str, Any]]:
         return []
     w = df[codes].astype(float)
     group_of: Dict[str, str] = {}
-    for group, members in (_strategy_weight_groups(run_dir) or {}).items():
+    logical_mapping = _logical_group_mapping(run_dir, codes)
+    for group, members in logical_mapping.items():
         for code in members:
             group_of[code] = group
+    config = load_json(run_dir / "config.json") or {}
+    try:
+        display_names = {
+            group.logical_symbol: group.display_name
+            for group in parse_logical_groups(config, codes)
+        }
+    except ValueError:
+        display_names = {}
     members: Dict[str, List[str]] = {}
     for code in codes:
         members.setdefault(group_of.get(code, code), []).append(code)
@@ -748,7 +748,12 @@ def position_groups(run_dir: Path) -> List[Dict[str, Any]]:
         keys = [group] * len(group_codes)
         exp = _per_bar_exposure(w[group_codes], keys)
         peak_pct = round(float(exp["single"].max()) * 100.0, 2) if len(exp) else 0.0
-        groups.append({"group": group, "codes": group_codes, "peak_pct": peak_pct})
+        groups.append({
+            "group": group,
+            "display_name": display_names.get(group, group),
+            "codes": group_codes,
+            "peak_pct": peak_pct,
+        })
     return groups
 
 
@@ -948,7 +953,7 @@ def build_digest(
         if key in metrics and metrics[key] is not None:
             summary[key] = metrics[key]
     daily_position, daily_risk = daily_position_and_risk(
-        run_dir, _strategy_weight_groups(run_dir)
+        run_dir, _logical_group_mapping(run_dir)
     )
     position_risk_summary = _position_risk_summary(daily_position, daily_risk)
     if include_mae_mfe:

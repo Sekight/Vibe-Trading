@@ -869,18 +869,16 @@ class TestAutoMonteCarlo:
 
 
 # ---------------------------------------------------------------------------
-# 7. max_single_weight — per-logical-symbol grouping (strategy weight_groups)
+# 7. max_single_weight — per-logical-symbol grouping (config logical_groups)
 # ---------------------------------------------------------------------------
 
 
 class TestSingleWeightGroup:
     """``_single_weight_by_group`` and the engine metric it feeds.
 
-    A strategy can declare ``weight_groups = {group: [codes...]}`` when several
-    codes stand for the adds of one underlying instrument (pseudo units).
-    ``max_single_weight`` then reports the peak *net* weight per group (signed
-    sum, same semantics as portfolio weight); codes not listed in any group
-    keep the historical per-code behavior.
+    ``config.json.logical_groups`` declares when several execution codes stand
+    for one underlying instrument (pseudo units). ``max_single_weight`` then
+    reports the peak net weight per group.
     """
 
     def test_group_sums_same_direction(self) -> None:
@@ -930,8 +928,6 @@ class TestSingleWeightGroup:
                 return {"AAA": bars.copy(), "BBB": bars.copy()}
 
         class SignalEngine:
-            weight_groups = {"T": ["AAA", "BBB"]}
-
             def generate(self, data_map):
                 return {c: pd.Series(0.05, index=data_map[c].index) for c in data_map}
 
@@ -945,6 +941,11 @@ class TestSingleWeightGroup:
                 "end_date": "2024-04-30",
                 "source": "tushare",
                 "initial_cash": 1_000_000,
+                "logical_groups": [{
+                    "logical_symbol": "T",
+                    "codes": ["AAA", "BBB"],
+                    "chart_code": "AAA",
+                }],
             },
             FakeLoader(),
             SignalEngine(),

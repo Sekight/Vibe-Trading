@@ -523,20 +523,23 @@ def test_load_digest_incrementally_backfills_positions_on_old_digest(tmp_path: P
 
 
 def test_position_groups_merges_pseudo_units(tmp_path: Path) -> None:
-    """weight_groups merges pseudo units into one logical group; codes without
-    a declaration stay as their own group; each group reports peak exposure."""
+    """Config logical_groups merges pseudo units into one logical group."""
     run_dir = write_run_dir(tmp_path, "20260818_000000_00_groups")
+    config = json.loads((run_dir / "config.json").read_text(encoding="utf-8"))
+    config["codes"] = ["RB01", "RB02", "TA01"]
+    config["logical_groups"] = [{
+        "logical_symbol": "RB",
+        "display_name": "RB",
+        "codes": ["RB01", "RB02"],
+        "chart_code": "RB01",
+    }]
+    (run_dir / "config.json").write_text(
+        json.dumps(config, ensure_ascii=False), encoding="utf-8"
+    )
     (run_dir / "artifacts" / "positions.csv").write_text(
         "timestamp,RB01,RB02,TA01\n"
         "2024-01-02 09:00:00,0.1,0.1,-0.08\n"
         "2024-01-03 09:00:00,0.2,-0.1,0.0\n",
-        encoding="utf-8",
-    )
-    (run_dir / "code" / "signal_engine.py").write_text(
-        "class SignalEngine:\n"
-        "    weight_groups = {'RB': ['RB01', 'RB02']}\n"
-        "    def generate(self, data_map):\n"
-        "        return {c: __import__('pandas').Series(dtype=float) for c in data_map}\n",
         encoding="utf-8",
     )
     groups = position_groups(run_dir)

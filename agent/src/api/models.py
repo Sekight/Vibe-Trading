@@ -81,6 +81,10 @@ class RunResponse(BaseModel):
     run_directory: str = Field(..., description="Run directory path")
     run_stage: Optional[str] = Field(None, description="UI-facing run stage")
     run_context: Optional[Dict[str, Any]] = Field(None, description="Normalized request context")
+    chart_groups: Optional[List[Dict[str, Any]]] = Field(
+        None,
+        description="Config-driven logical instruments represented in the chart tab",
+    )
     price_series: Optional[Dict[str, List[Dict[str, Any]]]] = Field(None, description="Grouped OHLC series")
     indicator_series: Optional[Dict[str, Dict[str, List[Dict[str, Any]]]]] = Field(
         None,

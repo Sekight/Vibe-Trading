@@ -257,6 +257,7 @@ def collect_run_logs(run_dir: Path, line_limit: int = 200) -> List[Dict[str, Any
 def build_trade_markers(
     trades: List[Dict[str, Any]],
     symbols: Optional[set[str]] = None,
+    code_aliases: Optional[Dict[str, str]] = None,
 ) -> List[Dict[str, Any]]:
     """Normalize trade rows into frontend marker objects.
 
@@ -268,7 +269,8 @@ def build_trade_markers(
     """
     markers: List[Dict[str, Any]] = []
     for row in trades:
-        code = str(row.get("code") or "")
+        raw_code = str(row.get("code") or "")
+        code = (code_aliases or {}).get(raw_code, raw_code)
         if symbols and code not in symbols:
             continue
         side = str(row.get("side") or "").upper()
@@ -286,14 +288,14 @@ def build_trade_markers(
             {
                 "time": timestamp,
                 "timestamp": timestamp,
-                "code": row.get("code"),
+                "code": code,
                 "side": side,
                 "action": "close" if is_close else "open",
                 "direction": direction,
                 "price": _safe_float(row.get("price")),
                 "qty": _safe_float(row.get("qty")),
                 "reason": row.get("reason"),
-                "text": f"{side} {row.get('code') or ''}".strip(),
+                "text": f"{side} {code}".strip(),
             }
         )
     return markers
@@ -417,8 +419,8 @@ def load_price_series(run_dir: Path) -> List[Dict[str, Any]]:
     return reconstruct_price_series(run_dir)
 
 
-def load_chart_symbols(run_dir: Path, context: Optional[Dict[str, Any]] = None) -> List[str]:
-    """Load chart symbol names without materializing all chart rows."""
+def _artifact_symbols(run_dir: Path) -> List[str]:
+    """Return concrete artifact symbols without loading all OHLCV rows."""
     artifacts = run_dir / "artifacts"
     symbols: set[str] = set()
 
@@ -441,11 +443,33 @@ def load_chart_symbols(run_dir: Path, context: Optional[Dict[str, Any]] = None) 
             if file_path.stem.removeprefix("ohlcv_")
         )
 
-    if not symbols:
-        raw_codes = (context or load_run_context(run_dir)).get("codes") or []
-        symbols.update(str(code) for code in raw_codes if code)
-
     return sorted(symbols)
+
+
+def load_chart_groups(
+    run_dir: Path,
+    context: Optional[Dict[str, Any]] = None,
+) -> List[Dict[str, Any]]:
+    """Return config-driven logical chart groups with concrete chart codes."""
+    available = _artifact_symbols(run_dir)
+    if not available:
+        raw_codes = (context or load_run_context(run_dir)).get("codes") or []
+        available = [str(code) for code in raw_codes if code]
+    config = load_json_file(run_dir / "config.json") or {}
+    from backtest.logical_groups import parse_logical_groups
+
+    try:
+        groups = parse_logical_groups(config, available)
+    except ValueError:
+        # Invalid configs are rejected by runner; historical/manual runs
+        # remain viewable with the safe singleton interpretation.
+        groups = parse_logical_groups({}, available)
+    return [group.as_dict() for group in groups]
+
+
+def load_chart_symbols(run_dir: Path, context: Optional[Dict[str, Any]] = None) -> List[str]:
+    """Load one representative chart code per logical instrument."""
+    return [str(group["chart_code"]) for group in load_chart_groups(run_dir, context)]
 
 
 def reconstruct_price_series(run_dir: Path) -> List[Dict[str, Any]]:
@@ -514,13 +538,15 @@ def build_run_analysis(
         A serializable dictionary of chart, trade, and log data.
     """
     context = load_run_context(run_dir)
-    chart_symbols = load_chart_symbols(run_dir, context) if include_symbol_list or not include_payload else []
+    chart_groups = load_chart_groups(run_dir, context) if include_symbol_list or not include_payload else []
+    chart_symbols = [str(group["chart_code"]) for group in chart_groups]
 
     if not include_payload:
         return {
             "run_stage": infer_run_stage(run_dir),
             "run_context": context,
             "chart_symbols": chart_symbols,
+            "chart_groups": chart_groups,
             "price_series": {},
             "indicator_series": {},
             "trade_markers": [],
@@ -530,7 +556,22 @@ def build_run_analysis(
     price_rows = load_price_series(run_dir)
     if include_symbol_list and not chart_symbols:
         chart_symbols = sorted({str(row.get("code") or "") for row in price_rows if row.get("code")})
-    selected_symbols = {symbol for symbol in (symbols or []) if symbol}
+        chart_groups = [
+            {"logical_symbol": code, "display_name": code, "codes": [code], "chart_code": code}
+            for code in chart_symbols
+        ]
+    requested_symbols = {str(symbol) for symbol in (symbols or []) if str(symbol).strip()}
+    selected_symbols: set[str] = set()
+    code_aliases: Dict[str, str] = {}
+    for group in chart_groups:
+        chart_code = str(group["chart_code"])
+        members = [str(code) for code in group.get("codes") or []]
+        if not requested_symbols or requested_symbols.intersection({chart_code, *members}):
+            if requested_symbols:
+                selected_symbols.add(chart_code)
+                code_aliases.update({member: chart_code for member in members})
+    if requested_symbols and not selected_symbols:
+        selected_symbols = requested_symbols
     if selected_symbols:
         price_rows = [row for row in price_rows if str(row.get("code") or "") in selected_symbols]
     periods = infer_indicator_periods(run_dir)
@@ -540,9 +581,10 @@ def build_run_analysis(
         "run_stage": infer_run_stage(run_dir),
         "run_context": context,
         "chart_symbols": chart_symbols,
+        "chart_groups": chart_groups,
         "price_series": group_price_rows(price_rows),
         "indicator_series": build_indicator_series(price_rows, periods) if price_rows else {},
-        "trade_markers": build_trade_markers(trades, selected_symbols or None),
+        "trade_markers": build_trade_markers(trades, selected_symbols or None, code_aliases),
         "run_logs": collect_run_logs(run_dir),
     }
 

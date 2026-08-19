@@ -500,6 +500,13 @@ export interface TradeMarker {
   text?: string;
 }
 
+export interface ChartGroup {
+  logical_symbol: string;
+  display_name: string;
+  codes: string[];
+  chart_code: string;
+}
+
 export interface EquityPoint {
   time: string;
   equity: string | number;
@@ -583,6 +590,7 @@ export interface RunData {
   validation?: ValidationData;
 
   chart_symbols?: string[];
+  chart_groups?: ChartGroup[];
   price_series?: Record<string, PriceBar[]>;
   indicator_series?: Record<string, Record<string, IndicatorPoint[]>>;
   trade_markers?: TradeMarker[];
@@ -664,7 +672,7 @@ export interface RunAnalysisCharts {
 }
 export interface RunPositionGroups {
   run_id: string;
-  groups: Array<{ group: string; codes: string[]; peak_pct: number }>;
+  groups: Array<{ group: string; display_name?: string; codes: string[]; peak_pct: number }>;
 }
 export interface RunPositionGroupSeries {
   run_id: string;

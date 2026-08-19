@@ -218,6 +218,7 @@ def _build_response_from_run_dir(
             chart_symbols_out.extend(analysis.get("chart_symbols") or [])
         response.run_stage = analysis.get("run_stage")
         response.run_context = analysis.get("run_context")
+        response.chart_groups = analysis.get("chart_groups")
         response.price_series = analysis.get("price_series")
         response.indicator_series = analysis.get("indicator_series")
         response.trade_markers = analysis.get("trade_markers")
@@ -358,7 +359,7 @@ def register_runs_routes(
 
     @app.get("/runs/{run_id}/analysis/positions/groups", dependencies=[Depends(require_auth)])
     async def get_run_position_groups(run_id: str):
-        """List logical position groups (per strategy weight_groups) with the
+        """List logical position groups (per config logical_groups) with the
         peak single exposure of each, for the per-symbol dropdown."""
         _host_validate_path_param(run_id, "run_id")
         run_dir = _host_RUNS_DIR() / run_id
