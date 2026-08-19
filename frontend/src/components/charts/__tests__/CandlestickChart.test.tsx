@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { render } from "@testing-library/react";
 import { CandlestickChart } from "../CandlestickChart";
 import type { PriceBar } from "@/lib/api";
+import type { TradeMarker } from "@/lib/api";
 import type { ChartView } from "@/lib/chartWindow";
 
 // 用假 echarts 实例捕获 setOption / datazoom 事件，验证「窗口保持」核心机制。
@@ -73,6 +74,36 @@ beforeEach(() => {
 });
 
 describe("CandlestickChart 可视窗口保持（文档验证场景 1/3/4 的核心机制）", () => {
+  it("4H run defaults to 4h and passes the raw bars through", () => {
+    const data: PriceBar[] = [
+      { time: "2025-09-01 09:00:00", open: 10, high: 12, low: 9, close: 11, volume: 1 },
+      { time: "2025-09-01 10:00:00", open: 11, high: 14, low: 10, close: 13, volume: 2 },
+    ];
+    const { container } = render(<CandlestickChart {...props({ data, baseInterval: "4H" })} />);
+    const buttons = Array.from(container.querySelectorAll("button"));
+    const option = setOption.mock.calls[setOption.mock.calls.length - 1]?.[0];
+
+    expect(buttons.slice(0, 5).map((button) => button.textContent)).toEqual(["4h", "1D", "1W", "1M", "1Y"]);
+    expect(option?.xAxis?.[0]?.data).toEqual(data.map((item) => item.time));
+    expect(option?.series?.[0]?.data).toHaveLength(data.length);
+  });
+
+  it("4h marker bucketing maps lower-period data to the natural 4h bar", () => {
+    const data: PriceBar[] = [
+      { time: "2025-09-01 08:00:00", open: 10, high: 12, low: 9, close: 11, volume: 1 },
+      { time: "2025-09-01 09:00:00", open: 11, high: 14, low: 10, close: 13, volume: 2 },
+      { time: "2025-09-01 12:00:00", open: 13, high: 15, low: 12, close: 14, volume: 3 },
+    ];
+    const markers: TradeMarker[] = [{ time: "2025-09-01 09:30:00", side: "BUY", price: 12, qty: 1 }];
+    render(<CandlestickChart {...props({ data, baseInterval: "1H", period: "4h", markers })} />);
+    const option = setOption.mock.calls[setOption.mock.calls.length - 1]?.[0];
+    const markPoints = option?.series?.[0]?.markPoint?.data;
+
+    expect(option?.xAxis?.[0]?.data).toEqual(["2025-09-01 08:00:00", "2025-09-01 12:00:00"]);
+    expect(markPoints).toHaveLength(1);
+    expect(markPoints[0].coord[0]).toBe("2025-09-01 08:00:00");
+  });
+
   it("场景1/2：调指标/副图时沿用当前窗口（来自共享 ref），不重置回默认", () => {
     const windowRef = makeWindowRef();
     windowRef.current = { start: 30, end: 100 };

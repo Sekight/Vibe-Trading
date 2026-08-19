@@ -1,6 +1,6 @@
 import type { PriceBar } from "@/lib/api";
 
-export type KlinePeriod = "5m" | "15m" | "20m" | "1h" | "2h" | "1D" | "1W" | "1M" | "1Y";
+export type KlinePeriod = "5m" | "15m" | "20m" | "1h" | "2h" | "4h" | "1D" | "1W" | "1M" | "1Y";
 
 export const KLINE_PERIODS: KlinePeriod[] = [
   "5m",
@@ -8,6 +8,7 @@ export const KLINE_PERIODS: KlinePeriod[] = [
   "20m",
   "1h",
   "2h",
+  "4h",
   "1D",
   "1W",
   "1M",
@@ -20,7 +21,12 @@ const PERIOD_MINUTES: Partial<Record<KlinePeriod, number>> = {
   "20m": 20,
   "1h": 60,
   "2h": 120,
+  "4h": 240,
 };
+
+export function isIntradayPeriod(period: KlinePeriod): boolean {
+  return PERIOD_MINUTES[period] != null;
+}
 
 function parseTime(time: string): Date {
   const normalized = time.includes("T") ? time : time.replace(" ", "T");

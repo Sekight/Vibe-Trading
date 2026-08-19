@@ -942,7 +942,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
   2. `agent/backtest/loaders/local_loader.py` 的 `_RESAMPLE_RULES` 加映射（如 `"20m": "20min"`）——local 数据是按目标周期从 1m 现场聚合的，不加就只会警告并原样返回源 bar，等于没聚合；
   3. `agent/backtest/metrics.py` 的 `_BARS_PER_DAY` 年化表和 `_normalize_interval` 加对应映射——不加的话年化收益/夏普等按默认 1 bar/天折算，**指标失真**（回测执行和交易不受影响）。
   前两处决定"能不能跑"，第三处决定"年化指标准不准"。
-- 前端 K 线图上的周期按钮（5m/15m/20m/1h/2h/1D/1W/1M/1Y）是**前端本地聚合展示**，与回测 `interval` 无关——页面能切 20m 不代表回测能跑 20m。
+- 前端 K 线图上的周期按钮（5m/15m/20m/1h/2h/4h/1D/1W/1M/1Y）是**前端本地聚合展示**，与回测 `interval` 无关——页面能切 20m 不代表回测能跑 20m；4h 与 1D 同级，基础回测周期不大于 4H 时显示，1D 基础回测仍只显示 1D 及以上，4H run 选择 4h 时直接展示原始 4H bar。
 
 ### 8.43 加仓怎么算成"单标的"持仓？（max_single_weight 按策略声明分组）
 
@@ -1039,7 +1039,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 - `config.json` 可新增 `backtest_start` / `backtest_end`：`start_date` / `end_date` 只负责数据加载与指标预热，回测执行、净值、回撤、metrics 从 `backtest_start` 开始，到 `backtest_end`（纯日期包含整天）结束。不配置时行为不变。
 - `trades.csv` 的 `timestamp`：日内 run 显示完整 `YYYY-MM-DD HH:MM:SS`，日线 run 只显示 `YYYY-MM-DD`；新增 `holding_bars` 列，WebUI 交易表同步显示。
 - 指标口径：`avg_holding_bars` 是平均持仓 bar 数；`avg_holding_days` 是按每交易日 bar 数换算的天数，两个值以引擎 metrics 为准。
-- 行情 K 线左上角是周期按钮（5m/15m/20m/1h/2h/1D/1W/1M/1Y，按基础周期动态显示），切换由前端聚合；1D/1W/1M/1Y 按 `trade_date` 分桶，期货夜盘归下一交易日。周期切换后只显示前端重算指标，后端 indicator_series 隐藏。
+- 行情 K 线左上角是周期按钮（5m/15m/20m/1h/2h/4h/1D/1W/1M/1Y，按基础周期动态显示），切换由前端聚合；4h 与 1D 同级，基础周期不大于 4H 时出现，4H 基础周期默认选中并直接展示原始 4H bar，较小基础周期选择 4h 时按自然时间前端聚合，1D 基础周期仍只显示 1D 及以上；1D/1W/1M/1Y 按 `trade_date` 分桶，期货夜盘归下一交易日。周期切换后只显示前端重算指标，后端 indicator_series 隐藏。
 - 分析图：热力图支持日/周/月切换（默认按回测长度自动选）；净值/回撤从回测窗口开始；盈亏 vs 持仓、持仓分桶改用 bar 数。
 - 旧 run 的 `analysis.digest.json` 是缓存，升级后需要重建（schema v3）才会显示新口径；重建方式是重新跑 `backtest.runner` 或删除该文件后刷新 WebUI。
 - 1m 行情显示暂未开放：单标的约 8.5 万根会拖垮前端；后续按“区间/数量切片接口 + 懒加载”方案再补。

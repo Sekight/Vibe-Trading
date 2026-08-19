@@ -9,7 +9,7 @@ import { abbreviateNum } from "@/lib/formatters";
 import { pickCandleOhlc } from "@/lib/candleOhlc";
 import { tradeMarkerStyle } from "@/lib/tradeActions";
 import { mergeBarTradeMarks } from "@/lib/tradeMarkers";
-import { availablePeriods, periodKeyOf, periodKeyOfDate, resampleBars, tradeDateOfTime, type KlinePeriod } from "@/lib/resample";
+import { availablePeriods, isIntradayPeriod, periodKeyOf, periodKeyOfDate, resampleBars, tradeDateOfTime, type KlinePeriod } from "@/lib/resample";
 import { resolveZoom, type ChartView, type Overlay, type Sub, type ZoomWindow } from "@/lib/chartWindow";
 import { echarts, CHART_GROUP, connectCharts } from "@/lib/echarts";
 import { useThemeDark } from "@/lib/theme-store";
@@ -158,12 +158,12 @@ export function CandlestickChart({ data, markers, indicators, height = 500, base
       legendNames.push("BOLL");
     }
 
+    const isIntraday = isIntradayPeriod(effectivePeriod);
     const rawMarks: any[] = (markers || []).map(m => {
       let idx = dates.indexOf(m.time);
       if (idx < 0) {
-        const isMinute = effectivePeriod === "5m" || effectivePeriod === "15m" || effectivePeriod === "20m" || effectivePeriod === "1h" || effectivePeriod === "2h";
         const hasTradeDate = visibleData.some(d => d.trade_date);
-        const markerKey = isMinute ? periodKeyOf(m.time, effectivePeriod) : periodKeyOfDate(hasTradeDate ? tradeDateOfTime(m.time) : m.time.slice(0, 10), effectivePeriod);
+        const markerKey = isIntraday ? periodKeyOf(m.time, effectivePeriod) : periodKeyOfDate(hasTradeDate ? tradeDateOfTime(m.time) : m.time.slice(0, 10), effectivePeriod);
         idx = dates.indexOf(markerKey);
       }
       if (idx < 0) return null;
