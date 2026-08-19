@@ -50,6 +50,7 @@
 | V035 | 2026-08-18 | 持仓与风险 tab 图 1 改「每日组合持仓」收盘口径 | 图 1 三线改取收盘值（同刻快照，夜盘 bar 排除），图 2 保持日峰值（职责分工：图 1 日常、图 2 峰值风险）；HowToUse 8.45 补多标的角度 |
 | V036 | 2026-08-18 | 持仓与风险 tab 新增「单标的每日持仓」图 | 下拉框选标的（weight_groups 分组+峰值标注），毛/净/单边三线，收盘默认/峰值切换；API 现读 positions.csv 按需加载（不进 digest）；HowToUse 8.45 三图说明 |
 | V037 | 2026-08-19 | 报告页行情 K 线增加 4H 周期（与 1D 同级） | 4h 纳入共用周期列表并按基础周期动态显示；4H run 默认直显原始 4H bar，较小周期可前端自然聚合，交易标记归桶同步覆盖 4h |
+| V038 | 2026-08-19 | A方案：config 驱动逻辑标的分组 | 以 config.logical_groups 作为唯一来源，统一指标、digest、持仓风险和行情图的逻辑标的语义，支持多标的数组配置并保留伪单位执行模型 |
 > 补录说明：V001-V009 为补录条目，依据 git 历史、HowToUse、全局复利与踩坑日志、`C:\Users\mumu\.codex\sessions` 会话记录回溯整理；当时未留痕的字段标“待补”。从下一条起，每次迭代收尾直接写正文。
 
 ## 模板
@@ -459,3 +460,11 @@
 - 验证：前端定向 Vitest 2 个文件共 15 项通过；`npm run build` 通过（仅保留既有 chunk size warning）；浏览器实测 4H run `ta_turtle_4h_v438_swg2_2014_2023` 显示 `4h/1D/1W/1M/1Y` 且默认选中 4h，1H run 显示 `1h/2h/4h/1D/1W/1M/1Y` 并可切换，真实 1D run `20260808_032625_05_e9f25e` 仍只显示 `1D/1W/1M/1Y`。
 - 影响/注意：这是前端展示能力扩展，不开放 1m、不实现 2H 回测、不改变 4H 自然时间聚合或跨周期视口映射；旧 run 需刷新页面后按当前前端代码显示。
 - 关联：计划 P-20260819-chart_4h_interval；HowToUse 8.42/第 12 节；run `ta_turtle_4h_v438_swg2_2014_2023`、`ta_turtle_1h_v425_2021_2023`、`20260808_032625_05_e9f25e`；无 commit。
+
+### V038 · A方案：config 驱动逻辑标的分组（2026-08-19）
+- 一句话总结：保留伪单位执行代码，通过 `config.json.logical_groups` 数组把多个执行 code 聚合为逻辑标的；引擎指标、digest 持仓风险、行情图和交易标记统一使用该分组，不再依赖策略 `weight_groups` 硬编码。
+- 为什么：TA0001~TA0004 是同一主连的加仓单位，却被回测 artifacts 和 WebUI 当成四个行情标的；分组必须从策略代码迁移到 config，才能支持单标的加仓、多标的组合，并避免同一语义在多个文件重复配置。
+- 关键细节：新增 `agent/backtest/logical_groups.py`，负责 `local:` 归一化、数组分组校验、singleton fallback 和 chart_code；runner fail closed 校验非法分组；base engine/digest 从 config 解析分组；API 增加 chart_groups；UI 只展示每组一个代表行情并把组内交易标记映射到代表图；没有 logical_groups 的旧配置按单 code 兼容。B 方案锚点保留为未来在 logical_symbol 下引入原生 leg_id，不在本迭代实现。
+- 验证：后端定向回归 `131 passed, 1 skipped`；前端 CandlestickChart/RunDetail 定向测试 `17 passed`；`npm run build` 通过；TA 副本 `ta_turtle_4h_v437fix_logical_groups_2014_2023` 官方 runner `--fastrun` 通过，114 笔交易、收益 47.704%，`max_single_weight == max_portfolio_weight == 0.1453009`，chart symbols 仅一个代表代码，228 个组内交易标记全部可见；多逻辑组由单测覆盖。
+- 影响/注意：A 方案不消除执行层重复的 OHLCV 快照，只改变逻辑展示与统计聚合；旧策略代码中的 `weight_groups` 不再作为新分组来源；配置错误直接失败；原始 TA run 未覆盖，验证使用独立副本。
+- 关联：计划 P-20260819-logical_symbol_groups；HowToUse 8.43/8.45；run `ta_turtle_4h_v437fix_logical_groups_2014_2023`；commit 未提交。

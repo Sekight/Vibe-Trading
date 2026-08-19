@@ -14,7 +14,13 @@
 
 - 计划文档 `关联迭代` 填 V 号；ITERATION_LOG `关联` 填计划编号 P-...
 
-## 当前计划
+## 优化系列索引
+
+| 系列 | 完整迭代链 | 当前 | 下一方向 |
+|---|---|---|---|
+| 逻辑标的 / 金字塔加仓 | P-20260818-single_weight_group → P-20260819-logical_symbol_groups（A） → B-native-pyramid-legs | A | B |
+
+## 计划索引
 
 | 编号 | 状态 | 日期 | 标题 | 文件 | 关联迭代 |
 |---|---|---|---|---|---|
@@ -36,4 +42,5 @@
 | P-20260818-backtest_2h_interval | 已废弃 | 2026-08-18 | 回测引擎支持 2H（两小时）周期（独立计划已并入交易时间聚合议题） | P-20260818-backtest_2h_interval.md | 待填 |
 | P-20260818-trading_time_aggregation | 讨论中 | 2026-08-18 | 回测与前端支持按交易时间聚合（同花顺式，可选开关，默认自然时间兼容） | P-20260818-trading_time_aggregation.md | 待填 |
 | P-20260819-chart_4h_interval | 已完成 | 2026-08-19 | 报告页行情 K 线增加 4H 周期（与 1D 同级） | P-20260819-chart_4h_interval.md | V037 |
+| P-20260819-logical_symbol_groups | 已完成 | 2026-08-19 | A方案：config 驱动逻辑标的分组，兼容伪单位加仓与多标的图表 | P-20260819-logical_symbol_groups.md | V038 |
 
