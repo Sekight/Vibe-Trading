@@ -659,7 +659,7 @@
     "positionsCloseNote": "終値ベース",
     "positionsSingleTitle": "単一銘柄の日次ポジション",
     "positionsSinglePeak": "ピーク",
-    "positionsLegendNote": "グロス＝全ポジションの絶対値合計（資金占用）｜ネット＝相殺後のネットエクスポージャー（負もあり、方向のみ）｜片側＝同一銘柄内の対鎖で大きい側の証拠金占用（常に同方向なら三者一致）"
+    "positionsLegendNote": "<strong>グロス</strong>＝全ポジションの絶対値合計（資金占用）｜<strong>ネット</strong>＝相殺後のネットエクスポージャー（負もあり、方向のみ）｜<strong>片側</strong>＝同一銘柄内の対鎖で大きい側の証拠金占用（常に同方向なら三者一致）"
   },
   "compare": {
     "title": "戦略比較",

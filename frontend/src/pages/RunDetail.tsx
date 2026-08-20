@@ -1,7 +1,7 @@
 import i18n from '@/i18n';
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ReactNode } from "react";
-import { useTranslation } from "react-i18next";
+import { Trans, useTranslation } from "react-i18next";
 import { useParams, useNavigate } from "react-router";
 import {
   AlertTriangle,
@@ -1149,7 +1149,10 @@ function PositionsRiskTab({ runId }: { runId: string }) {
   return (
     <div className="space-y-4 p-4">
       <p className="text-xs text-muted-foreground">
-        {i18n.t("runDetail.positionsLegendNote" as any)}
+        <Trans
+          i18nKey="runDetail.positionsLegendNote"
+          components={{ strong: <strong /> }}
+        />
       </p>
       <div className="grid gap-4 lg:grid-cols-2">
         <DailyPositionChart points={position} />

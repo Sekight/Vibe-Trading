@@ -9,6 +9,8 @@ const apiMock = vi.hoisted(() => ({
   getRunCode: vi.fn(),
   getRunAnalysis: vi.fn(),
   getRunAnalysisCharts: vi.fn(),
+  getRunPositionGroups: vi.fn(),
+  getRunPositionGroupSeries: vi.fn(),
   fetchRunAnalysisPng: vi.fn(),
 }));
 
@@ -26,6 +28,7 @@ vi.mock("@/lib/echarts", () => ({
       resize: vi.fn(),
       dispose: vi.fn(),
     })),
+    getInstanceByDom: vi.fn(() => undefined),
   },
 }));
 
@@ -52,6 +55,8 @@ describe("RunDetail page", () => {
     apiMock.getRunCode.mockReset();
     apiMock.getRunAnalysis.mockReset();
     apiMock.getRunAnalysisCharts.mockReset();
+    apiMock.getRunPositionGroups.mockReset();
+    apiMock.getRunPositionGroupSeries.mockReset();
     apiMock.fetchRunAnalysisPng.mockReset();
   });
 
@@ -292,6 +297,31 @@ describe("RunDetail page", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Analysis Charts" }));
 
     expect(await screen.findByText(/MAE\/MFE not computed/)).toBeInTheDocument();
+  });
+
+  it("renders the position-risk legend terms in bold", async () => {
+    apiMock.getRun.mockResolvedValue({
+      status: "success", run_id: "positions", prompt: "Positions run",
+    });
+    apiMock.getRunCode.mockResolvedValue({});
+    apiMock.getRunAnalysisCharts.mockResolvedValue({
+      run_id: "positions",
+      available: true,
+      charts: {
+        daily_position: [{ date: "2024-01-05", gross_pct: 10, net_pct: 6, single_pct: 10 }],
+        daily_risk: [{ date: "2024-01-05", risk_pct: 10 }],
+      },
+      pngs: [],
+    });
+    apiMock.getRunPositionGroups.mockResolvedValue({ run_id: "positions", groups: [] });
+
+    renderRunDetail("/runs/positions");
+    await screen.findByText("Positions run");
+    fireEvent.click(screen.getByRole("tab", { name: "Positions & Risk" }));
+
+    expect((await screen.findByText("Gross")).tagName).toBe("STRONG");
+    expect(screen.getByText("Net").tagName).toBe("STRONG");
+    expect(screen.getByText("Single-sided").tagName).toBe("STRONG");
   });
 
   it("renders the analysis report tab with markdown and status", async () => {

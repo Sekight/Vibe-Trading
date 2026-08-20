@@ -664,7 +664,7 @@
     "positionsCloseNote": "close-of-day",
     "positionsSingleTitle": "Single-Symbol Daily Position",
     "positionsSinglePeak": "peak",
-    "positionsLegendNote": "Gross = total position volume (all long & short) ｜ Net = net exposure after offset (may be negative, direction only) ｜ Single-sided = real margin usage (bigger side of a lock within one instrument; equal to gross when always same-direction)"
+    "positionsLegendNote": "<strong>Gross</strong> = total position volume (all long & short) ｜ <strong>Net</strong> = net exposure after offset (may be negative, direction only) ｜ <strong>Single-sided</strong> = real margin usage (bigger side of a lock within one instrument; equal to gross when always same-direction)"
   },
   "compare": {
     "title": "Strategy Comparison",
