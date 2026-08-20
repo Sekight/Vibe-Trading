@@ -633,6 +633,8 @@
     "heatmapWeek": "أسبوع",
     "heatmapMonth": "شهر",
     "showMore": "عرض {{count}} أخرى",
+    "loadAllTrades": "تحميل جميع التداولات",
+    "tradesAllLoaded": "تم تحميل جميع التداولات ({{count}})",
     "allSymbols": "كل الرموز",
     "sideAll": "الكل",
     "sideBuy": "شراء",

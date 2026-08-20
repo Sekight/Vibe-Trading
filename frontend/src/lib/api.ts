@@ -596,6 +596,7 @@ export interface RunData {
   trade_markers?: TradeMarker[];
   equity_curve?: EquityPoint[];
   trade_log?: Array<Record<string, string>>;
+  artifacts_trades_csv?: Array<Record<string, string>>;
   run_logs?: Array<{ source?: string; line_number?: number; message?: string }>;
 }
 

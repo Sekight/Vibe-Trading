@@ -633,6 +633,8 @@
     "heatmapWeek": "周",
     "heatmapMonth": "月",
     "showMore": "再显示 {{count}} 条",
+    "loadAllTrades": "加载全部交易",
+    "tradesAllLoaded": "已加载全部 {{count}} 笔",
     "allSymbols": "全部标的",
     "sideAll": "全部",
     "sideBuy": "买入",

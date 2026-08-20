@@ -633,6 +633,8 @@
     "heatmapWeek": "週",
     "heatmapMonth": "月",
     "showMore": "さらに {{count}} 件表示",
+    "loadAllTrades": "すべての取引を読み込む",
+    "tradesAllLoaded": "全 {{count}} 件を読み込み済み",
     "allSymbols": "すべての銘柄",
     "sideAll": "すべて",
     "sideBuy": "買い",

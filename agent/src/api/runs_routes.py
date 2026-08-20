@@ -14,6 +14,8 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.responses import FileResponse, JSONResponse
 
+MAX_RUN_LIST_LIMIT = 300
+
 
 # ---------------------------------------------------------------------------
 # Helper functions (module-level; host Pydantic models resolved via sys.modules)
@@ -440,7 +442,7 @@ def register_runs_routes(
         """List recent runs with summary fields."""
         from src.ui_services import load_run_context
 
-        limit = min(max(1, limit), 100)
+        limit = min(max(1, limit), MAX_RUN_LIST_LIMIT)
         runs_dir = _host_RUNS_DIR()
 
         if not runs_dir.exists():
@@ -448,7 +450,7 @@ def register_runs_routes(
 
         run_dirs = sorted(
             [d for d in runs_dir.iterdir() if d.is_dir()],
-            key=lambda x: x.name,
+            key=lambda x: x.stat().st_mtime,
             reverse=True
         )
 

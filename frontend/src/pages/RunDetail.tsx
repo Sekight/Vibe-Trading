@@ -134,6 +134,7 @@ export function RunDetail() {
   const [chartLoadingSymbols, setChartLoadingSymbols] = useState<Record<string, boolean>>({});
   const [bulkChartLoading, setBulkChartLoading] = useState(false);
   const [bulkChartProgress, setBulkChartProgress] = useState<ChartLoadProgress>({ done: 0, total: 0 });
+  const [tradesAllLoaded, setTradesAllLoaded] = useState(false);
   const chartCacheRef = useRef<ChartCache>({});
   const cancelBulkChartLoadRef = useRef(false);
   const runGenerationRef = useRef(0);
@@ -168,6 +169,7 @@ export function RunDetail() {
     setChartLoadingSymbols({});
     setBulkChartLoading(false);
     setBulkChartProgress({ done: 0, total: 0 });
+    setTradesAllLoaded(false);
 
     if (!runId) {
       setLoading(false);
@@ -228,6 +230,9 @@ export function RunDetail() {
 
   const ok = run.status === "success";
   const cancelled = run.status === "cancelled";
+  const activeTrades = tradesAllLoaded && run.artifacts_trades_csv?.length
+    ? run.artifacts_trades_csv
+    : (run.trade_log || []);
 
   async function loadChartSymbol(
     symbol: string,
@@ -250,6 +255,9 @@ export function RunDetail() {
         chart_groups: nextRun.chart_groups?.length ? nextRun.chart_groups : prev.chart_groups,
         equity_curve: nextRun.equity_curve?.length ? nextRun.equity_curve : prev.equity_curve,
         trade_log: nextRun.trade_log?.length ? nextRun.trade_log : prev.trade_log,
+        artifacts_trades_csv: nextRun.artifacts_trades_csv?.length
+          ? nextRun.artifacts_trades_csv
+          : prev.artifacts_trades_csv,
       } : nextRun);
     } finally {
       if (runGenerationRef.current === generation) {
@@ -370,9 +378,9 @@ export function RunDetail() {
           </div>
 
           <div className="ml-auto flex flex-wrap gap-1">
-            {run.trade_log && run.trade_log.length > 0 && (
+            {activeTrades.length > 0 && (
               <button
-                onClick={() => downloadCsv(`trades_${runId}.csv`, buildTradesCsv(run.trade_log!))}
+                onClick={() => downloadCsv(`trades_${runId}.csv`, buildTradesCsv(activeTrades))}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs text-muted-foreground hover:bg-muted/60 transition-colors"
                 title={i18n.t("runDetail.downloadTradesCsv")}
               >
@@ -418,7 +426,13 @@ export function RunDetail() {
           {tab === "analysisCharts" && runId && <AnalysisChartsTab runId={runId} />}
           {tab === "positions" && runId && <PositionsRiskTab runId={runId} />}
           {tab === "analysis" && runId && <AnalysisTab runId={runId} />}
-          {tab === "trades" && <TradesTab run={run} />}
+          {tab === "trades" && (
+            <TradesTab
+              run={run}
+              allLoaded={tradesAllLoaded}
+              onLoadAll={() => setTradesAllLoaded(true)}
+            />
+          )}
           {tab === "validation" && run.validation && <ValidationPanel data={run.validation} />}
           {tab === "runCard" && run.run_card && <RunCardTab card={run.run_card} />}
           {tab === "code" && <CodeTab code={code} />}
@@ -739,6 +753,41 @@ function ChartTab({
 }
 
 const TRADES_PAGE_SIZE = 100;
+const TRADE_ROW_HEIGHT = 40;
+const TRADE_VIEWPORT_HEIGHT = 560;
+const TRADE_OVERSCAN = 10;
+
+type TradeSymbolGroup = {
+  id: string;
+  label: string;
+  codes: Set<string>;
+};
+
+function normalizeTradeCode(code?: string): string {
+  const value = String(code || "").trim();
+  return value.toLowerCase().startsWith("local:") ? value.slice(6).trim() : value;
+}
+
+function buildTradeSymbolGroups(
+  run: RunData,
+  trades: Array<Record<string, string>>,
+): TradeSymbolGroup[] {
+  const configured = (run.chart_groups || []).map((group) => ({
+    id: group.logical_symbol,
+    label: group.display_name || group.logical_symbol,
+    codes: new Set(group.codes.map(normalizeTradeCode).filter(Boolean)),
+  }));
+  if (configured.length === 0) {
+    return [...new Set(trades.map((trade) => normalizeTradeCode(trade.code)).filter(Boolean))]
+      .map((code) => ({ id: code, label: code, codes: new Set([code]) }));
+  }
+
+  const groupedCodes = new Set(configured.flatMap((group) => [...group.codes]));
+  const ungrouped = [...new Set(trades.map((trade) => normalizeTradeCode(trade.code)).filter(Boolean))]
+    .filter((code) => !groupedCodes.has(code))
+    .map((code) => ({ id: code, label: code, codes: new Set([code]) }));
+  return [...configured, ...ungrouped];
+}
 
 
 function parseTradeNumber(value?: string): number | null {
@@ -788,15 +837,39 @@ function formatSigned(value: number, suffix = ""): string {
   return `${value > 0 ? "+" : ""}${value.toFixed(2)}${suffix}`;
 }
 
-function TradesTab({ run }: { run: RunData }) {
-  const trades = run.trade_log || [];
+function TradesTab({
+  run,
+  allLoaded,
+  onLoadAll,
+}: {
+  run: RunData;
+  allLoaded: boolean;
+  onLoadAll: () => void;
+}) {
+  const previewTrades = run.trade_log || [];
+  const allTrades = run.artifacts_trades_csv || [];
+  const trades = allLoaded && allTrades.length > 0 ? allTrades : previewTrades;
   const [sideFilter, setSideFilter] = useState<"" | TradeKind>("");
   const [symbolFilter, setSymbolFilter] = useState("");
   const [visibleCount, setVisibleCount] = useState(TRADES_PAGE_SIZE);
+  const [scrollTop, setScrollTop] = useState(0);
+  const tableViewportRef = useRef<HTMLDivElement>(null);
+  const hasFullTrades = allTrades.length > previewTrades.length;
+
+  useEffect(() => {
+    setScrollTop(0);
+    const viewport = tableViewportRef.current;
+    if (viewport) {
+      if (typeof viewport.scrollTo === "function") viewport.scrollTo({ top: 0 });
+      else viewport.scrollTop = 0;
+    }
+  }, [allLoaded, sideFilter, symbolFilter]);
+
   if (trades.length === 0) return <div className="p-8 text-muted-foreground text-sm">{i18n.t("runDetail.noTrades")}</div>;
 
   const kindOf = (tr: Record<string, string>): TradeKind | null => tradeActionInfo(tr)?.kind ?? null;
-  const symbols = [...new Set(trades.map((tr) => tr.code).filter(Boolean))];
+  const symbolGroups = buildTradeSymbolGroups(run, trades);
+  const selectedGroup = symbolGroups.find((group) => group.id === symbolFilter);
   const hasPnl = trades.some((tr) => parseTradeNumber(tr.pnl) != null);
   const hasCommission = trades.some((tr) => (tr.commission ?? "") !== "");
   const hasReturnPct = trades.some((tr) => parseTradeNumber(tr.return_pct) != null);
@@ -809,7 +882,7 @@ function TradesTab({ run }: { run: RunData }) {
 
   const filtered = trades.filter((tr) => (
     (!sideFilter || kindOf(tr) === sideFilter)
-    && (!symbolFilter || tr.code === symbolFilter)
+    && (!selectedGroup || selectedGroup.codes.has(normalizeTradeCode(tr.code)))
   ));
   const longOpen = filtered.filter((tr) => kindOf(tr) === "long_open").length;
   const shortOpen = filtered.filter((tr) => kindOf(tr) === "short_open").length;
@@ -818,8 +891,19 @@ function TradesTab({ run }: { run: RunData }) {
   const totalPnl = hasPnl
     ? filtered.reduce((sum, tr) => sum + (parseTradeNumber(tr.pnl) ?? 0), 0)
     : null;
-  const visible = filtered.slice(0, visibleCount);
-  const remaining = filtered.length - visible.length;
+  const isVirtualized = allLoaded && filtered.length > 0;
+  const virtualStart = isVirtualized
+    ? Math.max(0, Math.floor(scrollTop / TRADE_ROW_HEIGHT) - TRADE_OVERSCAN)
+    : 0;
+  const virtualEnd = isVirtualized
+    ? Math.min(filtered.length, Math.ceil((scrollTop + TRADE_VIEWPORT_HEIGHT) / TRADE_ROW_HEIGHT) + TRADE_OVERSCAN)
+    : filtered.length;
+  const visible = isVirtualized
+    ? filtered.slice(virtualStart, virtualEnd)
+    : filtered.slice(0, visibleCount);
+  const remaining = isVirtualized ? 0 : filtered.length - visible.length;
+  const columnCount = 6 + [hasLots, hasWeight, hasPnl, hasReturnPct, hasCommission, hasHoldingDays, hasHoldingBars]
+    .filter(Boolean).length;
 
   const sideChips: { id: "" | TradeKind; label: string }[] = [
     { id: "", label: i18n.t("runDetail.sideAll") },
@@ -842,8 +926,25 @@ function TradesTab({ run }: { run: RunData }) {
             </span>
           </span>
         )}
-        <div className="ms-auto flex flex-wrap items-center gap-1.5">
-          <div className="flex gap-1" role="group">
+        {hasFullTrades && (
+          <button
+            type="button"
+            disabled={allLoaded}
+            onClick={onLoadAll}
+            className={cn(
+              "inline-flex max-w-[14rem] min-w-0 items-center justify-center rounded-full border px-2.5 py-1 text-center leading-4 whitespace-normal break-words transition-colors",
+              allLoaded
+                ? "cursor-default border-border/60 text-muted-foreground opacity-70"
+                : "border-border/60 text-muted-foreground hover:bg-muted/60 hover:text-foreground",
+            )}
+          >
+            {allLoaded
+              ? i18n.t("runDetail.tradesAllLoaded", { count: allTrades.length })
+              : i18n.t("runDetail.loadAllTrades")}
+          </button>
+        )}
+        <div className="ms-auto flex min-w-0 max-w-full flex-wrap items-center gap-1.5">
+          <div className="flex min-w-0 max-w-full flex-wrap gap-1" role="group">
             {sideChips.map((chip) => (
               <button
                 key={chip.id || "all"}
@@ -860,23 +961,30 @@ function TradesTab({ run }: { run: RunData }) {
               </button>
             ))}
           </div>
-          {symbols.length > 1 && (
+          {symbolGroups.length > 1 && (
             <select
               value={symbolFilter}
               onChange={(event) => { setSymbolFilter(event.target.value); setVisibleCount(TRADES_PAGE_SIZE); }}
-              className="h-7 rounded-md border border-border/60 bg-background px-2 text-xs"
+              className="h-7 max-w-full rounded-md border border-border/60 bg-background px-2 text-xs"
               aria-label={i18n.t("runDetail.symbol")}
             >
               <option value="">{i18n.t("runDetail.allSymbols")}</option>
-              {symbols.map((symbol) => (
-                <option key={symbol} value={symbol}>{symbol}</option>
+              {symbolGroups.map((group) => (
+                <option key={group.id} value={group.id}>{group.label}</option>
               ))}
             </select>
           )}
         </div>
       </div>
 
-      <div className="overflow-x-auto rounded-xl border border-border/60 bg-card shadow-sm">
+      <div
+        ref={isVirtualized ? tableViewportRef : undefined}
+        onScroll={isVirtualized ? (event) => setScrollTop(event.currentTarget.scrollTop) : undefined}
+        className={cn(
+          "rounded-xl border border-border/60 bg-card shadow-sm",
+          isVirtualized ? "max-h-[35rem] overflow-auto" : "overflow-x-auto",
+        )}
+      >
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b bg-muted/40 text-left text-[11px] uppercase tracking-wide text-muted-foreground [&_th]:font-medium">
@@ -896,14 +1004,24 @@ function TradesTab({ run }: { run: RunData }) {
             </tr>
           </thead>
           <tbody>
-            {visible.map((tr, i) => {
+            {isVirtualized && virtualStart > 0 && (
+              <tr aria-hidden="true">
+                <td colSpan={columnCount} style={{ height: virtualStart * TRADE_ROW_HEIGHT }} />
+              </tr>
+            )}
+            {visible.map((tr, offset) => {
+              const i = isVirtualized ? virtualStart + offset : offset;
               const kind = kindOf(tr);
               const pnl = parseTradeNumber(tr.pnl);
               const returnPct = parseTradeNumber(tr.return_pct);
               const price = parseTradeNumber(tr.price);
               const qty = parseTradeNumber(tr.qty);
               return (
-                <tr key={i} className={cn("border-b last:border-0 hover:bg-muted/40", i % 2 === 1 && "bg-muted/10")}>
+                <tr
+                  key={i}
+                  style={isVirtualized ? { height: TRADE_ROW_HEIGHT } : undefined}
+                  className={cn("border-b last:border-0 hover:bg-muted/40", i % 2 === 1 && "bg-muted/10")}
+                >
                   <td className="py-2 ps-4 pr-4 font-mono text-xs">{tr.time || tr.timestamp}</td>
                   <td className="py-2 pr-4 font-mono text-xs">{tr.code}</td>
                   <td className="py-2 pr-4">
@@ -962,6 +1080,11 @@ function TradesTab({ run }: { run: RunData }) {
                 </tr>
               );
             })}
+            {isVirtualized && virtualEnd < filtered.length && (
+              <tr aria-hidden="true">
+                <td colSpan={columnCount} style={{ height: (filtered.length - virtualEnd) * TRADE_ROW_HEIGHT }} />
+              </tr>
+            )}
           </tbody>
         </table>
       </div>

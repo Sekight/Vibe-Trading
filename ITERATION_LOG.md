@@ -468,3 +468,27 @@
 - 验证：后端定向回归 `131 passed, 1 skipped`；前端 CandlestickChart/RunDetail 定向测试 `17 passed`；`npm run build` 通过；TA 副本 `ta_turtle_4h_v437fix_logical_groups_2014_2023` 官方 runner `--fastrun` 通过，114 笔交易、收益 47.704%，`max_single_weight == max_portfolio_weight == 0.1453009`，chart symbols 仅一个代表代码，228 个组内交易标记全部可见；多逻辑组由单测覆盖。
 - 影响/注意：A 方案不消除执行层重复的 OHLCV 快照，只改变逻辑展示与统计聚合；旧策略代码中的 `weight_groups` 不再作为新分组来源；配置错误直接失败；原始 TA run 未覆盖，验证使用独立副本。
 - 关联：计划 P-20260819-logical_symbol_groups；HowToUse 8.43/8.45；run `ta_turtle_4h_v437fix_logical_groups_2014_2023`；commit 未提交。
+
+### V039 · WebUI 交易 Tab 一键加载全量与逻辑标的筛选（2026-08-20）
+- 一句话总结：交易 Tab 支持在已有全量响应上切换“加载全部”，分类/统计/下载统一使用全量源；按钮点击后保留并置灰；交易标的复用 config 驱动逻辑组，TA 伪单位合并展示；全量表格采用窗口化渲染。
+- 为什么：后端已经在首次 `/runs/{id}` 响应中提供 `artifacts_trades_csv`，前端此前只读 `trade_log` 预览；交易分类、raw code 标的筛选和 tab 卸载又会造成全量状态丢失或 TA0001~TA0004 被拆成多个标的。用户接受刷新/切 run 时重新等待，但要求同一 run 切 tab 不重新等待。
+- 关键细节：`RunData` 暴露 `artifacts_trades_csv`；`RunDetail` 提升 `tradesAllLoaded` 到 run 级并在 runId 变化时重置，图表标的二次响应合并时保留全量交易和 `chart_groups`；`TradesTab` 的五类方向筛选、逻辑标的筛选、计数和总盈亏都基于活动数据源，表格行仍保留真实执行 code；按钮成功后显示“已加载全部 N 笔”并 disabled；全量模式用固定行高、overscan 和滚动窗口只渲染视口附近行，避免 1 万行 DOM。
+- 验证：`RunDetail.test.tsx` 13 passed（含全量按钮状态、五类/逻辑组统计、切 tab、切图表标的持久性和窗口化行数）；前端全量 `55` 个测试文件、`458` 项通过；`npm run build` 通过（仅既有 chunk size warning）；`pytest agent/tests/test_logical_groups.py -q` 7 passed；真实样本交易 payload 1,242/3,418/3,506 行约 422KB/959KB/970KB，5,000/10,000 行 JSON 处理毫秒级、直接 DOM 约 0.6/1.4s 的量级基准已记录。
+- 影响/注意：首次响应仍传输全量交易，刷新页面或切换 run 会重新等待；同一 run 切换 tab/图表标的复用父层状态，不重新请求交易。若未来要真正减少首次网络 payload，另建后端分页/按需加载计划；当前 M033 已修复，M034 由窗口化渲染部分缓解。
+- 关联：计划 P-20260817-trade_log_full_load；P-20260819-logical_symbol_groups；Mistake_Journal M033/M034；当前改动尚未提交。
+
+### V040 · 交易 Tab 全量按钮布局与默认样式调整（2026-08-20）
+- 一句话总结：将“加载全部交易”按钮从右侧分类按钮组移到左侧统计行“总盈亏”之后，默认使用中性可点击样式，长文案允许换行。
+- 为什么：按钮与“全部/多开/空开/多平/空平”并排会挤压统计文字，默认橙色又容易被误解为已经选中；用户要求按钮位置和视觉语义明确分离。
+- 关键细节：统计行保持 `flex-wrap`；按钮增加最大宽度、换行和 `break-words`，右侧分类/标的控件也允许收缩换行；默认态改为边框+灰字，只有分类按钮保留选中态颜色，已加载态继续置灰禁用。
+- 验证：RunDetail 定向测试 13 passed（新增按钮不在 `.ms-auto` 分类组、默认不含选中态颜色、具备换行约束断言）；前端全量 55 个测试文件、458 项通过；`npm run build` 通过（仅既有 chunk size warning）。
+- 影响/注意：只调整交易 Tab 的展示布局和按钮状态样式，不改变全量数据、筛选统计、逻辑标的和持久化语义。
+- 关联：计划 P-20260817-trade_log_full_load；V039 后续微调；当前改动尚未提交。
+
+### V041 · Reports 列表扩大到前 300 个并按真实时间排序（2026-08-20）
+- 一句话总结：WebUI 报告列表扫描上限从 100 提升到 300，后端同步放宽 limit 上限，并按 run 目录最后修改时间倒序，避免自定义命名的最新 run 被目录名字典序截掉。
+- 为什么：报告页原先按目录名倒序只取前 100 个；当前 161 个 run 中，`china_future_...` 最新 run 按 mtime 排名第 1、按目录名却排到第 109，因此 WebUI 看不到。
+- 关键细节：前端 `REPORT_SCAN_LIMIT=300`；后端 `MAX_RUN_LIST_LIMIT=300`；`list_runs` 用 `d.stat().st_mtime` 排序后再截取，仍保持列表规模上限和旧的报告指标过滤逻辑。
+- 验证：后端 `test_analysis_api.py` 10 passed（含自定义 run 名按 mtime 排序）；前端 Reports 定向 2 passed；前端全量 55 个测试文件、458 项通过；`npm run build` 通过（仅既有 chunk size warning）。
+- 影响/注意：当前 161 个 run 实测扫描前 100 约 32ms、全量约 53ms；扩大到 300 在当前规模下可接受。未来 run 数继续增长时仍受 300 上限保护。
+- 关联：Reports 前端/`runs_routes.py`；无新计划文档；当前改动尚未提交。

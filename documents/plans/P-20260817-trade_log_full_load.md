@@ -1,70 +1,127 @@
 # 计划：WebUI 交易明细"一键加载全部"按钮
 
 > 编号：P-20260817-trade_log_full_load
-> 状态：讨论中
+> 状态：已完成
 > 日期：2026-08-17
-> 关联迭代：待填（收尾时填 V 号）
+> 关联迭代：V039 / V040
 > 关联：ta_turtle_15m_v1_2021_2023（发现场景 run）
+> 关联计划：P-20260819-logical_symbol_groups（交易标的筛选复用逻辑分组）
 
 ## 项目调研
 
-- 后端 `agent/src/api/runs_routes.py:183/206`：trades.csv 全量载入 `response.artifacts_trades_csv`（`models.py:78` "Full trade rows"），再 `trade_log = artifacts_trades_csv[:500]` 截断为预览；响应模型 `RunResponse` 两个字段都序列化（无 exclude）——**全量交易数据已随每次 `/runs/{id}` 响应下发**，`:500` 截断只影响 `trade_log` 字段。
-- 前端 `RunDetail.tsx:786` TradesTab 只读 `run.trade_log`；多开/空开/多平/空平/总盈亏统计均由 `trades` 推导，**换数据源即自动刷新**；表格按 `TRADES_PAGE_SIZE` 分页渲染，不会一次性渲染全部 DOM。
-- 前端 `lib/api.ts:587` RunData 类型只有 `trade_log`，未暴露 `artifacts_trades_csv`（JSON 里有但没类型，前端用不了）。
-- 下载交易 CSV 按钮（`RunDetail.tsx:372`）也用 `run.trade_log`（截断 500 行）——加载全部后应同步用全量源。
-- 图表 symbol 刷新合并（`RunDetail.tsx:249`）只保留 trade_log，需同步保留 artifacts_trades_csv（防切换 symbol 后丢全量）。
+- 后端 `agent/src/api/runs_routes.py`：`trades.csv` 全量载入 `response.artifacts_trades_csv`（`agent/src/api/models.py` 的 “Full trade rows”），再以 `artifacts_trades_csv[:500]` 生成 `trade_log` 预览；`RunResponse` 两个字段都会序列化——**全量交易数据已经随 `/runs/{id}` 响应下发**，后端 `:500` 只截断预览字段。
+- 前端 `RunDetail.tsx:741/791` 的 `TRADES_PAGE_SIZE = 100` 只控制表格首屏/“显示更多”的可见行数；当前 `TradesTab` 的统计来自 `filtered`，但 `filtered` 的源仍是 `run.trade_log` 预览。计划必须明确：统计不能使用 `visible`（否则会把前 100 行误当成全量），点击一键加载后必须切换到 `artifacts_trades_csv` 再重新计算。
+- 当前 `TradesTab` 只读 `run.trade_log`，未使用后端已经下发的 `artifacts_trades_csv`；`frontend/src/lib/api.ts` 的 `RunData` 也尚未暴露该字段。
+- 当前 `sideFilter`、`symbolFilter`、`visibleCount` 都在 `TradesTab` 内部，而 `RunDetail` 只在 `tab === "trades"` 时挂载它；如果把“已加载全部”也放在 `TradesTab`，切换 tab 会卸载组件并丢失状态，必须提升到 `RunDetail` 的 run 级状态。
+- 下载交易 CSV 按钮（`RunDetail.tsx`）也使用 `run.trade_log`；加载全部后必须切换到当前全量数据源，并明确下载的是未按 UI 筛选裁剪的活动交易集。
+- 图表 symbol 刷新合并（`RunDetail.tsx` 的 `loadChartSymbol`）目前只保留 `trade_log`，需要同步保留 `artifacts_trades_csv` 和 `chart_groups`，否则切换行情标的后全量数据可能被空响应覆盖或回落为预览。
+- V038（`P-20260819-logical_symbol_groups`）已经让 `RunData.chart_groups` 成为 config `logical_groups` 的前端展示元数据，`codes` 已按逻辑组提供。交易 Tab 目前仍从交易行 `code` 直接去重生成标的选项，因此 `TA0001/TA0002/TA0003/TA0004` 会被拆成多个标的；本计划必须复用 `chart_groups` 做交易筛选，缺少分组的旧 run 才回退为单 code。
+
+## 性能调研（2026-08-20）
+
+- 代码事实：当前 `/runs/{id}` 首次 summary 响应并不是只读取 500 笔。后端先把完整 `trades.csv` 读入 `artifacts_trades_csv`，再复制前 500 笔为 `trade_log`；因此“默认 500”目前只是前端可用的预览数据边界，不是传输/解析边界。
+- 真实本机样本（只测交易字段，不含 run card、equity、HTTP 网络和 React 渲染）：
+
+  | 交易行数 | CSV 大小 | `artifacts_trades_csv` + `trade_log` JSON 大小 | CSV 读/JSON 序列化/JSON 解析中位数 |
+  |---:|---:|---:|---:|
+  | 1,242 | 96KB | 约 422KB | 约 3 / 3 / 3ms |
+  | 3,418 | 273KB | 约 959KB | 约 8 / 7 / 6ms |
+  | 3,506 | 271KB | 约 970KB | 约 8 / 7 / 6ms |
+
+- 前端合成 5,000 / 10,000 行的 Node + jsdom 基准：JSON 复制约 8 / 15ms，筛选与计数约 1 / 2ms；一次创建 5,000 / 10,000 行表格 DOM 约 0.6 / 1.4s。jsdom 不是生产浏览器，React 完整列、样式和低配机器会有更大波动，这个数字只用于量级判断。
+- 结论（a）：第一次进入即使界面默认只展示 500 笔预览，当前后端仍会读取并传输全部 4,000~10,000 笔。按现有行宽估算，5,000 笔交易字段 JSON 约 1.2~1.5MB，10,000 笔约 2.4~3MB；本机 loopback 通常是亚秒到数秒量级，远程/低带宽环境可能明显变慢。CSV/JSON CPU 本身不是主要瓶颈，网络传输、浏览器解析和后续组件初始化才是风险。
+- 结论（b）：在当前协议下点击“加载全部”不需要再次请求或读取 CSV，主要成本是切换活动数据源、重新筛选统计和渲染表格；前两项是毫秒级，直接把 5,000~10,000 行全部挂进 DOM 可能进入秒级并增加内存/交互卡顿。因此“全量”应表示全量数据可筛选、统计和连续滚动访问，不能再有 100 行数据截断；表格实现应采用虚拟列表/窗口化渲染，不能用一次性大 DOM 或继续依赖手动“显示更多”。
+
+## 多标的兼容性评估（2026-08-20）
+
+- 现有 V038 的 `logical_groups` 是数组，`parse_logical_groups` 已支持多个逻辑组、未分组 code 的 singleton fallback、成员唯一归属和 `chart_code` 代表行情；现有 `agent/tests/test_logical_groups.py` 7/7 通过。因此 T、A、RB、F、G 各自配置为独立逻辑组在架构上可以兼容，组间不会因为同一份交易表而自动合并。
+- 交易 Tab 的实现边界：筛选器使用唯一的 `logical_symbol` 作为内部 ID、`display_name` 作为显示文本；选中一个逻辑组时匹配该组全部 member codes，分类计数和盈亏合并，表格行仍保留实际执行 code；“全部标的”才合并所有逻辑组。
+- 需要防范的坑：
+  1. `chart_code` 只代表 K 线，不能拿它替代逻辑组成员集合，否则 TA0002~TA0004 等交易会被漏掉；
+  2. 配置和交易行可能一边带 `local:` 一边不带，比较前必须归一化；
+  3. 同一 execution code 多组归属、重复 `logical_symbol` 继续由后端 fail closed；未声明分组的旧 run 只能安全回退 singleton；
+  4. 切换任意行情标的的二次响应不得覆盖全量交易或 `chart_groups`，否则多标的选择器会退化为 raw code；
+  5. 多标的下分类统计要先按逻辑标的筛选、再按交易方向分类，不能把不同标的的同名显示文本当作分组键。
+- 结论：后端和图表/持仓风险层已有多标的基础；本计划的新增风险集中在交易 Tab 的逻辑组映射、全量状态和响应合并，必须用至少 5 个逻辑组的合成数据做前端回归，而不能只用单个 TA 四伪单位 run。
 
 ## 需求目标
 
-- 做什么：WebUI 报告-交易页加"加载全部交易明细"按钮，点击后交易表显示全量交易，笔数与盈亏统计随之刷新；**默认进入仍显示截断前 500 行（原逻辑不变）**。
-- 范围 / 边界：只改前端展示层（RunDetail TradesTab + RunData 类型 + i18n + 测试）；**后端零改动**（全量数据已在响应中）。
-- 验收标准（一句话）：点击按钮后交易表笔数、多开/空开/多平/空平、总盈亏与 trades.csv 全量一致；默认进入仍为前 500 行。
+- 做什么：WebUI 报告-交易页增加“加载全部交易明细”按钮。默认仍使用后端预览数据，表格首屏保持 100 行；点击后切换到 `artifacts_trades_csv` 全量数据，`全部`、`多开`、`空开`、`多平`、`空平` 五种分类都显示该筛选条件下的全量交易，笔数与总盈亏统计同步刷新。
+- 全量状态：一键加载是当前 run 的单向状态，不是 `TradesTab` 的临时局部状态；切换分类、交易标的、图表标的或报告 tab 都不能退回预览，切换到另一个 run 时才重置。
+- 按钮状态：点击后按钮不消失，保持可见并置灰/禁用，文案显示“已加载全部 N 笔”（或等价的多语言文案）；它只是状态提示，不提供第二次重复加载入口。
+- 标的语义：交易 Tab 的标的筛选必须使用 V038 已落地的 `chart_groups`/`logical_groups`。同一逻辑组内的执行 code（如 TA0001~TA0004）在筛选器中只显示一个逻辑标的并合并其交易、分类计数和盈亏统计；交易表行仍显示实际执行 code，便于审计。
+- 范围 / 边界：只改前端展示层（RunDetail、RunData 类型、i18n、测试）；**后端零改动**（全量交易和逻辑分组元数据已在响应中）。不改变 `trades.csv`、交易分类判定、交易行原始 code 或后端分页/传输协议。
+- 验收标准（一句话）：一键加载后，全部/五个分类/每个逻辑标的筛选均以 `trades.csv` 全量为源，表格、笔数、分类计数、总盈亏与下载内容一致；切换筛选、标的、图表标的和 tab 后仍保持全量；TA0001~TA0004 只作为一个逻辑标的出现。
 
 ## 实现方案
 
-1. `frontend/src/lib/api.ts`：RunData 增加 `artifacts_trades_csv?: Array<Record<string, string>>`。
+1. `frontend/src/lib/api.ts`：RunData 增加 `artifacts_trades_csv?: Array<Record<string, string>>`；保留 `trade_log` 作为预览字段。
 2. `frontend/src/pages/RunDetail.tsx`：
-   - TradesTab 增加 `showAll` 状态；数据源 `trades = showAll && run.artifacts_trades_csv?.length ? run.artifacts_trades_csv : (run.trade_log || [])`；
-   - 统计行旁加"加载全部交易明细"按钮：仅当 `run.artifacts_trades_csv?.length > (run.trade_log?.length ?? 0)` 且 `!showAll` 时显示（空值防护：老 run 无 `artifacts_trades_csv` 字段时不显示按钮）；加载后按钮隐藏/置灰，文案改为"已加载全部 N 笔"；
-   - **幂等性约定**：按钮为单向加载（非 toggle），点击后 `showAll=true` 且按钮消失，无第二次点击入口；数据已随响应在内存中，无网络请求，重复触发 `setShowAll(true)` 无副作用；统计由 `trades` 每次渲染重新推导，与点击次数无关；
-   - 下载交易 CSV 改用当前 `trades` 源（加载全部后下载全量）；
-   - 图表 symbol 合并处（约 :249）同步保留 `artifacts_trades_csv`——否则切换 symbol 后已加载的全量被合并逻辑覆盖，而按钮已隐藏无法再加载（视图静默回落 500）。
-3. `frontend/src/i18n/locales/{en,zh-CN,ja,ko,ar}.json`：补按钮与状态文案 key（如 `runDetail.loadAllTrades` / `runDetail.tradesAllLoaded`）。
-4. 测试：`frontend/src/pages/__tests__/RunDetail.test.tsx` 补用例。
+   - 在 `RunDetail` 持有 `tradesAllLoaded`（或等价的 run 级状态），在 `runId` 变化时重置；向 `TradesTab` 传入状态与单向加载回调，不能把它只放在会被 tab 卸载的 `TradesTab` 内。
+   - 活动源为 `tradesAllLoaded && artifacts_trades_csv 有数据 ? artifacts_trades_csv : trade_log`；按钮仅在全量行数大于预览行数且尚未加载时可点击，点击后保留在原位置并置灰/禁用，文案改为“已加载全部 N 笔”，不发网络请求且状态幂等。
+   - `filtered` 先按逻辑标的和多开/空开/多平/空平筛选；统计（总笔数、四类计数、总盈亏）始终基于完整 `filtered`，绝不能基于 `visible`。未加载时表格仍按 `TRADES_PAGE_SIZE=100` 首屏/“显示更多”；已加载全部后取消 100 行数据上限，使用虚拟列表/窗口化让当前筛选结果全部可连续访问，不能再留下“显示更多”造成全量假象，也不能一次性创建 1 万行 DOM。
+   - 分类按钮或标的筛选只改变筛选条件和首屏游标，不得把 `tradesAllLoaded` 改回 false；切 tab 后重新挂载 `TradesTab` 也必须继续使用全量源。
+   - 从 `run.chart_groups` 建立逻辑标的选择器：选项使用 `display_name`（内部以 `logical_symbol` 或稳定 group key 标识），成员 code 归一化 `local:` 前缀后匹配交易行；同组交易合并计数/盈亏，表格保留原始 `tr.code`。没有 `chart_groups` 的旧 run 使用每个 code 一个 singleton。
+   - 下载交易 CSV 使用当前活动源（加载全部后下载全量交易集）；切换标的只影响页面筛选，不静默改变下载源，并在计划中固定该语义。
+   - 图表 symbol 请求合并时同步保留 `artifacts_trades_csv`、`chart_groups` 和已选择的全量状态，防止切换行情标的后回落预览或把 TA 逻辑组拆回 TA0001~TA0004。
+3. `frontend/src/i18n/locales/{en,zh-CN,ja,ko,ar}.json`：补按钮/状态文案 key（如 `runDetail.loadAllTrades` / `runDetail.tradesAllLoaded`）；逻辑标的名称优先复用后端 `display_name`，不为 TA 单独写死前端文案。
+4. 测试：`frontend/src/pages/__tests__/RunDetail.test.tsx` 覆盖预览/全量切换、五类筛选、逻辑标的合并、状态持久性和下载源。
 
 ## 执行清单
 
-1. api.ts RunData 增加 `artifacts_trades_csv` 类型
-2. RunDetail.tsx TradesTab 加按钮 + `showAll` 状态 + 数据源切换
-3. 下载 CSV 改用当前数据源；symbol 合并保留全量字段
-4. 5 个语言包补 key（en/zh-CN/ja/ko/ar）
-5. RunDetail.test.tsx 补默认截断 + 点击后全量统计两用例
-6. 构建前端 + 组件测试 + WebUI 手动验证（v1 run）
+1. [x] api.ts RunData 增加 `artifacts_trades_csv` 类型，并确认 summary / chart-symbol 响应都能被前端保留。
+2. [x] RunDetail.tsx 将一键加载状态提升到 run 级；TradesTab 接入活动数据源、五类筛选、全量统计和“加载后不再受 100 行限制”的展示逻辑。
+3. [x] 交易标的筛选改用 `chart_groups` 逻辑标的；TA0001~TA0004 合并为一个选项，旧 run / 未分组 code 走 singleton fallback。
+4. [x] 下载 CSV 改用当前活动数据源；symbol 请求合并保留全量交易、逻辑分组和全量状态。
+5. [x] 5 个语言包补 key（en/zh-CN/ja/ko/ar）。
+6. [x] RunDetail.test.tsx 补：默认首屏 100 与预览统计、点击后全部/五类/逻辑标的全量计数与盈亏、切分类/交易标的/图表标的/tab 后状态不丢、TA 伪单位合并、下载全量。
+7. [x] 增加 5,000 / 10,000 行交易数据的前端渲染量级基准，确认全量模式不退回手动分页且采用窗口化渲染。
+8. [x] 构建前端 + 组件测试 + WebUI 自动化验证（v1 run、含 TA 逻辑组的 run、切换 tab/图表标的）。
 
 ## 开工前核对
 
 （状态从"讨论中"切到"已确认"前逐项核对；核对结果逐项展示"通过 / 未通过 + 发现项"）
 
-- 需求目标 / 范围与讨论记录一致（默认 500 不变、点击加载全部、统计刷新）
-- 范围/边界无被后续讨论反转但仍保留的旧约束（后端零改动）
-- 执行清单覆盖需求目标与验收标准
-- 验收标准可验证（对比 trades.csv 全量）
-- 元信息已填（关联迭代允许待填）
+- 需求目标 / 范围与讨论记录一致：通过——预览源与首屏 100 分层，点击后按钮保留并置灰，五类筛选/逻辑标的/全量状态均纳入。
+- 范围/边界无被后续讨论反转但仍保留的旧约束：通过——用户接受首次响应携带全量交易，刷新或切换 run 重新等待；本计划继续前端零后端改动。
+- 执行清单覆盖需求目标与验收标准：通过——覆盖 parent state、分类/标的/tab 持久性、窗口化渲染和多标的回归。
+- 验收标准可验证：通过——分别对比 trades.csv 全量、当前逻辑组成员集合、按钮状态、可见表格行和切换场景。
+- 元信息已填（关联迭代允许待填）：通过。
 
 ## 验证
 
-- `cd frontend && npm test -- RunDetail`（组件测试）
-- 构建后打开 v1 run（ta_turtle_15m_v1_2021_2023）WebUI 报告-交易：默认显示 500 笔 / 总盈亏 -1,150；点"加载全部"后显示 621 笔 / 总盈亏 -17,640（与 trades.csv 全量一致）
-- 点击后下载 CSV 行数 = trades.csv 行数（1242 行）
-- **跑回归测试（改动不得破坏既有功能）**：`cd frontend && npm test`（全量前端测试套件，覆盖既有 RunDetail 组件用例与新增按钮用例）；本改动仅前端展示层，构建（`npm run build`）通过且全量测试绿即可
+- `cd frontend && npm test -- RunDetail`（组件测试）→ 13 passed。
+- 构建后打开 v1 run（`ta_turtle_15m_v1_2021_2023`）WebUI 报告-交易：默认表格首屏 100 笔，统计基于后端预览源（最多 500 笔）而不是首屏 100；点“加载全部”后使用 621 笔全量交易，`全部`及五个分类的表格/笔数/总盈亏都与 `trades.csv` 对应筛选结果一致。
+- 点击“加载全部”后按钮仍在原位置、处于 disabled/置灰状态，并显示“已加载全部 N 笔”；切换五类按钮时按钮状态不变。
+- 在同一 run 中先点击“加载全部”，再依次切换五类按钮、逻辑标的、图表标的、分析/交易 tab：每次回来仍是全量模式；切换到另一个 run 后状态重置为预览。
+- 含 `TA0001`~`TA0004` 的 run：标的筛选器只出现一个 TA 逻辑标的；选中它时四个成员交易合并计数与总盈亏，表格仍显示实际 code；无 `logical_groups` 的旧 run 仍按单 code 展示。
+- 五逻辑组（T/A/RB/F/G）合成 run：五个逻辑标的独立可选、成员不串组、全部标的统计等于五组并集；切换其中任一行情标的后交易全量源和逻辑组列表不丢。
+- 性能回归：记录 1,242/3,418/3,506 行真实样本的 payload 和解析量级；5,000/10,000 行全量模式不直接创建等量 DOM，滚动访问不依赖反复点击“显示更多”。
+- 点击后下载 CSV 行数 = `trades.csv` 全量行数（示例 run 为 1242 行）；分类/标的筛选不改变“下载当前活动交易集”的语义。
+- 后端逻辑分组回归：`pytest agent/tests/test_logical_groups.py -q` → 7 passed。
+- **前端全量回归**：`cd frontend && npm run test:run` → 55 个测试文件、458 项通过；`npm run build` 通过（仅保留既有 chunk size warning）。
 
 ## 讨论记录
 
 - 2026-08-17 用户提出：WebUI 交易统计（500 笔 / 总盈亏 -1,150）与全量不符，要求"前端加一键加载全部交易明细并刷新统计，默认仍截断 500"。调研确认根因是后端 `trade_log[:500]` 截断预览，且全量 `artifacts_trades_csv` 已随响应下发——改动收敛为前端展示层。
 - 2026-08-17 用户追问按钮幂等性。确认设计为单向加载（点击后按钮消失、无网络请求、统计按渲染重新推导），并把空值防护（老 run 无 `artifacts_trades_csv` 字段）、快速双击、切换 symbol 后合并保留全量字段等边界写进实现方案。
+- 2026-08-20 用户补充：交易 Tab 右侧五个分类也必须受“一键加载全部”影响；点击后分类与全部都展示全量交易并刷新全量笔数/盈亏统计。全量选择必须跨分类、交易标的、图表标的和 tab 持久，只有切换 run 才重置。
+- 2026-08-20 用户指出：交易标的不能按 TA0001/TA0002/TA0003 等执行 code 拆开，必须复用 `P-20260819-logical_symbol_groups` 的 config 驱动逻辑组；同一逻辑组筛选时合并成员交易，但交易行继续保留真实执行 code。
+- 2026-08-20 用户确认：点击“加载全部”后按钮不消失，保持可见并置灰，显示已加载状态。
+- 2026-08-20 性能调研结论：当前首次响应虽只在交易 Tab 首屏展示预览，但后端已经读取并下发完整交易数组；真实 1,242/3,418/3,506 行样本交易 payload 约 422KB/959KB/970KB，CSV 读写和 JSON 处理为毫秒级，5,000/10,000 行约 1~3MB。点击全部无额外网络/CSV I/O，主要风险是全量表格 DOM 渲染进入秒级，因此实现必须采用窗口化/虚拟列表。
+- 2026-08-20 多标的评估结论：T、A、RB、F、G 以独立 `logical_groups` 配置可兼容，现有逻辑组解析和后端/图表基础已验证；交易 Tab 仍需处理 `local:` 归一化、member code 合并、`chart_code` 仅作行情代表、旧 run singleton fallback 和切标的响应不丢全量数据等坑。
+- 2026-08-20 用户确认按原前端方案执行：首次响应带全量交易的等待可以接受；同一 run 切换 tab 不应重新请求或重新等待，刷新页面/切换到其他 run 后回来重新等待可以接受；本次不扩展后端按需加载接口。
+- 2026-08-20 实现完成：前端接入 `artifacts_trades_csv`，将全量状态提升到 `RunDetail`，按钮点击后保留并禁用；分类/逻辑标的筛选和统计统一使用活动交易源，切换 tab/图表标的保留状态与全量字段；全量表格采用窗口化渲染，旧 run 无逻辑组时回退 singleton。
+- 2026-08-20 用户补充 UI 微调：加载全部按钮移到左侧统计行、紧跟“总盈亏”之后，与右侧分类按钮分离；按钮默认使用中性可点击样式，不显示已选中的橙色状态；统计文字过长时允许按钮/右侧控件换行，不能互相覆盖。
 
 ## 风险 / 注意
 
 - 大 run（数万笔）的全量 JSON 已随默认响应下发（现状如此），本改动不新增负担；若未来要瘦身默认响应，可另立计划做"按需加载"（后端加参数控制），**本计划不做**。
 - i18n 5 语言都要补 key，漏一个会导致按钮无文案。
-- 表格分页渲染（TRADES_PAGE_SIZE）已存在，加载全量不会一次渲染全部 DOM。
+- “预览最多 500”与“表格首屏 100”是两个不同边界，测试必须分别断言；统计不能跟随首屏 `visible` 行数。
+- 已加载全部后若仍保留旧的 100 行“显示更多”闸门，就不满足“分类和全部展示全量交易”；应取消该语义上的截断，若数万笔全量渲染造成性能问题，需采用虚拟列表等方式优化，不能静默回退预览。
+- `TradesTab` 会随 tab 切换卸载；全量状态若不提升到 `RunDetail`，用户切回交易页会重新回到预览，这是本计划的高风险回归点。
+- 逻辑组成员可能带 `local:` 前缀或历史 run 没有 `chart_groups`；比较时要归一化前缀，展示时保留真实 code，旧数据安全回退 singleton。
+- 图表 symbol 的二次请求如果覆盖 `RunData` 时丢掉 `artifacts_trades_csv` / `chart_groups`，会造成“按钮已点击但数据又变少/标的又拆分”的静默回归，必须有切图表标的的 UI 测试。
+- 首次响应已经下发全量交易，所谓“默认 500”不能被当作网络减负；如果未来需要真正按需加载，必须另立后端分页/按需请求计划，本计划只解决前端展示与状态。
+- “全量可用”不能等价于“全量 DOM 常驻”：本次已用窗口化渲染缓解 5,000~10,000 行的秒级等待和滚动卡顿；若未来要求真正减少首次网络 payload，另建后端按需加载计划。

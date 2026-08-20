@@ -16,7 +16,7 @@ import { api, type RunListItem } from "@/lib/api";
 import { formatMetricVal } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 
-const REPORT_SCAN_LIMIT = 100;
+const REPORT_SCAN_LIMIT = 300;
 
 type SortMode = "created_desc" | "created_asc" | "return_desc" | "sharpe_desc";
 

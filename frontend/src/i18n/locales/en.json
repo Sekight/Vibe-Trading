@@ -638,6 +638,8 @@
     "heatmapWeek": "Week",
     "heatmapMonth": "Month",
     "showMore": "Show {{count}} more",
+    "loadAllTrades": "Load all trades",
+    "tradesAllLoaded": "All {{count}} trades loaded",
     "allSymbols": "All symbols",
     "sideAll": "All",
     "sideBuy": "Buy",

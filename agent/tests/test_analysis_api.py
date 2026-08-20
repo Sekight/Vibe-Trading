@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -19,6 +20,22 @@ def _client(monkeypatch, tmp_path: Path) -> TestClient:
     monkeypatch.setattr(api_server, "_API_KEY", "")
     monkeypatch.delenv("API_AUTH_KEY", raising=False)
     return TestClient(api_server.app, client=("127.0.0.1", 50000))
+
+
+def test_runs_list_orders_custom_ids_by_directory_mtime(tmp_path: Path, monkeypatch) -> None:
+    old_run = write_run_dir(tmp_path, "old_custom_report")
+    new_run = write_run_dir(tmp_path, "new_custom_report")
+    os.utime(old_run, (1_000, 1_000))
+    os.utime(new_run, (2_000, 2_000))
+    client = _client(monkeypatch, tmp_path)
+
+    response = client.get("/runs?limit=300")
+
+    assert response.status_code == 200
+    assert [item["run_id"] for item in response.json()[:2]] == [
+        "new_custom_report",
+        "old_custom_report",
+    ]
 
 
 def test_analysis_route_returns_markdown_and_status(tmp_path: Path, monkeypatch) -> None:

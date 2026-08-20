@@ -200,6 +200,120 @@ describe("RunDetail page", () => {
     expect(screen.getByText("0.8")).toBeInTheDocument();
   });
 
+  it("loads all trades once, keeps the disabled state, and groups logical symbols", async () => {
+    const makeTrade = (index: number) => {
+      const variants = [
+        { code: "TA0001.ZCE", side: "buy", pnl: "0", holding_bars: "0" },
+        { code: "TA0002.ZCE", side: "sell", pnl: "0", holding_bars: "0" },
+        { code: "TA0003.ZCE", side: "sell", pnl: "1", holding_bars: "1" },
+        { code: "RB0001.ZCE", side: "buy", pnl: "-1", holding_bars: "1" },
+      ];
+      const variant = variants[index % variants.length];
+      return {
+        time: `2026-01-${String((index % 28) + 1).padStart(2, "0")}`,
+        price: "100",
+        qty: "1",
+        reason: "signal",
+        ...variant,
+      };
+    };
+    const previewTrades = Array.from({ length: 120 }, (_, index) => makeTrade(index));
+    const allTrades = Array.from({ length: 240 }, (_, index) => makeTrade(index));
+
+    apiMock.getRun.mockResolvedValue({
+      status: "success",
+      run_id: "full-trades",
+      prompt: "Full trades run",
+      trade_log: previewTrades,
+      artifacts_trades_csv: allTrades,
+      chart_groups: [
+        { logical_symbol: "TA_MAIN", display_name: "TA Main", codes: ["TA0001.ZCE", "TA0002.ZCE", "TA0003.ZCE"], chart_code: "TA0001.ZCE" },
+        { logical_symbol: "RB_MAIN", display_name: "RB Main", codes: ["RB0001.ZCE"], chart_code: "RB0001.ZCE" },
+      ],
+    });
+    apiMock.getRunCode.mockResolvedValue({});
+
+    const router = renderRunDetail("/runs/full-trades");
+    await screen.findByText("Full trades run");
+    fireEvent.click(screen.getByRole("tab", { name: "Trades" }));
+
+    expect(screen.getByText("120 trades")).toBeInTheDocument();
+    const loadButton = screen.getByRole("button", { name: "Load all trades" });
+    expect(loadButton).toBeEnabled();
+    expect(loadButton).toHaveClass("border-border/60", "text-muted-foreground", "whitespace-normal", "max-w-[14rem]");
+    expect(loadButton).not.toHaveClass("bg-primary/10", "text-primary");
+    expect(loadButton.closest(".ms-auto")).toBeNull();
+    expect(screen.getByRole("button", { name: "Show 20 more" })).toBeInTheDocument();
+
+    fireEvent.click(loadButton);
+
+    expect(await screen.findByText("240 trades")).toBeInTheDocument();
+    const loadedButton = screen.getByRole("button", { name: "All 240 trades loaded" });
+    expect(loadedButton).toBeDisabled();
+    expect(screen.queryByRole("button", { name: /Show .* more/ })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("row").length).toBeLessThan(240);
+
+    const symbolSelect = screen.getByRole("combobox", { name: "Symbol" });
+    expect(screen.getByRole("option", { name: "TA Main" })).toBeInTheDocument();
+    fireEvent.change(symbolSelect, { target: { value: "TA_MAIN" } });
+    expect(await screen.findByText("180 trades")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "All 240 trades loaded" })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Chart" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Trades" }));
+    expect(await screen.findByRole("button", { name: "All 240 trades loaded" })).toBeDisabled();
+    expect(router.state.location.pathname).toBe("/runs/full-trades");
+  });
+
+  it("keeps the full trade source after switching the chart symbol", async () => {
+    const previewTrades = [
+      { time: "2026-01-01", code: "TA0001.ZCE", side: "buy", price: "100", qty: "1", pnl: "0", holding_bars: "0", reason: "signal" },
+      { time: "2026-01-02", code: "TA0001.ZCE", side: "sell", price: "101", qty: "1", pnl: "1", holding_bars: "1", reason: "signal" },
+    ];
+    const allTrades = [...previewTrades, {
+      time: "2026-01-03", code: "RB0001.ZCE", side: "buy", price: "200", qty: "1", pnl: "0", holding_bars: "0", reason: "signal",
+    }];
+    const chartGroups = [
+      { logical_symbol: "TA_MAIN", display_name: "TA Main", codes: ["TA0001.ZCE"], chart_code: "TA0001.ZCE" },
+      { logical_symbol: "RB_MAIN", display_name: "RB Main", codes: ["RB0001.ZCE"], chart_code: "RB0001.ZCE" },
+    ];
+    const summary = {
+      status: "success",
+      run_id: "chart-full-trades",
+      prompt: "Chart full trades run",
+      chart_symbols: ["TA0001.ZCE", "RB0001.ZCE"],
+      chart_groups: chartGroups,
+      price_series: { "TA0001.ZCE": [{ time: "2026-01-01", open: 100, high: 101, low: 99, close: 100, volume: 1 }] },
+      trade_log: previewTrades,
+      artifacts_trades_csv: allTrades,
+    };
+    apiMock.getRun.mockImplementation((_runId: string, params?: Record<string, string>) => {
+      if (params?.chart_symbol) {
+        return Promise.resolve({
+          ...summary,
+          price_series: { [params.chart_symbol]: [{ time: "2026-01-01", open: 200, high: 201, low: 199, close: 200, volume: 1 }] },
+          artifacts_trades_csv: undefined,
+        });
+      }
+      return Promise.resolve(summary);
+    });
+    apiMock.getRunCode.mockResolvedValue({});
+
+    renderRunDetail("/runs/chart-full-trades");
+    await screen.findByText("Chart full trades run");
+    fireEvent.click(screen.getByRole("tab", { name: "Trades" }));
+    fireEvent.click(screen.getByRole("button", { name: "Load all trades" }));
+    expect(await screen.findByRole("button", { name: "All 3 trades loaded" })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Chart" }));
+    fireEvent.change(screen.getByLabelText("Symbol"), { target: { value: "RB0001.ZCE" } });
+    fireEvent.click(screen.getByRole("button", { name: "Show only" }));
+    await waitFor(() => expect(apiMock.getRun).toHaveBeenCalledWith("chart-full-trades", { chart_symbol: "RB0001.ZCE" }));
+
+    fireEvent.click(screen.getByRole("tab", { name: "Trades" }));
+    expect(await screen.findByRole("button", { name: "All 3 trades loaded" })).toBeDisabled();
+  });
+
   it("keeps ChartTab mounted when switching tabs (window/state preserved)", async () => {
     apiMock.getRun.mockResolvedValue({
       status: "success",

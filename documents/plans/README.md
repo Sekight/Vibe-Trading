@@ -32,7 +32,7 @@
 | P-20260816-contract_switch_auto | 讨论中 | 2026-08-16 | 换约规则自动识别主连切换日 | P-20260816-contract_switch_auto.md | 待填 |
 | P-20260816-cache_env_once | 讨论中 | 2026-08-16 | loader 缓存只配置一次（直跑 runner 也加载 vibe_home/.env） | P-20260816-cache_env_once.md | 待填 |
 | P-20260817-reports_dir_selector | 讨论中 | 2026-08-17 | WebUI 报告页目录选择器（支持 runs 子目录分类） | P-20260817-reports_dir_selector.md | 待填 |
-| P-20260817-trade_log_full_load | 讨论中 | 2026-08-17 | WebUI 交易明细一键加载全部（统计刷新，默认仍截断 500） | P-20260817-trade_log_full_load.md | 待填 |
+| P-20260817-trade_log_full_load | 已完成 | 2026-08-17 | WebUI 交易明细一键加载全部（统计刷新，默认仍截断 500） | P-20260817-trade_log_full_load.md | V039 / V040 |
 | P-20260817-fastrun | 已完成 | 2026-08-17 | 回测 fastrun：--without-regime / --without-mae-mfe / --fastrun 跳过 digest 分析 | P-20260817-fastrun.md | V032 |
 | P-20260818-single_weight_group | 已完成 | 2026-08-18 | max_single_weight 按策略声明 weight_groups 分组合并（加仓计单标的口径） | P-20260818-single_weight_group.md | V033 |
 | P-20260818-daily_position_risk_charts | 已完成 | 2026-08-18 | 新 tab「持仓与风险」：每日组合持仓（收盘口径）+ 账户风险度（单边+100%线）；上线后迭代图 1 改收盘口径 | P-20260818-daily_position_risk_charts.md | V034 / V035 |
@@ -43,4 +43,5 @@
 | P-20260818-trading_time_aggregation | 讨论中 | 2026-08-18 | 回测与前端支持按交易时间聚合（同花顺式，可选开关，默认自然时间兼容） | P-20260818-trading_time_aggregation.md | 待填 |
 | P-20260819-chart_4h_interval | 已完成 | 2026-08-19 | 报告页行情 K 线增加 4H 周期（与 1D 同级） | P-20260819-chart_4h_interval.md | V037 |
 | P-20260819-logical_symbol_groups | 已完成 | 2026-08-19 | A方案：config 驱动逻辑标的分组，兼容伪单位加仓与多标的图表 | P-20260819-logical_symbol_groups.md | V038 |
+| P-20260820-execution_mode_state_machine | 讨论中 | 2026-08-20 | 回测引擎正常交易与止损成交路径解耦 | P-20260820-execution_mode_state_machine.md | 待填 |
 

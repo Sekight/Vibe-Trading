@@ -633,6 +633,8 @@
     "heatmapWeek": "주",
     "heatmapMonth": "월",
     "showMore": "{{count}}건 더 보기",
+    "loadAllTrades": "전체 거래 로드",
+    "tradesAllLoaded": "전체 {{count}}건 로드됨",
     "allSymbols": "전체 종목",
     "sideAll": "전체",
     "sideBuy": "매수",
