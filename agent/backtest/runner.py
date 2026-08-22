@@ -22,10 +22,23 @@ import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, model_validator, field_validator
 
 try:
-    from dotenv import load_dotenv
-    load_dotenv()
+    # Keep the direct runner on the same one-time dotenv resolution path as
+    # CLI/WebUI.  This loads ~/.vibe-trading/.env by default, or
+    # <VIBE_TRADING_HOME>/.env when the runtime root is overridden before the
+    # process starts, so loader cache settings are available before any
+    # backtest data is fetched.
+    from src.providers.llm import _ensure_dotenv
 except ImportError:
-    pass
+    # Preserve the lightweight fallback for environments that do not have the
+    # provider layer installed; python-dotenv remains optional for this module.
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        pass
+    else:
+        load_dotenv()
+else:
+    _ensure_dotenv()
 
 from backtest.loaders.registry import (
     FALLBACK_CHAINS,

@@ -16,6 +16,7 @@ from urllib.parse import urlsplit
 from pydantic import PrivateAttr
 
 from src.config.accessor import get_env_config, reset_env_config
+from src.config.paths import get_runtime_root
 from src.providers.capabilities import (
     get_llm_credentials,
     get_provider_capabilities,
@@ -395,9 +396,21 @@ else:
 
 AGENT_DIR = Path(__file__).resolve().parents[2]
 
-# .env search order: ~/.vibe-trading/.env → agent/.env → $CWD/.env
+
+def _runtime_env_path() -> Path:
+    """Return the canonical runtime dotenv path.
+
+    The default runtime root is ``~/.vibe-trading``.  When the process is
+    started with ``VIBE_TRADING_HOME`` set, the runtime-root override is
+    honored for ``.env`` as well.
+    """
+    return get_runtime_root() / ".env"
+
+
+# .env search order: <runtime_root>/.env → agent/.env → $CWD/.env;
+# runtime_root defaults to ~/.vibe-trading.
 _ENV_CANDIDATES = [
-    Path.home() / ".vibe-trading" / ".env",
+    _runtime_env_path(),
     AGENT_DIR / ".env",
     Path.cwd() / ".env",
 ]
@@ -406,7 +419,7 @@ _ENV_CANDIDATES = [
 # .env path (it leaks the OS username / home / CWD). The label names
 # which slot won - the entire P08 R1 signal - using compile-time
 # constants only.
-_ENV_LABELS = ("~/.vibe-trading/.env", "<AGENT_DIR>/.env", "<CWD>/.env")
+_ENV_LABELS = ("<runtime_root>/.env", "<AGENT_DIR>/.env", "<CWD>/.env")
 
 # Kimi reasoning models (K-series: kimi-k2*, kimi-k3, …, and the
 # kimi-for-coding alias) reject any temperature other than 1 with

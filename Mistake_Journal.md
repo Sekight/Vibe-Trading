@@ -57,7 +57,7 @@
 | M019 | 2026-08-15 | 🟡坑 | 策略文件被外部进程置零损坏 |
 | M020 | 2026-08-16 | 🔴错误 | 触轨/止盈判定口径与预期相反 |
 | M021 | 2026-08-16 | 🟡坑 | 郑商所后缀 .CZCE 误判 A 股引擎、0 成交无警告 |
-| M022 | 2026-08-16 | 🟡坑 | 直跑 runner 不加载 vibe_home/.env，缓存开关失效 |
+| M022 | 2026-08-16 | ✅已修复 | 直跑 runner 不加载 vibe_home/.env，缓存开关失效 |
 | M023 | 2026-08-16 | 🟡坑 | 保本止损同 bar 回溯假象（bar 级顺序假设） |
 | M024 | 2026-08-16 | 🟡坑 | 主连切换跳空污染切换后约 20 根指标 |
 | M025 | 2026-08-16 | 🟡坑 | trades.csv 归因陷阱：reason 失真 + qty 随权益漂移 |
@@ -201,11 +201,13 @@
 - 状态：有效（约定）
 - 关联：解法见 HowToUse 8.22
 
-### M022 · 直跑 runner 不加载 <vibe_home>/.env，缓存开关实际失效（2026-08-16）· 🟡坑
+### M022 · 直跑 runner 不加载 <vibe_home>/.env，缓存开关实际失效（2026-08-16）· ✅已修复
 - 现象：`VIBE_TRADING_DATA_CACHE=1` 写在 `.vibe-trading/.env`，但 `python -m backtest.runner` 每次仍重新取数，cache 目录不产生新 parquet；`loader_cache_enabled()` 实测 False。
 - 教训：runner 的 `load_dotenv()` 无参只找 agent/.env 与 cwd/.env（仓库里都没有），`.vibe-trading/.env` 从不被加载；CLI/UI 走 `_ensure_dotenv()` 才正确。直跑 runner 需显式 `VIBE_TRADING_DATA_CACHE=1` 前缀；缓存 key 按 源+标的+周期+区间 区分，换区间是新 key（非失效）。
-- 状态：有效（计划 P-20260816-cache_env_once 讨论中）
-- 关联：解法见 HowToUse 8.35（待优化）；计划 P-20260816-cache_env_once
+- 状态：已修复（2026-08-22，计划 P-20260816-cache_env_once）
+- 已修复：2026-08-22 · runner 复用统一 `_ensure_dotenv()`；默认读取 `~/.vibe-trading/.env`，`VIBE_TRADING_HOME` 启动前覆盖时读取自定义运行目录 `.env`；隔离子进程回归验证缓存首次写入、二次命中。
+- 关联：解法见 HowToUse 8.35；计划 P-20260816-cache_env_once；来源 V042
+- 补充（2026-08-22）：Windows 测试中仅 monkeypatch `HOME` 不会改变 `pathlib.Path.home()`；验证自定义运行目录应设置 `VIBE_TRADING_HOME`，避免将既有路径基线失败误判为 runner 缓存回归。
 
 ### M023 · 保本止损"同 bar 回溯"假象：bar 级把整根高低点当同时发生（2026-08-16）· 🟡坑
 - 现象：加"浮盈≥1R 止损上移成本价"规则，同 bar 生效口径下结果 -1,224；逐笔排查发现 3 笔在触发 bar 内被"新止损"平掉——真实时间线里触发发生在最低点之后、价格从未回到成本价，出场是虚构的（修正为下一根生效后 -10）。

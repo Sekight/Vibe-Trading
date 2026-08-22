@@ -769,8 +769,26 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 结论先说：你现在主要用 WebUI / `vibe-trading run` 发任务，这个缓存帮助不大（原因见下），更推荐直接用 data-bridge；只有当你改用 `python -m backtest.runner <run_dir>` 直接反复调同一批标的 + 固定区间时，才值得开。
 
 - 是什么：回测 loader 的“可选本地行情缓存”。开启后，各数据源（tencent / tushare / akshare / mootdx / eastmoney / yfinance / ccxt / okx / futu / finnhub / tiingo / fmp / baostock / local 等）把“已完全结算的历史 K 线”按 key 存成 parquet；下次同一请求直接读本地，不联网。
-- 怎么开：在 `<vibe_home>\.env` 加 `VIBE_TRADING_DATA_CACHE=1`（`true/yes/on` 也行），默认关闭，不设或写 `0` 即关。默认目录是 `<vibe_home>\cache\loaders`；想换位置再加 `VIBE_TRADING_DATA_CACHE_ROOT=E:\...\loader-cache`。改完重启 `serve` / `dev` 后端，或新开 CLI 进程。
-- 待优化（2026-08-16）：设计上是"只配置一次"——在 `<vibe_home>\.env` 写好即可，不该每次手动带。但直接跑 `python -m backtest.runner <run_dir>` 时，runner 里的 `load_dotenv()` 无参数只找 `agent/.env` / 当前目录 `.env`，**不会加载 `<vibe_home>\.env`**，所以直跑路径下缓存实际一直是关的（症状：换标的/换区间每次都重新取数，`<vibe_home>\cache\loaders` 下不产生新 parquet；`VIBE_TRADING_DATA_CACHE` 写在 `.env` 里也无效）。当前 workaround：命令前显式带环境变量，例如 `VIBE_TRADING_DATA_CACHE=1 ..\.venv\Scripts\python.exe -m backtest.runner "<run_dir>"`。修复计划见 `documents/plans/P-20260816-cache_env_once.md`（拟让 runner 复用现有 `_ensure_dotenv()` 加载 `<vibe_home>/.env`，恢复"只配置一次"）。
+- 怎么开：默认在 `~/.vibe-trading/.env` 加 `VIBE_TRADING_DATA_CACHE=1`（`true/yes/on` 也行），默认关闭，不设或写 `0` 即关。默认缓存目录是 `~/.vibe-trading/cache/loaders`；改完后重启 `serve` / `dev` 后端，或新开 CLI / runner 进程。
+- 直跑 runner 已支持一次配置（2026-08-22）：`python -m backtest.runner "<run_dir>"` 启动时会复用统一的 `.env` 加载逻辑，因此不再需要每次在命令前手动带 `VIBE_TRADING_DATA_CACHE=1`。默认优先读取 `~/.vibe-trading/.env`，随后才回退到 `agent/.env` / 当前目录 `.env`。
+- 自定义运行目录：如果进程启动前设置了 `VIBE_TRADING_HOME`，runner 会优先读取 `<VIBE_TRADING_HOME>/.env`。例如：
+
+  ```powershell
+  $env:VIBE_TRADING_HOME = 'E:\vibe-home'
+  ..\.venv\Scripts\python.exe -m backtest.runner "<run_dir>"
+  ```
+
+  `VIBE_TRADING_HOME` 要在进程启动前设置；不要只把它写进待加载的 `.env` 里期待它反向决定 `.env` 位置。
+- 自定义缓存目录：在已经会被加载的 `.env` 中增加 `VIBE_TRADING_DATA_CACHE_ROOT`，例如：
+
+  ```dotenv
+  VIBE_TRADING_DATA_CACHE=1
+  VIBE_TRADING_DATA_CACHE_ROOT=E:/vibe-cache/loaders
+  ```
+
+  该变量只改变 loader parquet 的存放位置，不改变 runs、data-bridge 等其他目录；如果只设置 `VIBE_TRADING_HOME`，缓存默认仍按 `~/.vibe-trading/cache/loaders` 处理。
+- 什么时候使用自定义缓存目录：C 盘空间紧张、希望把大批量历史行情缓存放到 E/D 盘、需要把缓存与运行产物分开，或多个实验共用一个稳定缓存目录时使用。若每次标的/区间都不同、已经使用 data-bridge 本地数据，或只是偶尔跑一次回测，则不建议额外设置。
+- 这次修复对应计划 `documents/plans/P-20260816-cache_env_once.md`；缓存 key、缓存版本、过期判断和 data-bridge 行为均未改变。
 - 缓存了什么：只有 loader 返回的行情 DataFrame（OHLCV + 你请求的 `extra_fields`）。不缓存 run card、策略代码、LLM 分析、token 用量，也不含 API key。目录结构为 `cache\loaders\<source>\<sha256>.parquet` + 同名 `.parquet.json` 元数据。
 - key 怎么算：`缓存版本 + source + symbol + timeframe + start_date + end_date + fields`。所以只有“同一数据源 + 同一标的 + 同一周期 + 同一区间 + 同一字段”才会命中。
 - 增量吗：不做增量。区间从 2023-01-01~2023-12-28 改成 ~2023-12-31 时，key 变了，会全量重拉并写一个新文件，旧文件仍留在磁盘，不会只补 3 天。

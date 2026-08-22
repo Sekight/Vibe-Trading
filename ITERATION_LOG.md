@@ -51,6 +51,10 @@
 | V036 | 2026-08-18 | 持仓与风险 tab 新增「单标的每日持仓」图 | 下拉框选标的（weight_groups 分组+峰值标注），毛/净/单边三线，收盘默认/峰值切换；API 现读 positions.csv 按需加载（不进 digest）；HowToUse 8.45 三图说明 |
 | V037 | 2026-08-19 | 报告页行情 K 线增加 4H 周期（与 1D 同级） | 4h 纳入共用周期列表并按基础周期动态显示；4H run 默认直显原始 4H bar，较小周期可前端自然聚合，交易标记归桶同步覆盖 4h |
 | V038 | 2026-08-19 | A方案：config 驱动逻辑标的分组 | 以 config.logical_groups 作为唯一来源，统一指标、digest、持仓风险和行情图的逻辑标的语义，支持多标的数组配置并保留伪单位执行模型 |
+| V039 | 2026-08-20 | WebUI 交易 Tab 一键加载全量与逻辑标的筛选 | 全量交易状态提升到 run 级，筛选/统计统一数据源，逻辑组伪单位合并展示并窗口化渲染 |
+| V040 | 2026-08-20 | 交易 Tab 全量按钮布局与默认样式调整 | 全量按钮移到统计行，默认中性可点击，长文案允许换行 |
+| V041 | 2026-08-20 | Reports 列表扩大到前 300 个并按真实时间排序 | 按 mtime 排序并放宽前后端扫描上限，避免自定义命名的最新 run 被截掉 |
+| V042 | 2026-08-22 | 直跑 runner 一次加载缓存环境 | runner 复用统一 dotenv，默认/自定义运行目录均可一次配置缓存，并补充缓存目录使用说明 |
 > 补录说明：V001-V009 为补录条目，依据 git 历史、HowToUse、全局复利与踩坑日志、`C:\Users\mumu\.codex\sessions` 会话记录回溯整理；当时未留痕的字段标“待补”。从下一条起，每次迭代收尾直接写正文。
 
 ## 模板
@@ -492,3 +496,10 @@
 - 验证：后端 `test_analysis_api.py` 10 passed（含自定义 run 名按 mtime 排序）；前端 Reports 定向 2 passed；前端全量 55 个测试文件、458 项通过；`npm run build` 通过（仅既有 chunk size warning）。
 - 影响/注意：当前 161 个 run 实测扫描前 100 约 32ms、全量约 53ms；扩大到 300 在当前规模下可接受。未来 run 数继续增长时仍受 300 上限保护。
 - 关联：Reports 前端/`runs_routes.py`；无新计划文档；当前改动尚未提交。
+
+### V042 · 直跑 runner 一次加载缓存环境（2026-08-22）
+- 一句话总结：直跑 `python -m backtest.runner` 复用统一 dotenv 加载，默认从 `~/.vibe-trading/.env` 读取缓存开关，也支持进程启动前设置 `VIBE_TRADING_HOME` 后从自定义运行目录读取 `.env`。
+- 为什么：V030/V032 之后直接 runner 已成为低 token、高频调参入口，但 runner 原有无参 `load_dotenv()` 找不到用户级 `.env`，导致 `VIBE_TRADING_DATA_CACHE=1` 的一次性配置在直跑路径失效，每次重复取数。
+- 关键细节：`agent/backtest/runner.py` 改为调用 `src.providers.llm._ensure_dotenv()`；`src/providers/llm.py` 的运行目录 dotenv 候选默认首项为 `~/.vibe-trading/.env`，`VIBE_TRADING_HOME` 启动前覆盖时首项跟随自定义目录；`VIBE_TRADING_DATA_CACHE_ROOT` 仍作为独立缓存目录覆盖项。缓存 key、版本、过期判断、loader、CLI/WebUI、fastrun/digest 行为均未改动。
+- 验证：`agent/tests/test_runner_dotenv.py` 3 passed；与 `test_dotenv_observability.py` 合计 8 passed；隔离子进程确认缓存首次写入 parquet、第二次 fetch 命中（fetch 只执行 1 次）；真实默认环境探针输出 `enabled=true`、缓存根目录为 `~/.vibe-trading/cache/loaders`；相关 runner/dotenv 回归集 155 passed、1 skipped；loader/cache 扩展集 249 passed、1 skipped，另有 1 个既有 Windows 下 `HOME` 与 `Path.home()` 预期不一致的基线失败，未修改无关代码。
+- 关联：计划 P-20260816-cache_env_once；Mistake_Journal M022；HowToUse 8.35；当前改动尚未提交（无 commit）。
