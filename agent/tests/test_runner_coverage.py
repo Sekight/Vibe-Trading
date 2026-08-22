@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-import pandas as pd
+import json
 
-from backtest.runner import _data_coverage_warnings
+import pandas as pd
+import pytest
+
+from backtest.runner import BacktestConfigSchema, _data_coverage_warnings, main
 
 
 def _frame(start: str, periods: int = 30) -> pd.DataFrame:
@@ -43,3 +46,48 @@ def test_empty_and_none_frames_are_ignored() -> None:
 def test_invalid_start_date_returns_no_warnings() -> None:
     data = {"X": _frame("2026-01-05")}
     assert _data_coverage_warnings({"start_date": "nonsense"}, data) == []
+
+
+def test_legacy_exit_mode_stop_is_rejected_for_migration() -> None:
+    """The overloaded legacy stop spelling must fail before data loading."""
+    with pytest.raises(ValueError, match="legacy exit_mode='stop'"):
+        BacktestConfigSchema(
+            codes=["X"],
+            start_date="2026-01-01",
+            end_date="2026-01-31",
+            entry_mode="close",
+            exit_mode="stop",
+        )
+
+
+def test_next_open_stop_three_field_config_is_accepted() -> None:
+    """The P0 hard-stop preset must pass the runner schema contract."""
+    config = BacktestConfigSchema(
+        codes=["rb2410.SHFE"],
+        start_date="2026-01-01",
+        end_date="2026-01-31",
+        entry_mode="next_open",
+        exit_mode="next_open",
+        stop_loss_mode="hard",
+    )
+    assert config.entry_mode == "next_open"
+    assert config.exit_mode == "next_open"
+    assert config.stop_loss_mode == "hard"
+
+
+def test_runner_rejects_legacy_exit_mode_stop_before_loading_data(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "config.json").write_text(
+        json.dumps({"exit_mode": "stop"}), encoding="utf-8"
+    )
+    monkeypatch.setenv("VIBE_TRADING_ALLOWED_RUN_ROOTS", str(tmp_path))
+
+    with pytest.raises(SystemExit):
+        main(run_dir)
+
+    output = capsys.readouterr().out
+    assert "legacy exit_mode='stop' rejected" in output
+    assert "migrate" in output

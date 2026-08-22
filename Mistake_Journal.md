@@ -296,8 +296,8 @@
 - 现象：当前引擎拒绝三种合理的非对称成交组合：`entry_mode=next_open` + `exit_mode=close`、`entry_mode=next_open` + `exit_mode=stop`、`entry_mode=close` + `exit_mode=next_open`；现有引擎只允许 `next_open/next_open`、`close/close`、`close/stop`。
 - 根因：`BaseEngine` 用开仓模式同时决定信号是否整体 shift、`_same_bar` 状态和成交价格路径，开仓与平仓没有独立的时序/成交处理；同一信号下先收盘平旧仓、下一根开盘开新仓，以及开仓后持续维护止损状态，都没有统一建模。
 - 教训：开仓时点、平仓时点和止损激活时点应分别建模；常见的非对称成交时序不能用固定组合白名单代替。
-- 状态：有效（未修复；三种组合均有合理且常见的策略语义，建议作为后续引擎能力补齐；`next_open/close`、`close/next_open` 优先，`next_open/stop` 需先定义止损在入场 bar 是否生效）
-- 关联：解法说明见 HowToUse 8.34；实现入口 `agent/backtest/engines/base.py`；现有边界测试 `agent/tests/test_engine_execution_modes.py`。
+- 状态：部分修复（2026-08-23 · V043）——旧的二元字段语义已迁移为 `entry_mode` / `exit_mode` / `stop_loss_mode` 三字段；`next_open/stop` 已支持，`next_open/close` 与 `close/next_open` 仍按本期范围明确拒绝。旧 `exit_mode=stop` 不再静默解释，runner 会 warning 并失败。
+- 关联：解法说明见计划 `documents/plans/P-20260822-risk_exit_execution_modes.md` 与 HowToUse 8.34；实现入口 `agent/backtest/engines/base.py`；边界测试 `agent/tests/test_engine_execution_modes.py` / `agent/tests/test_runner_coverage.py`。
 
 ### M036 · 多交易日历下目标权重缩放不等于实际组合持仓上限（2026-08-20）· 🟡坑
 - 现象：六品种组合先把目标权重帧压到组合 60%、单标的 50%，但 `positions.csv` 仍出现组合峰值 62.48%。原因是某品种在另一品种新增仓位的时间点没有对应 bar，最终引擎按各 code 自己的交易日历前向填充；已有同方向 Position 也不会因目标权重变小而自动缩仓。

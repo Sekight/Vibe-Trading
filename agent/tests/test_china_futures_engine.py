@@ -404,29 +404,19 @@ class TestPriceTick:
 
     def test_close_fill_price_long_floor(self) -> None:
         engine = _make_engine(codes=["rb2410.SHFE"])
-        engine._same_bar = True
-        engine.positions["rb2410.SHFE"] = Position(
-            "rb2410.SHFE", 1, 3152.0, pd.Timestamp("2025-09-17"), 16.0
-        )
-        engine._stop_price = lambda ts, symbol: 3143.7571  # type: ignore[method-assign]
         bar = pd.Series({"open": 3155.0, "high": 3160.0, "low": 3140.0, "close": 3145.0})
-        assert engine._close_fill_price(
-            bar, pd.Timestamp("2025-09-17 10:05:00"), "rb2410.SHFE"
+        assert engine._stop_fill_price(
+            bar, 3143.7571, 1, "rb2410.SHFE"
         ) == 3143.0
         # 跳空低开穿破止损：按实际开盘价成交，不取整
         bar_gap = pd.Series({"open": 3140.0, "high": 3160.0, "low": 3135.0, "close": 3145.0})
-        assert engine._close_fill_price(
-            bar_gap, pd.Timestamp("2025-09-17 10:05:00"), "rb2410.SHFE"
+        assert engine._stop_fill_price(
+            bar_gap, 3143.7571, 1, "rb2410.SHFE"
         ) == 3140.0
 
     def test_close_fill_price_short_ceil(self) -> None:
         engine = _make_engine(codes=["rb2410.SHFE"])
-        engine._same_bar = True
-        engine.positions["rb2410.SHFE"] = Position(
-            "rb2410.SHFE", -1, 3160.0, pd.Timestamp("2025-09-19"), 15.0
-        )
-        engine._stop_price = lambda ts, symbol: 3169.2857  # type: ignore[method-assign]
         bar = pd.Series({"open": 3165.0, "high": 3175.0, "low": 3160.0, "close": 3170.0})
-        assert engine._close_fill_price(
-            bar, pd.Timestamp("2025-09-19 13:50:00"), "rb2410.SHFE"
+        assert engine._stop_fill_price(
+            bar, 3169.2857, -1, "rb2410.SHFE"
         ) == 3170.0

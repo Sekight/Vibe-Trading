@@ -138,6 +138,9 @@ Self-check after writing `signal_engine.py`:
   "optimizer": null,
   "optimizer_params": {},
   "engine": "daily",
+  "entry_mode": "next_open",
+  "exit_mode": "next_open",
+  "stop_loss_mode": "none",
   "validation": null
 }
 ```
@@ -153,6 +156,11 @@ Self-check after writing `signal_engine.py`:
 - `optimizer`: optional, one of `"equal_volatility"` / `"risk_parity"` / `"mean_variance"` / `"max_diversification"` / `"turnover_aware"` / `null` (equal-weight by default)
 - `optimizer_params`: optimizer parameters, such as `{"lookback": 60}`. `mean_variance` additionally supports `{"risk_free": 0.0}`; `turnover_aware` supports `{"risk_aversion": 1.0, "turnover_penalty": 0.5}` (L1 penalty on weight changes; tune to data frequency)
 - `engine`: backtest engine, default `"daily"`. For options strategies, set `"options"` (requires `OptionsSignalEngine`)
+- `entry_mode`: normal opening/add mode, `"next_open"` or `"close"`.
+- `exit_mode`: normal signal/take-profit/reduction exit mode, `"next_open"` or `"close"`; do not write `"stop"` here.
+- `stop_loss_mode`: engine protective stop, `"none"` or `"hard"`. Hard stops are independent of the normal exit signal and have priority.
+- When `stop_loss_mode="hard"`, `SignalEngine.generate()` may set `self.stop_prices` to a map of absolute stop-price Series. The index must align with each symbol's input bars. The strategy owns how candidates are calculated; the engine owns activation, gap handling, and market-rule execution.
+- `next_open` hard-stop runs currently require an absolute stop known at the signal bar; entry-price-dependent risk sizing (`stop_distance`/`risk_budget` → lots after the next open) is not yet supported.
 - `initial_cash`: default 1,000,000
 - `commission`: default 0.1%
 - `validation`: optional statistical validation after backtest completes. Omit to skip. Example:

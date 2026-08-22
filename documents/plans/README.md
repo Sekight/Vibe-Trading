@@ -43,6 +43,7 @@
 | P-20260818-trading_time_aggregation | 讨论中 | 2026-08-18 | 回测与前端支持按交易时间聚合（同花顺式，可选开关，默认自然时间兼容） | P-20260818-trading_time_aggregation.md | 待填 |
 | P-20260819-chart_4h_interval | 已完成 | 2026-08-19 | 报告页行情 K 线增加 4H 周期（与 1D 同级） | P-20260819-chart_4h_interval.md | V037 |
 | P-20260819-logical_symbol_groups | 已完成 | 2026-08-19 | A方案：config 驱动逻辑标的分组，兼容伪单位加仓与多标的图表 | P-20260819-logical_symbol_groups.md | V038 |
-| P-20260820-execution_mode_state_machine | 讨论中 | 2026-08-20 | 回测引擎正常交易与止损成交路径解耦 | P-20260820-execution_mode_state_machine.md | 待填 |
+| P-20260820-execution_mode_state_machine | 已废弃 | 2026-08-20 | 回测引擎正常交易与止损成交路径解耦（已废弃，见 P-20260822-risk_exit_execution_modes） | P-20260820-execution_mode_state_machine.md | 待填 |
 | P-20260822-mcp_backtest_workflow | 讨论中 | 2026-08-22 | MCP 回测模式与外部 Agent 协作工作流 | P-20260822-mcp_backtest_workflow.md | 待填 |
+| P-20260822-risk_exit_execution_modes | 已完成 | 2026-08-22 | 正常出场与保护性止损执行模式重构 | P-20260822-risk_exit_execution_modes.md | V043 |
 

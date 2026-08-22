@@ -1,10 +1,12 @@
 # 计划：回测引擎正常交易与止损成交路径解耦
 
 > 编号：P-20260820-execution_mode_state_machine
-> 状态：讨论中
+> 状态：已废弃
 > 日期：2026-08-20
 > 关联迭代：待填（收尾时填 V 号）
 > 关联：Mistake_Journal M035；commit / run（收尾时补）
+
+> ⚠️ 已废弃，见新计划 `P-20260822-risk_exit_execution_modes`。原文保留，历史讨论不删除。
 
 ## 项目调研
 

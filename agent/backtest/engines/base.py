@@ -24,6 +24,7 @@ import numpy as np
 import pandas as pd
 
 from backtest.constraints import apply_constraints_frame, load_constraints
+from backtest.execution_modes import validate_execution_modes
 from backtest.loaders.rsshub_events import (
     FeedSpec,
     RSSHubEventProvider,
@@ -70,6 +71,7 @@ class _OpenOrder:
     leverage: float
     margin: float
     commission: float
+    stop_price: Optional[float] = None
 
     @property
     def cost(self) -> float:
@@ -455,19 +457,20 @@ class BaseEngine(ABC):
         self._interval: str = str(config.get("interval") or "1D")
         self.initial_capital: float = config.get("initial_cash", 1_000_000)
         self.default_leverage: float = config.get("leverage", 1.0)
-        # Execution modes: next_open (default, existing behavior) or close-family.
-        # close/stop fill on the same bar the signal is emitted; the signal series
-        # is not shifted when the close family is active.
         self.entry_mode: str = str(config.get("entry_mode", "next_open"))
         self.exit_mode: str = str(config.get("exit_mode", "next_open"))
-        _exec_pair = f"{self.entry_mode}/{self.exit_mode}"
-        if _exec_pair not in {"next_open/next_open", "close/close", "close/stop"}:
-            raise ValueError(
-                "Allowed: next_open/next_open (default), close/close, close/stop."
-                f"Unsupported entry_mode/exit_mode combination: {_exec_pair!r}. "
-                "Allowed: next_open/next_open (default), close/close, close/stop."
-            )
-        self._same_bar: bool = self.entry_mode == "close"
+        self.stop_loss_mode: str = str(config.get("stop_loss_mode", "none"))
+        validate_execution_modes(
+            self.entry_mode,
+            self.exit_mode,
+            self.stop_loss_mode,
+        )
+        self._entry_same_bar: bool = self.entry_mode == "close"
+        self._exit_same_bar: bool = self.exit_mode == "close"
+        # Backward-compatible alias used by existing market-engine tests and
+        # by the target-alignment path, which is intentionally still limited
+        # to the supported symmetric normal pairs in this phase.
+        self._same_bar: bool = self._entry_same_bar
         # Markets that clear at or below zero (e.g. EU day-ahead power) opt in
         # to opening on negative-price bars. Default False preserves the legacy
         # "reject any open_price <= 0" behavior. An exactly-zero open is always
@@ -488,6 +491,11 @@ class BaseEngine(ABC):
         self._active_symbol: str = ""  # set by _rebalance/_close_position for subclass use
         self._stop_map: Optional[Dict[str, pd.Series]] = None
         self._stop_arr: Optional[np.ndarray] = None
+        self._active_stops: Dict[str, float] = {}
+        self._stop_triggered_this_bar: set[str] = set()
+        self._fill_phase: str = "normal"
+        self._fill_price_override: Optional[float] = None
+        self._fill_source: Optional[str] = None
 
     # ── Market rule interface (subclass must implement) ──
 
@@ -605,10 +613,19 @@ class BaseEngine(ABC):
         Returns:
             The prospective fill price, or None when the bar has no usable open.
         """
-        raw = bar.get("open", bar.get("close"))
-        # Same-bar mode fills at the decision bar's close (stop exits fill at
-        # min(open, stop) which is bounded by the same band when stop is inside it).
-        if self._same_bar:
+        raw = (
+            self._fill_price_override
+            if self._fill_price_override is not None
+            else bar.get("open", bar.get("close"))
+        )
+        # Same-bar mode fills normal orders at the decision bar's close.
+        # Hard-stop orders use _fill_price_override supplied by
+        # _try_hard_stop, so their limit check follows the actual stop/gap
+        # price rather than guessing from the normal mode.
+        same_bar = (
+            self._exit_same_bar if direction == 0 else self._entry_same_bar
+        )
+        if self._fill_price_override is None and same_bar:
             raw = bar.get("close", bar.get("open"))
         if raw is None or pd.isna(raw):
             return None
@@ -673,34 +690,52 @@ class BaseEngine(ABC):
 
     def _open_fill_price(self, bar: pd.Series) -> float:
         """Raw (pre-slippage) fill price for opening orders."""
-        if self._same_bar:
+        if self._entry_same_bar:
             return float(bar.get("close", bar.get("open", 0)))
         return self.execution_open(bar)
 
     def _close_fill_price(self, bar: pd.Series, ts: pd.Timestamp, symbol: str) -> float:
         """Raw (pre-slippage) fill price for closing orders."""
-        if not self._same_bar:
+        if not self._exit_same_bar:
             return self.execution_open(bar)
-        stop = self._stop_price(ts, symbol)
-        low = bar.get("low")
-
-        # Stops are direction-aware: longs stop below, shorts stop above.
-        high = bar.get("high")
-        open_px = bar.get("open")
-        if stop is not None and pd.notna(stop):
-            pos = self.positions.get(symbol)
-            direction = pos.direction if pos is not None else 1
-            if direction == 1 and low is not None and pd.notna(low) and float(low) <= stop:
-                # 未跳穿（开盘 ≥ 止损）按止损价成交；跳空低开穿破则按实际开盘价。
-                if open_px is not None and pd.notna(open_px) and float(open_px) < stop:
-                    return float(open_px)
-                return self._round_stop_fill(stop, direction, symbol)
-            if direction == -1 and high is not None and pd.notna(high) and float(high) >= stop:
-                # 未跳穿（开盘 ≤ 止损）按止损价成交；跳空高开穿破则按实际开盘价。
-                if open_px is not None and pd.notna(open_px) and float(open_px) > stop:
-                    return float(open_px)
-                return self._round_stop_fill(stop, direction, symbol)
         return float(bar.get("close", bar.get("open", 0)))
+
+    def _stop_fill_price(
+        self,
+        bar: pd.Series,
+        stop: Optional[float],
+        direction: int,
+        symbol: str,
+    ) -> Optional[float]:
+        """Return the raw hard-stop fill price when this bar triggers it.
+
+        A stop is a gap-through only when a long opens strictly below its
+        stop or a short opens strictly above its stop.  Otherwise a triggered
+        stop fills at the stop price, rounded by the market hook.
+        """
+        if stop is None or not np.isfinite(stop):
+            return None
+        open_px = bar.get("open")
+        if open_px is None or pd.isna(open_px):
+            open_px = bar.get("close")
+        if open_px is None or pd.isna(open_px):
+            return None
+        open_px = float(open_px)
+
+        if direction == 1:
+            low = bar.get("low")
+            if low is None or pd.isna(low) or float(low) > stop:
+                return None
+            if open_px < stop:
+                return open_px
+            return self._round_stop_fill(stop, direction, symbol)
+
+        high = bar.get("high")
+        if high is None or pd.isna(high) or float(high) < stop:
+            return None
+        if open_px > stop:
+            return open_px
+        return self._round_stop_fill(stop, direction, symbol)
 
     def _round_stop_fill(self, price: float, direction: int, symbol: str) -> float:
         """止损成交价按品种最小变动价位取整：多单 floor、空单 ceil（保守）。
@@ -723,6 +758,129 @@ class BaseEngine(ABC):
             return None
         val = self._stop_arr[self._bar_idx, col]
         return None if val is None or np.isnan(val) else float(val)
+
+    def _stop_candidate_at(
+        self, symbol: str, timestamp: pd.Timestamp
+    ) -> Optional[float]:
+        """Read the strategy's stop candidate for a signal timestamp."""
+        if not self._stop_map:
+            return None
+        series = self._stop_map.get(symbol)
+        if series is None:
+            return None
+        try:
+            value = pd.Series(series).reindex([timestamp]).iloc[0]
+        except (IndexError, KeyError, TypeError, ValueError):
+            return None
+        if pd.isna(value):
+            return None
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            return None
+        return value if np.isfinite(value) else None
+
+    def _stop_candidate_before(
+        self, symbol: str, timestamp: pd.Timestamp
+    ) -> Optional[float]:
+        """Read the last stop candidate strictly before ``timestamp``."""
+        if not self._stop_map:
+            return None
+        series = self._stop_map.get(symbol)
+        if series is None:
+            return None
+        series = pd.Series(series).sort_index()
+        try:
+            loc = series.index.searchsorted(timestamp, side="left") - 1
+        except (TypeError, ValueError):
+            return None
+        if loc < 0 or loc >= len(series):
+            return None
+        value = series.iloc[loc]
+        if pd.isna(value):
+            return None
+        try:
+            value = float(value)
+        except (TypeError, ValueError):
+            return None
+        return value if np.isfinite(value) else None
+
+    def _try_hard_stop(
+        self,
+        symbol: str,
+        bar: pd.Series,
+        timestamp: pd.Timestamp,
+    ) -> bool:
+        """Close an active position when its hard stop is touched."""
+        if self.stop_loss_mode != "hard":
+            return False
+        position = self.positions.get(symbol)
+        stop = self._active_stops.get(symbol)
+        if position is None or stop is None:
+            return False
+        raw_price = self._stop_fill_price(
+            bar, stop, position.direction, symbol
+        )
+        if raw_price is None:
+            return False
+        self._active_symbol = symbol
+        open_px = bar.get("open")
+        gap = (
+            open_px is not None
+            and not pd.isna(open_px)
+            and (
+                (position.direction == 1 and float(open_px) < stop)
+                or (position.direction == -1 and float(open_px) > stop)
+            )
+        )
+        self._fill_phase = "stop"
+        self._fill_source = "gap_open" if gap else "stop_price"
+        self._fill_price_override = raw_price
+        try:
+            allowed = self.can_execute(symbol, 0, bar)
+        except Exception:
+            self._fill_source = None
+            raise
+        finally:
+            self._fill_phase = "normal"
+            self._fill_price_override = None
+        if not allowed:
+            logger.warning(
+                "Hard stop triggered but blocked for %s at %s",
+                symbol,
+                timestamp,
+            )
+            self._fill_source = None
+            # A triggered hard stop has priority over a normal signal exit,
+            # even when the market rule blocks the stop fill.  Keep the
+            # position and retry on a later bar instead of silently replacing
+            # the blocked protective exit with a signal close on this bar.
+            self._stop_triggered_this_bar.add(symbol)
+            return False
+        price = self.apply_slippage(raw_price, -position.direction)
+        try:
+            self._close_position(symbol, price, timestamp, "stop")
+        finally:
+            self._fill_source = None
+        self._active_stops.pop(symbol, None)
+        self._stop_triggered_this_bar.add(symbol)
+        return True
+
+    def _update_active_stops(
+        self, codes: List[str], timestamp: pd.Timestamp
+    ) -> None:
+        """Apply stop candidates at bar close for the next bar."""
+        if self.stop_loss_mode != "hard":
+            return
+        for symbol in list(self.positions):
+            candidate = self._stop_candidate_at(symbol, timestamp)
+            if candidate is not None:
+                # No tightening/loosening policy is imposed here.  The
+                # strategy owns that policy and the engine stores its value.
+                self._active_stops[symbol] = candidate
+        for symbol in list(self._active_stops):
+            if symbol not in self.positions:
+                self._active_stops.pop(symbol, None)
 
     def get_price_tick(self, symbol: str) -> Optional[float]:
         """Minimum price tick for the instrument; None = unknown (no rounding).
@@ -867,13 +1025,20 @@ class BaseEngine(ABC):
                     "backtest window is empty after applying backtest_start/backtest_end"
                 )
 
-        # Optional stop-price series from the strategy. Only used for
-        # exit_mode="stop" same-bar exits; without it stops fall back to close.
+        # Optional absolute stop-price series from the strategy. The hard-stop
+        # path is independent of normal signal exits. A missing series leaves
+        # the position without an engine-side protective stop; the strategy
+        # can still implement a normal signal exit itself.
         self._stop_map = None
-        if self._same_bar and self.exit_mode == "stop":
+        if self.stop_loss_mode == "hard":
             stop_map = getattr(signal_engine, "stop_prices", None)
             if isinstance(stop_map, dict):
                 self._stop_map = stop_map
+            else:
+                logger.warning(
+                    "stop_loss_mode='hard' but SignalEngine.stop_prices is missing; "
+                    "no engine-side protective stops will be active"
+                )
 
         # 4. Bar-by-bar execution
         self._execute_bars(dates, data_map, close_df, target_pos, valid_codes)
@@ -1073,11 +1238,23 @@ class BaseEngine(ABC):
                 # matching the close matrix column order (codes).
                 _stop_arr = stop_df.reindex(columns=codes).values
         self._stop_arr = _stop_arr
+        self._active_stops.clear()
+        pending_targets: Optional[Dict[str, Optional[float]]] = None
 
         for i, ts in enumerate(dates):
             self._bar_idx = i
+            self._stop_triggered_this_bar.clear()
 
             stop_run = self.before_rebalance_bar(ts, data_map, codes)
+
+            # Existing positions are checked before normal signal exits.  A
+            # hard stop is an independent risk event and therefore does not
+            # require target weight to become zero first.
+            if not stop_run and self.stop_loss_mode == "hard":
+                for symbol in list(self.positions):
+                    frame = data_map.get(symbol)
+                    if frame is not None and ts in frame.index:
+                        self._try_hard_stop(symbol, frame.loc[ts], ts)
 
             # a. Value the book at prices observable when orders execute.
             # Rebalances happen at the bar open, so using close_df[ts] here
@@ -1089,16 +1266,25 @@ class BaseEngine(ABC):
                 equity = self._calc_equity(close_df, ts)
             else:
                 equity = self._calc_open_equity(data_map, close_df, ts)
-            target_weights: Dict[str, Optional[float]] = {}
-            for c in codes:
-                try:
-                    val = _target_arr[i, _code_to_col[c]]
-                    target_weights[c] = (
-                        None if stop_run else (float(val) if not np.isnan(val) else 0.0)
-                    )
-                except Exception as exc:
-                    target_weights[c] = None
-                    logger.warning("Target weight failed for %s at %s: %s", c, ts, exc)
+            if not self._same_bar and pending_targets is not None:
+                # The previous signal bar created this intent.  It is now
+                # due for execution at the current bar's open.
+                target_weights = pending_targets
+            else:
+                target_weights = {}
+                for c in codes:
+                    try:
+                        val = _target_arr[i, _code_to_col[c]]
+                        target_weights[c] = (
+                            None
+                            if stop_run
+                            else (float(val) if not np.isnan(val) else 0.0)
+                        )
+                    except Exception as exc:
+                        target_weights[c] = None
+                        logger.warning(
+                            "Target weight failed for %s at %s: %s", c, ts, exc
+                        )
 
             # b. Release capital before opening replacement positions.  A
             # single mixed close/open pass makes rotations depend on symbol
@@ -1106,6 +1292,8 @@ class BaseEngine(ABC):
             for c in codes:
                 target_w = target_weights[c]
                 current_pos = self.positions.get(c)
+                if c in self._stop_triggered_this_bar:
+                    continue
                 if target_w is None or current_pos is None:
                     continue
                 target_dir = 1 if target_w > 1e-9 else (-1 if target_w < -1e-9 else 0)
@@ -1122,10 +1310,14 @@ class BaseEngine(ABC):
             # one common scale factor to all target weights.  This preserves
             # portfolio proportions and makes fills independent of input code
             # order; sequential cash clipping would privilege the first name.
-            open_targets: list[tuple[str, float, Optional[pd.DataFrame]]] = []
+            open_targets: list[
+                tuple[str, float, Optional[pd.DataFrame], Optional[float]]
+            ] = []
             for c in sorted(codes):
                 target_w = target_weights[c]
                 if target_w is None:
+                    continue
+                if c in self._stop_triggered_this_bar:
                     continue
                 target_dir = 1 if target_w > 1e-9 else (-1 if target_w < -1e-9 else 0)
                 current_pos = self.positions.get(c)
@@ -1134,15 +1326,59 @@ class BaseEngine(ABC):
                 ):
                     continue
                 if current_pos is None and target_dir != 0:
-                    open_targets.append((c, target_w, data_map.get(c)))
+                    frame = data_map.get(c)
+                    entry_stop = None
+                    if self.stop_loss_mode == "hard":
+                        if self._same_bar:
+                            entry_stop = self._stop_candidate_at(c, ts)
+                        elif i > 0:
+                            entry_stop = self._stop_candidate_at(c, dates[i - 1])
+                        else:
+                            entry_stop = self._stop_candidate_before(c, ts)
+
+                    # A next-open entry whose opening price has already
+                    # crossed its precomputed stop is cancelled.  This is a
+                    # policy decision, not an immediate entry+exit trade.
+                    if (
+                        not self._same_bar
+                        and entry_stop is not None
+                        and frame is not None
+                        and ts in frame.index
+                    ):
+                        open_px = self.execution_open(frame.loc[ts])
+                        crossed = (
+                            target_dir == 1 and open_px < entry_stop
+                        ) or (
+                            target_dir == -1 and open_px > entry_stop
+                        )
+                        if crossed:
+                            logger.info(
+                                "Next-open entry cancelled through hard stop for %s at %s",
+                                c,
+                                ts,
+                            )
+                            continue
+                    open_targets.append((c, target_w, frame, entry_stop))
 
             def _plans(scale: float) -> list[_OpenOrder]:
                 result: list[_OpenOrder] = []
-                for c, target_w, frame in open_targets:
+                for c, target_w, frame, entry_stop in open_targets:
                     try:
-                        order = self._plan_open_order(
-                            c, target_w * scale, frame, ts, equity
-                        )
+                        if self.stop_loss_mode == "hard":
+                            order = self._plan_open_order(
+                                c,
+                                target_w * scale,
+                                frame,
+                                ts,
+                                equity,
+                                stop_price=entry_stop,
+                            )
+                        else:
+                            # Keep the historical subclass/test override
+                            # signature valid when no stop contract is active.
+                            order = self._plan_open_order(
+                                c, target_w * scale, frame, ts, equity
+                            )
                     except Exception as exc:
                         logger.warning(
                             "Rebalance open plan failed for %s at %s: %s",
@@ -1166,8 +1402,51 @@ class BaseEngine(ABC):
                     else:
                         high = mid
 
+            opened_this_bar: list[str] = []
             for order in planned:
                 self._execute_open_order(order, ts)
+                opened_this_bar.append(order.symbol)
+                if (
+                    self.stop_loss_mode == "hard"
+                    and not self._same_bar
+                    and order.stop_price is not None
+                ):
+                    # The stop snapshot belongs to the signal that created
+                    # this next-open order and is active immediately after
+                    # the open fill.
+                    self._active_stops[order.symbol] = order.stop_price
+
+            # A next-open entry is active from its opening bar.  If that bar
+            # later touches the stop, record a stop trade; a gap-through was
+            # already rejected before the entry order was planned.
+            if self.stop_loss_mode == "hard" and not self._same_bar:
+                for symbol in opened_this_bar:
+                    frame = data_map.get(symbol)
+                    if frame is not None and ts in frame.index:
+                        self._try_hard_stop(symbol, frame.loc[ts], ts)
+
+            # For close entries the fill occurs at the bar close, so their
+            # candidate stop cannot inspect the same bar and becomes active
+            # only on the next bar.  For existing/next-open positions this
+            # also applies any new strategy candidate for the next bar.
+            self._update_active_stops(codes, ts)
+
+            if not self._same_bar and i + 1 < len(dates):
+                # Materialise the next normal target as a pending intent.  A
+                # later implementation can attach richer order metadata here
+                # without changing the execution phase below.
+                pending_targets = {
+                    c: (
+                        None
+                        if stop_run
+                        else (
+                            float(_target_arr[i + 1, _code_to_col[c]])
+                            if not np.isnan(_target_arr[i + 1, _code_to_col[c]])
+                            else 0.0
+                        )
+                    )
+                    for c in codes
+                }
 
             # d. Apply post-execution hooks after all normal market fills.
             if not stop_run:
@@ -1238,6 +1517,11 @@ class BaseEngine(ABC):
         self._code_to_col = None
         self._stop_arr = None
         self._stop_map = None
+        self._active_stops.clear()
+        self._stop_triggered_this_bar.clear()
+        self._fill_phase = "normal"
+        self._fill_price_override = None
+        self._fill_source = None
 
     def _calc_open_equity(
         self,
@@ -1371,6 +1655,7 @@ class BaseEngine(ABC):
         df: Optional[pd.DataFrame],
         ts: pd.Timestamp,
         equity: float,
+        stop_price: Optional[float] = None,
     ) -> Optional[_OpenOrder]:
         """Price an opening order without mutating portfolio state."""
         self._active_symbol = symbol
@@ -1406,6 +1691,7 @@ class BaseEngine(ABC):
             leverage=leverage,
             margin=margin,
             commission=commission,
+            stop_price=stop_price,
         )
 
     def _execute_open_order(self, order: _OpenOrder, ts: pd.Timestamp) -> None:
@@ -1438,6 +1724,7 @@ class BaseEngine(ABC):
         pos = self.positions.pop(symbol, None)
         if pos is None:
             return
+        self._active_stops.pop(symbol, None)
 
         pnl = self._calc_pnl(symbol, pos.direction, pos.size, pos.entry_price, exit_price)
         margin = self._calc_margin(symbol, pos.size, pos.entry_price, pos.leverage)

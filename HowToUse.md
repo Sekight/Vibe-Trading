@@ -589,7 +589,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 
 ```text
 <run_id>/
-├─ config.json                 回测参数：codes / start_date / end_date / interval / source / initial_cash / 费率 / engine / optimizer / validation / entry_mode / exit_mode（详见 8.34）
+├─ config.json                 回测参数：codes / start_date / end_date / interval / source / initial_cash / 费率 / engine / optimizer / validation / entry_mode / exit_mode / stop_loss_mode（详见 8.34）
 ├─ req.json                    用户原始 prompt + context（session_id）
 ├─ state.json                  状态：{"status":"success"} 或失败原因
 ├─ run_card.json / run_card.md 结果摘要：metrics、data_sources、hash、artifacts 清单
@@ -695,7 +695,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 >
 > `config.json` 是回测 runner 实际读取的“参数单”：agent 按你的提示词生成，也可以手动改；`python -m backtest.runner <run_dir>` 读它决定数据源、周期、标的、本金、费率、成交模式等，再加载 `code/signal_engine.py` 跑回测。它不含 API key；改完不会自动生效，需要重跑 runner 或用 `--continue` 续跑。
 >
-> 常见字段（不写某字段就用默认值；旧别名可同时保留）：
+> 常见字段（不写某字段就用默认值；旧配置文件可以保留，但 `exit_mode=stop` 必须按下方迁移规则改成三字段）：
 >
 > | 字段 | 作用 | 默认值 |
 > | --- | --- | --- |
@@ -711,8 +711,9 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 > | `slippage` | 滑点比例（买价×1.001、卖价×0.999） | 0.001 |
 > | `engine` | 回测引擎：daily / options | daily |
 > | `slippage_points` | 绝对跳点滑点：买价+n跳、卖价-n跳；配置后优先于 `slippage` 比例 | 无（用 `slippage`） |
-> | `entry_mode` | 开仓成交时点：next_open（次日开盘）或 close（信号日收盘） | next_open |
-> | `exit_mode` | 平仓成交时点：next_open / close / stop（止损价成交） | next_open |
+> | `entry_mode` | 正常开仓/加仓成交时点：next_open（次日开盘）或 close（信号日收盘） | next_open |
+> | `exit_mode` | 正常信号平仓/止盈/减仓成交时点：next_open 或 close；不能写 stop | next_open |
+> | `stop_loss_mode` | 引擎保护性止损：none（关闭）或 hard（独立触发、优先平仓） | none |
 > | `optimizer` | 权重优化器名（如 risk_parity）；`optimizer_params` 传参数 | 无（不优化） |
 > | `constraints` | 组合约束（总仓位、单标的上限等），需配合 optimizer 才生效 | 无 |
 > | `validation` | 显式 true 时跑蒙特卡洛；不写时若 trade_count >= 10 也会自动跑（n_simulations 降档：<100→1000，100-299→500，300-999→200，>=1000→100），产出 artifacts/validation.json | 自动（按交易数） |
@@ -724,17 +725,26 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 > 注意：`_run_card_effective_sources`、`_run_card_warnings` 是 runner 运行后写入的内部字段，不要手动编辑。
 > - 滑点优先级：配置 `slippage_points` 时按绝对跳点计算（`price + direction * slippage_points`，rb 1 跳 = 1 点；开多/平空为 +，开空/平多为 -），不配置时回退到 `slippage` 比例滑点。目前由国内期货引擎（ChinaFuturesEngine）读取，其他引擎仍只认 `slippage`。
 >
-> #### 成交时点 `entry_mode` / `exit_mode`（重点）
+> #### 正常成交与保护性止损模式（重点）
 >
-> - 允许组合只有三种：`next_open/next_open`（默认，旧行为不变）、`close/close`、`close/stop`；`next_open/close`、`next_open/stop`、`close/next_open` 会在 `agent/backtest/engines/base.py` 直接报错。
-> - `next_open`：信号日收盘出信号，次日开盘成交，避免用到当日收盘信息。
-> - `close`：信号日收盘价成交，适合“尾盘集合竞价 / 当天决定当天成交”。
-> - `stop`（只能配 `entry_mode=close`）：出场按策略给的止损价成交；当日最低价触及止损价时，成交价 = min(当日开盘价, 止损价)（跳空低开按开盘价，避免成交价低于开盘价）；未触及止损则按收盘价成交。
+> - 正常 `entry_mode/exit_mode` 组合目前只允许 `next_open/next_open` 和 `close/close`；`next_open/close`、`close/next_open` 暂不开放。
+> - 四个常用 preset：
+>   - `next_open/next_open` = `entry_mode: next_open` + `exit_mode: next_open` + `stop_loss_mode: none`；
+>   - `close/close` = `entry_mode: close` + `exit_mode: close` + `stop_loss_mode: none`；
+>   - `close/stop` = `entry_mode: close` + `exit_mode: close` + `stop_loss_mode: hard`；
+>   - `next_open/stop` = `entry_mode: next_open` + `exit_mode: next_open` + `stop_loss_mode: hard`。
+> - `next_open`：正常信号在当前 bar 产生，下一根实际 bar 开盘成交；`close`：正常信号在当前 bar 收盘成交。
+> - `stop_loss_mode: hard`：持仓建立后独立维护 active stop，不需要策略先把 target 改成 0；止损优先于正常信号平仓。
+> - next-open 入场当根启用 hard stop：若多单开盘价严格低于 stop，或空单开盘价严格高于 stop，取消入场，不产生开仓/止损双边手续费；若开盘没有穿 stop、入场后当根触及 stop，则先入场再按止损规则平仓。
+> - hard stop 非跳空触发按止损价成交；只有多单 `open < stop` 或空单 `open > stop` 时才按开盘价成交；期货止损价继续按品种 tick 取整。
+> - 旧配置 `exit_mode: stop` 不再支持：runner 会在加载行情前失败并给迁移提示。新配置使用 `exit_mode: close` 或 `next_open`，另加 `stop_loss_mode: hard`。
 >
 > #### `stop_prices`（策略代码字段，不写在 config.json）
 >
-> - 止损价由 `signal_engine.py` 自己算：`SignalEngine.generate()` 返回权重的同时，把 `self.stop_prices = {代码: pd.Series(止损价, index=交易日)}` 带上。
-> - 只有 `exit_mode="stop"` 时引擎才读它；某天止损价为 NaN/缺失，当天出场退回收盘价成交。
+> - 止损价由 `signal_engine.py` 自己算：`SignalEngine.generate()` 返回权重的同时，把 `self.stop_prices = {代码: pd.Series(绝对止损价, index=交易日)}` 带上。
+> - 只有 `stop_loss_mode="hard"` 时引擎才把它作为独立保护止损读取；普通 `exit_mode` 平仓不会读取止损价。
+> - 新 stop 候选默认在下一根 bar 生效；NaN 表示本 bar 不更新，沿用上一个有效 active stop。策略是否放宽止损由策略代码决定，引擎不做 max/min 限制。
+> - next-open 以损定量暂不支持：如果 stop 依赖实际 next-open 入场价，当前策略应使用预先可知的绝对 stop；实际成交后按 stop distance 计算手数属于后续迭代。
 > - `config.json` 不需要也不能写 `stop_prices`。
 >
 > #### 基准（benchmark）逻辑详解

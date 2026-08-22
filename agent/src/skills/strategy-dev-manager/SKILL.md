@@ -191,6 +191,14 @@ Runner AST safety constraints (violations reject the file and force a rewrite):
 - NO executable statements at module top level or inside class bodies; keep logic inside `SignalEngine` methods
 - Imports at module top level may include `math`, `numpy`, `pandas`, `typing` only (other pure helpers are allowed unless forbidden above)
 
+## Execution and hard-stop contract
+
+- `config.json.entry_mode` controls normal opens/adds (`next_open` or `close`).
+- `config.json.exit_mode` controls normal signal exits, take-profit signals, reductions, and reversal closes (`next_open` or `close`). Do not use `exit_mode="stop"`; the runner rejects that legacy spelling and asks for migration.
+- `config.json.stop_loss_mode` is `none` or `hard`. With `hard`, a strategy may expose `self.stop_prices = {symbol: pd.Series(...)}` from `generate()` using absolute stop prices known at the signal bar.
+- The strategy owns ATR/stop calculations and whether a candidate stop widens. The engine owns active-stop timing, next-open gap rejection, hard-stop priority, and market-rule fills.
+- Entry-price-dependent next-open risk sizing is not part of the current contract. Do not look ahead to the next bar's open to calculate lots inside `generate()`; use the existing target-weight sizing unless a later engine contract explicitly provides a risk intent.
+
 ## Quality Checklist
 
 Self-check before marking any phase complete:

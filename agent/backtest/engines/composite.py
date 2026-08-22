@@ -176,8 +176,18 @@ class CompositeEngine(BaseEngine):
                 if bar_date and entry_date and bar_date == entry_date:
                     return False
 
-        # Delegate remaining checks (price limits, short-sell block, etc.)
-        return self._rule_for(symbol).can_execute(symbol, direction, bar)
+        # Delegate remaining checks (price limits, short-sell block, etc.).
+        # The sub-engine is a rule book, but it still needs the parent
+        # execution phase/price override when a composite hard stop is being
+        # checked; otherwise its limit check would fall back to open/close.
+        sub = self._rule_for(symbol)
+        sub._fill_phase = self._fill_phase
+        sub._fill_price_override = self._fill_price_override
+        try:
+            return sub.can_execute(symbol, direction, bar)
+        finally:
+            sub._fill_phase = "normal"
+            sub._fill_price_override = None
 
     def round_size(self, raw_size: float, price: float) -> float:
         """Delegate to active symbol's sub-engine."""

@@ -388,7 +388,9 @@ class CryptoEngine(BaseEngine):
                 side="buy" if order.direction == 1 else "sell",
                 signed_quantity=order.direction * order.size,
                 execution_price=order.price,
-                execution_price_source="execution_open",
+                execution_price_source=(
+                    "close" if self._entry_same_bar else "execution_open"
+                ),
                 trading_fee=order.commission,
                 reason="signal",
             )
@@ -408,7 +410,12 @@ class CryptoEngine(BaseEngine):
             trade = self.trades[-1]
             price_source = self._liquidation_price_source
             if price_source is None:
-                price_source = "mark_close" if reason == "end_of_backtest" else "execution_open"
+                if reason == "end_of_backtest":
+                    price_source = "mark_close"
+                elif reason == "stop":
+                    price_source = self._fill_source or "stop_price"
+                else:
+                    price_source = "close" if self._exit_same_bar else "execution_open"
             self._record_event(
                 exit_time,
                 "market_fill",

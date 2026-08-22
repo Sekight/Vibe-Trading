@@ -48,6 +48,7 @@ from backtest.loaders.registry import (
     get_loader_cls_with_fallback,
     resolve_loader,
 )
+from backtest.execution_modes import validate_execution_modes
 from backtest.loaders.base import NoAvailableSourceError, validate_ohlc
 # Symbol classification lives in ``_market_hooks`` so runner.py and
 # composite.py share a single source of truth (audit-2026-05-18 B1+C1+C2).
@@ -90,6 +91,9 @@ class BacktestConfigSchema(BaseModel):
     source: str = "tushare"
     interval: str = "1D"
     engine: str = "daily"
+    entry_mode: str = "next_open"
+    exit_mode: str = "next_open"
+    stop_loss_mode: str = "none"
     # Returns divide by initial_cash, so a non-positive value yields inf/NaN
     # metrics (total_return, annual_return, ...). Reject it at the config
     # boundary instead of letting the run produce non-finite results.
@@ -172,6 +176,15 @@ class BacktestConfigSchema(BaseModel):
             raise ValueError(
                 f"start_date ({self.start_date}) must be <= end_date ({self.end_date})"
             )
+        return self
+
+    @model_validator(mode="after")
+    def valid_execution_modes(self) -> "BacktestConfigSchema":
+        validate_execution_modes(
+            self.entry_mode,
+            self.exit_mode,
+            self.stop_loss_mode,
+        )
         return self
 
 
@@ -928,6 +941,22 @@ def main(
         sys.exit(1)
 
     raw_config = json.loads(config_path.read_text(encoding="utf-8"))
+
+    # Legacy ``exit_mode=stop`` used to overload normal signal exits with a
+    # stop-price fill.  Do not silently reinterpret old configs as the new
+    # independent hard-stop model.  Emit a warning and fail before data or
+    # strategy loading so migration is cheap and observable.
+    if raw_config.get("exit_mode") == "stop":
+        print(json.dumps({
+            "warning": (
+                "legacy exit_mode='stop' rejected; migrate to "
+                "exit_mode='close' + stop_loss_mode='hard'"
+            )
+        }, ensure_ascii=False))
+        print(json.dumps({
+            "error": "Invalid config: legacy exit_mode='stop' is not supported"
+        }, ensure_ascii=False))
+        sys.exit(1)
 
     # Validate config schema
     try:

@@ -4,7 +4,7 @@
 > 状态：讨论中
 > 日期：2026-08-22
 > 关联迭代：待填（收尾时填 V 号）
-> 关联：P-20260816-cache_env_once / P-20260817-fastrun / P-20260820-execution_mode_state_machine / commit / run（收尾时补）
+> 关联：P-20260816-cache_env_once / P-20260817-fastrun / P-20260822-risk_exit_execution_modes / commit / run（收尾时补）
 
 ## 项目调研
 
@@ -18,7 +18,7 @@
 
 ## 前置计划与顺序评估
 
-- **必须先冻结/实现：P-20260820-execution_mode_state_machine**。本需求要把 `entry_mode/exit_mode` 写入 capability registry 和 MCP schema；如果该计划的 normal/stop 路径、`next_open/stop`、缺少 `stop_prices`、同 bar 冲突等语义尚未定稿，先暴露 MCP 参数会把不稳定的成交规则固化，后续必须同步返工 MCP、bridge skill 和 HowToUse。建议先完成该计划的公共 execution profile/配置校验，或把它作为本需求 Phase 0 合并执行。
+- **已完成前置：P-20260822-risk_exit_execution_modes**。本需求要把三字段 execution profile 写入 capability registry 和 MCP schema；现在 normal/stop 路径、`next_open/stop`、缺少 `stop_prices`、同 bar 冲突等语义已有计划与回归验证，后续 MCP 实现应复用公共校验，不得复制字符串白名单。
 - **必须先完成/并入：P-20260816-cache_env_once**。本需求默认 `use_cache=true`，需要先统一 runner 加载 `<vibe_home>/.env` 的路径；否则 CLI、MCP 子进程和直跑 runner 可能出现不同缓存行为。该计划只改 env 加载，不改缓存算法，风险和范围可控。
 - **软依赖：P-20260818-trading_time_aggregation**。它会增加 `aggregation` 配置并改变小周期 bar 的时间边界，但不直接改 MCP `backtest` 的动作层；本需求应把 `aggregation` 作为可扩展 config 字段透传，不在 bridge skill 中写死自然时间聚合。若该计划在本需求之前落地，只需重新生成能力表和小周期说明，不需要重写 MCP 工具。
 - **非前置阻塞：P-20260816-contract_switch_auto**。它改 local loader 的 `contract` 列透传和策略侧换约识别，不改变 MCP 回测动作；本需求只需确保 run_dir/config/artifact 以通用方式传递。
@@ -125,7 +125,7 @@
 - 2026-08-22 设计修正：不公开新增 `fast_backtest` / `generate_charts` / `generate_report` 三个工具；统一扩展原 `backtest` 的 `action`、`speed`、`use_cache`、`execution` 参数。三者保留为 action/能力 ID，内部 handler 不直接暴露。
 - 2026-08-22 bridge skill 职责再次收敛：不重复 MCP 参数说明，只保留原约定的工作流能力和协作边界；参数由 MCP schema、server instructions 和能力注册表提供。
 - 2026-08-22 用户要求复查其他“讨论中”计划的前置关系，避免本需求先固化接口后被后续引擎/缓存计划迫使返工。
-- 2026-08-22 依赖评估结论：P-20260820-execution_mode_state_machine 与 P-20260816-cache_env_once 为硬前置或必须并入 Phase 0；交易时间聚合、换约识别、仓位指标和报告目录选择器为软依赖/非阻塞，但 registry 和 MCP 必须保留配置、run_dir、artifact 口径的扩展兼容性。
+- 2026-08-22 依赖评估结论：P-20260822-risk_exit_execution_modes 与 P-20260816-cache_env_once 为硬前置或必须并入 Phase 0；交易时间聚合、换约识别、仓位指标和报告目录选择器为软依赖/非阻塞，但 registry 和 MCP 必须保留配置、run_dir、artifact 口径的扩展兼容性。
 
 ## 风险 / 注意
 
@@ -134,6 +134,6 @@
 - `generate_charts` 是后处理，依赖已有 artifacts；缺少完整 artifacts 时应返回可读错误，不应偷偷重跑。
 - MCP stdio server 的环境变量由 Codex client 注入；不要把 API key 写入 skill 或仓库配置。
 - `VIBE_TRADING_ALLOWED_RUN_ROOTS`、`VIBE_TRADING_DATA_CACHE_ROOT` 需要同时考虑 MCP 主进程和回测子进程的路径可见性。
-- 不得在 execution mode 尚未定稿时把 `entry_mode/exit_mode` 的当前字符串白名单直接复制到 MCP/skill；应由公共 execution profile 生成，避免后续状态机计划返工。
+- 不得把 `entry_mode` / `exit_mode` / `stop_loss_mode` 的字符串白名单直接复制到 MCP/skill；应由公共 execution profile 生成，避免 MCP 与引擎再次漂移。
 - `aggregation`、`logical_groups`、报告目录 `dir` 等后续配置/路径扩展不得被 MCP 工具硬编码为 runs 根目录或自然时间聚合。
-- 当前工作树已有未跟踪计划 `P-20260820-execution_mode_state_machine.md`，实现时不得覆盖或整理该用户文件。
+- execution mode 的实现与迁移以已完成计划 `P-20260822-risk_exit_execution_modes.md` 为准；旧计划保留为已废弃历史，不再作为 MCP 前置引用。

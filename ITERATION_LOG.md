@@ -55,6 +55,7 @@
 | V040 | 2026-08-20 | 交易 Tab 全量按钮布局与默认样式调整 | 全量按钮移到统计行，默认中性可点击，长文案允许换行 |
 | V041 | 2026-08-20 | Reports 列表扩大到前 300 个并按真实时间排序 | 按 mtime 排序并放宽前后端扫描上限，避免自定义命名的最新 run 被截掉 |
 | V042 | 2026-08-22 | 直跑 runner 一次加载缓存环境 | runner 复用统一 dotenv，默认/自定义运行目录均可一次配置缓存，并补充缓存目录使用说明 |
+| V043 | 2026-08-23 | 三字段执行模式与独立硬止损 | `next_open/stop` 落地；四个 preset 用 `entry_mode`/`exit_mode`/`stop_loss_mode` 表达，旧 `exit_mode=stop` 早失败并 warning |
 > 补录说明：V001-V009 为补录条目，依据 git 历史、HowToUse、全局复利与踩坑日志、`C:\Users\mumu\.codex\sessions` 会话记录回溯整理；当时未留痕的字段标“待补”。从下一条起，每次迭代收尾直接写正文。
 
 ## 模板
@@ -503,3 +504,12 @@
 - 关键细节：`agent/backtest/runner.py` 改为调用 `src.providers.llm._ensure_dotenv()`；`src/providers/llm.py` 的运行目录 dotenv 候选默认首项为 `~/.vibe-trading/.env`，`VIBE_TRADING_HOME` 启动前覆盖时首项跟随自定义目录；`VIBE_TRADING_DATA_CACHE_ROOT` 仍作为独立缓存目录覆盖项。缓存 key、版本、过期判断、loader、CLI/WebUI、fastrun/digest 行为均未改动。
 - 验证：`agent/tests/test_runner_dotenv.py` 3 passed；与 `test_dotenv_observability.py` 合计 8 passed；隔离子进程确认缓存首次写入 parquet、第二次 fetch 命中（fetch 只执行 1 次）；真实默认环境探针输出 `enabled=true`、缓存根目录为 `~/.vibe-trading/cache/loaders`；相关 runner/dotenv 回归集 155 passed、1 skipped；loader/cache 扩展集 249 passed、1 skipped，另有 1 个既有 Windows 下 `HOME` 与 `Path.home()` 预期不一致的基线失败，未修改无关代码。
 - 关联：计划 P-20260816-cache_env_once；Mistake_Journal M022；HowToUse 8.35；当前改动尚未提交（无 commit）。
+
+### V043 · 三字段执行模式与独立硬止损（2026-08-23）
+- 一句话总结：将正常开仓/加仓、正常信号平仓和保护性硬止损拆成 `entry_mode`、`exit_mode`、`stop_loss_mode` 三个字段，完成 `next_open/stop` P0，并保留四个常用 preset 的明确映射。
+- 为什么：旧 `entry_mode`、`exit_mode=stop` 让普通出场和止损共用成交分支，无法表达 next-open 入场后的 active stop，也无法区分旧配置迁移与新止损语义；该问题记录在 M035。
+- 关键细节：正常订单维护 next-open pending intent；hard stop 独立维护持仓级 active stop，优先于 signal close；多单仅 `open < stop`、空单仅 `open > stop` 时按 gap open，否则按 stop 价并遵守期货 tick 取整；next-open 入场若开盘已穿 stop 则取消入场，否则入场后当根可止损；新 stop 下一根生效，NaN 沿用旧 stop，策略负责是否放宽。止损被市场规则阻塞时保留持仓并跳过同 bar 普通平仓，后续重试。
+- 配置迁移：`next_open/next_open`、`close/close`、`close/stop` 的旧 preset 分别映射为三字段；新增 `next_open/stop` = `entry_mode=next_open`、`exit_mode=next_open`、`stop_loss_mode=hard`。`next_open/close`、`close/next_open` 暂不开放；旧 `exit_mode=stop` 在 runner 加载数据/策略前输出 warning 并失败。
+- 已知局限：本期不做实际 next-open 成交价之后的 stop-distance/risk-budget 以损定量；`next_open/stop` 继续使用信号阶段已知的绝对 `stop_prices` 与现有 target-weight sizing。未增加硬止盈、fill callback、`fill_phase` 或 `action` 字段，CSV 继续以 `reason` 做最小区分。
+- 验证：核心回归 `412 passed, 2 skipped`；runner/security/run-card 补充回归 `86 passed`；目标源码 `py_compile` 通过；旧真实 run smoke 在数据加载前以 exit code 1 拒绝 legacy `exit_mode=stop` 并输出迁移提示；执行模式 synthetic/end-to-end 覆盖四 preset、gap、入场当根止损、tick、reason、放宽和阻塞重试。
+- 关联：计划 `P-20260822-risk_exit_execution_modes`；Mistake_Journal M035；HowToUse 8.34；当前改动尚未提交（无 commit）。
