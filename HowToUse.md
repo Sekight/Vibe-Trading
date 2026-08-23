@@ -1106,7 +1106,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 ## 12. MCP 回测工作流能力表（自动生成）
 
 > 来源：`agent/src/backtest_capabilities.py`；注册表版本：`2026-08-23.1`。
-> 公开 MCP 工具保持为一个：`backtest`。`fast_backtest`、`generate_charts`、`generate_report` 是 action/能力 ID，不是额外工具。
+> Vibe-Trading MCP 服务总体会暴露多个研究与回测工具，完整工具数量以 MCP `tools/list` 为准。这里的“保持一个公开入口”仅指**回测生命周期**：回测相关操作统一使用 `backtest`，`fast_backtest`、`generate_charts`、`generate_report` 是 action/能力 ID，不是额外工具。
 
 默认调用：`backtest(run_dir, action="run", speed="fast", use_cache=false)`。
 它会执行真实回测，但不生成 PNG、不调用报告 LLM，也不隐式启用行情缓存。用户明确要求复用行情时，再传入 `use_cache=true`；需要图片或报告时，再显式调用同一个工具的 `action="charts"` 或 `action="report"`。

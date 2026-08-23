@@ -316,7 +316,7 @@ def render_capability_markdown(*, numbered: bool = False) -> str:
     return f"""{heading}
 
 > 来源：`agent/src/backtest_capabilities.py`；注册表版本：`{CAPABILITY_REGISTRY_VERSION}`。
-> 公开 MCP 工具保持为一个：`backtest`。`fast_backtest`、`generate_charts`、`generate_report` 是 action/能力 ID，不是额外工具。
+> Vibe-Trading MCP 服务总体会暴露多个研究与回测工具，完整工具数量以 MCP `tools/list` 为准。这里的“保持一个公开入口”仅指**回测生命周期**：回测相关操作统一使用 `backtest`，`fast_backtest`、`generate_charts`、`generate_report` 是 action/能力 ID，不是额外工具。
 
 默认调用：`backtest(run_dir, action=\"run\", speed=\"fast\", use_cache=false)`。
 它会执行真实回测，但不生成 PNG、不调用报告 LLM，也不隐式启用行情缓存。用户明确要求复用行情时，再传入 `use_cache=true`；需要图片或报告时，再显式调用同一个工具的 `action=\"charts\"` 或 `action=\"report\"`。
@@ -376,7 +376,7 @@ category: tool
 def render_mcp_instructions() -> str:
     """Render server-level routing instructions from the registry."""
     return f"""Vibe-Trading backtest workflow contract (registry {CAPABILITY_REGISTRY_VERSION}):
-- There is one public backtest tool. Use its action field for run, charts, report, or full; do not look for separate fast_backtest/generate_charts/generate_report tools.
+- The MCP server exposes multiple research/backtest tools overall. For the backtest lifecycle, use the single public `backtest` entry and its action field for run, charts, report, or full; do not look for separate fast_backtest/generate_charts/generate_report tools.
 - Default external-Agent route: action=run, speed=fast, use_cache=false. This runs loader, SignalEngine, and the built-in engine, but skips PNG, the report LLM, and implicit loader-cache enablement. Set use_cache=true only when the user explicitly asks to reuse cached market data.
 - charts and report are post-processing actions for an already completed run. They must not start a loader, SignalEngine, or backtest engine. Derived analysis.digest.json may be refreshed; core run artifacts must remain unchanged.
 - report calls one report LLM. It is not strategy generation and must not start an optimization loop.
