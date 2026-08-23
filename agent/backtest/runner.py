@@ -906,6 +906,7 @@ def main(
     *,
     without_regime: bool = False,
     without_mae_mfe: bool = False,
+    execution_overrides: dict[str, str] | None = None,
 ) -> None:
     """Load config, fetch data, run the selected backtest engine.
 
@@ -921,6 +922,8 @@ def main(
             analysis digest (see ``--fastrun`` in ``__main__``).
         without_mae_mfe: Skip MAE/MFE analysis when building the analysis
             digest (see ``--fastrun`` in ``__main__``).
+        execution_overrides: Optional in-memory execution-mode overrides used by
+            the MCP workflow. The run's config.json is never rewritten.
     """
     # Guard the CLI entry point with the same root whitelist the MCP
     # ``backtest`` tool already uses (src/tools/backtest_tool.py:23). Without
@@ -964,12 +967,22 @@ def main(
         from backtest.logical_groups import parse_logical_groups
 
         parse_logical_groups(raw_config, raw_config.get("codes") or [])
+        config = dict(raw_config)
+        if execution_overrides:
+            unknown = sorted(set(execution_overrides) - {
+                "entry_mode", "exit_mode", "stop_loss_mode",
+            })
+            if unknown:
+                raise ValueError(
+                    "unsupported execution override(s): " + ", ".join(unknown)
+                )
+            config.update(execution_overrides)
+            BacktestConfigSchema(**config)
     except Exception as exc:
         errors = str(exc)
         print(json.dumps({"error": f"Invalid config: {errors}"}))
         sys.exit(1)
 
-    config = raw_config
     source = config.get("source", "tushare")
     codes = config.get("codes", [])
 
@@ -1052,10 +1065,9 @@ def main(
         market_engine = _create_market_engine(effective_source, config, codes)
         market_engine.run_backtest(config, loader, signal_engine, run_dir, bars_per_year=bars_per_year)
 
-    # Deterministic post-backtest artifacts: analysis charts are generated for
-    # every successful run regardless of the LLM. The LLM analysis report is
-    # opt-in so the agent path (which writes analysis.md itself via
-    # write_run_analysis) never double-charges tokens.
+    # Persist the deterministic digest after a successful run. PNG charts and
+    # the LLM report are explicit opt-in post-processing stages so the fast
+    # Agent/MCP path does not pay their cost implicitly.
     if (run_dir / "run_card.json").exists():
         _finalize_run_analysis(
             run_dir,
@@ -1486,6 +1498,11 @@ if __name__ == "__main__":
     parser.add_argument("--without-regime", action="store_true", help="Skip correlation-regime analysis (digest omits the regime field and report section)")
     parser.add_argument("--without-mae-mfe", action="store_true", help="Skip MAE/MFE analysis (digest omits the mae_mfe_summary field and report section)")
     parser.add_argument("--fastrun", action="store_true", help="Skip all skippable analysis (currently regime + MAE/MFE) to surface metrics/trades/run_card quickly")
+    parser.add_argument(
+        "--execution-json",
+        default=None,
+        help=argparse.SUPPRESS,
+    )
     args = parser.parse_args()
     skips: set[str] = set()
     if args.fastrun:
@@ -1494,10 +1511,19 @@ if __name__ == "__main__":
         skips.add("regime")
     if args.without_mae_mfe:
         skips.add("mae_mfe")
+    execution_overrides = None
+    if args.execution_json:
+        try:
+            execution_overrides = json.loads(args.execution_json)
+        except json.JSONDecodeError as exc:
+            parser.error(f"--execution-json must be a JSON object: {exc}")
+        if not isinstance(execution_overrides, dict):
+            parser.error("--execution-json must be a JSON object")
     main(
         Path(args.run_dir),
         with_analysis=args.with_analysis,
         with_charts=args.with_charts,
         without_regime="regime" in skips,
         without_mae_mfe="mae_mfe" in skips,
+        execution_overrides=execution_overrides,
     )

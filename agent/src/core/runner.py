@@ -212,6 +212,7 @@ _RUNTIME_ENV_KEYS = frozenset(
         "VIBE_TRADING_IWENCAI_KEY",
         "VIBE_TRADING_SEC_UA",
         "VIBE_TRADING_DATA_CACHE",
+        "VIBE_TRADING_DATA_CACHE_ROOT",
         "VIBE_TRADING_ALLOWED_RUN_ROOTS",
         "CCXT_EXCHANGE",
         "CCXT_TIMEOUT_MS",
@@ -411,7 +412,13 @@ class Runner:
                 return cmd
         return sys.executable
 
-    def _build_runtime_env(self, run_dir: Path, *, pythonpath_extra: Path | None = None) -> dict[str, str]:
+    def _build_runtime_env(
+        self,
+        run_dir: Path,
+        *,
+        pythonpath_extra: Path | None = None,
+        env_overrides: dict[str, str] | None = None,
+    ) -> dict[str, str]:
         """Build subprocess env and enforce no-proxy execution.
 
         Args:
@@ -434,6 +441,15 @@ class Runner:
         if pythonpath_extra:
             existing = env.get("PYTHONPATH", "")
             env["PYTHONPATH"] = str(pythonpath_extra) + (os.pathsep + existing if existing else "")
+
+        if env_overrides:
+            invalid = [key for key in env_overrides if not _is_runtime_env_key_allowed(key)]
+            if invalid:
+                raise ValueError(
+                    "environment override contains disallowed key(s): "
+                    + ", ".join(sorted(invalid))
+                )
+            env.update({key: str(value) for key, value in env_overrides.items()})
 
         # Preserve system proxy settings; data sources (OKX/yfinance) need network access.
         # HOME/USERPROFILE are overridden per-execution in ``execute()`` (ephemeral
@@ -472,6 +488,7 @@ class Runner:
         *,
         cwd: Path | None = None,
         cli_args: list[str] | None = None,
+        env_overrides: dict[str, str] | None = None,
     ) -> RunResult:
         """Run entry script and collect logs and artifacts.
 
@@ -480,6 +497,9 @@ class Runner:
             run_dir: Current run directory.
             cwd: Working directory for subprocess (default: entry_script.parent).
             cli_args: Additional CLI arguments appended to subprocess command.
+            env_overrides: Explicit allow-listed environment values for this
+                subprocess only; the parent process and its dotenv files are
+                never modified.
 
         Returns:
             RunResult object with process output and discovered artifacts.
@@ -495,7 +515,11 @@ class Runner:
 
         effective_cwd = cwd or entry_script.parent
         pythonpath_extra = cwd if cwd else None
-        env = self._build_runtime_env(run_dir, pythonpath_extra=pythonpath_extra)
+        env = self._build_runtime_env(
+            run_dir,
+            pythonpath_extra=pythonpath_extra,
+            env_overrides=env_overrides,
+        )
         python_cmd = self._pick_python_interpreter()
         console.print(f"[dim]Runner: using Python: {python_cmd}[/dim]")
 

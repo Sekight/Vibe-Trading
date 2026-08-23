@@ -99,6 +99,30 @@ def test_backtest_runtime_env_prepends_runtime_pythonpath(
     assert env["PYTHONPATH"] == f"{pythonpath_extra}{os.pathsep}existing-path"
 
 
+def test_backtest_runtime_env_accepts_scoped_cache_override(
+    monkeypatch, tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("VIBE_TRADING_DATA_CACHE", "1")
+    env = Runner(timeout=1)._build_runtime_env(
+        tmp_path,
+        env_overrides={
+            "VIBE_TRADING_DATA_CACHE": "0",
+            "VIBE_TRADING_DATA_CACHE_ROOT": str(tmp_path / "cache"),
+        },
+    )
+
+    assert env["VIBE_TRADING_DATA_CACHE"] == "0"
+    assert env["VIBE_TRADING_DATA_CACHE_ROOT"] == str(tmp_path / "cache")
+
+
+def test_backtest_runtime_env_rejects_disallowed_override(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="disallowed"):
+        Runner(timeout=1)._build_runtime_env(
+            tmp_path,
+            env_overrides={"OPENAI_API_KEY": "must-not-pass"},
+        )
+
+
 # --------------------------------------------------------------------------- #
 # VT-001 runtime defense-in-depth: ephemeral HOME, UID-drop fallback, rlimits.
 # --------------------------------------------------------------------------- #

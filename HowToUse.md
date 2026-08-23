@@ -217,7 +217,7 @@ vibe-trading serve --port 8899
 | 标签 | 内容 |
 |---|---|
 | 图表 | 原有价格/权益曲线（基于 artifacts 里的 OHLCV / equity） |
-| 分析图 | 回测成功后自动生成的 7 张分析图（ECharts 交互渲染，PNG 兜底） |
+| 分析图 | 基于 digest 的 7 张分析图（ECharts 交互渲染，PNG 按需作为兜底；可用 `--with-charts` 或 MCP `action="charts"` 生成） |
 | 分析 | LLM 生成的 `analysis.md` 报告（agent 自动写，或 runner 补生成） |
 | 交易 | `artifacts/trades.csv` 交易明细（含持仓占比、手数） |
 | 运行卡片 | `run_card.json` 摘要 |
@@ -597,7 +597,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 ├─ analysis.status.json        分析状态：ok / failed / skipped + generated_by / llm_usage
 ├─ analysis.prompt.md          发给 LLM 的摘要正文（2026-08-12 起分析时生成，便于审计，见 8.36）
 ├─ analysis.digest.json        （2026-08-12 起回测成功后落库；前端/后端优先读缓存，artifacts 指纹过期才重建，见 8.36）
-├─ analysis_charts/            自动生成的 7 张分析图 PNG
+├─ analysis_charts/            按需生成的 7 张分析图 PNG（--with-charts 或 MCP action=charts）
 ├─ llm_usage.json              agent 每轮迭代的 token 统计（input / output / total）
 ├─ trace.jsonl                 agent 步骤追踪日志（调试用）
 ├─ code/
@@ -621,7 +621,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 - 中途失败/被中止的 run 可能只有 `req.json`、`trace.jsonl`、`state.json`，没有 `code/` 和 `artifacts/`。
 - 没有自动清理机制：新任务永远新建目录，旧 run 不会被覆盖也不会自动删除，需要自己手动清理。
 - 查看入口：`vibe-trading list` 列所有 run，`vibe-trading --show <run_id>` 看 run card 和指标。
-- 分析产物：`analysis_charts/` 的 7 张 PNG 在回测成功后自动生成；`analysis.digest.json` 在回测成功后落库，前端/后端优先读缓存，artifacts 指纹变化时自动重建；`analysis.md` / `analysis.status.json` 是 LLM 分析报告（agent 自动写，或 runner 加 `--with-analysis` 补生成），不存在不代表回测失败，见 8.36。
+- 分析产物：默认回测不生成 `analysis_charts/` PNG；需要时用 `--with-charts` 或 MCP `backtest(action="charts")` 按需补生成。`analysis.digest.json` 在回测成功后落库，前端/后端优先读缓存，artifacts 指纹变化时自动重建；`analysis.md` / `analysis.status.json` 是 LLM 分析报告（agent 自动写，或 runner 加 `--with-analysis` 补生成），不存在不代表回测失败，见 8.36。
 - 分析 prompt：调 LLM 前会把 `render_digest_for_llm()` 的渲染结果写成 `analysis.prompt.md`，并在日志打印 digest sha256、prompt 字符/行数，便于审计 LLM 实际看到的内容；完整 digest 也会落库，指纹一致时直接读缓存。
 
 ### 8.25 `source=local` 报 missing: ['local:600097.SH']，然后卡在 tushare token？
@@ -818,7 +818,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 
 ### 8.36 回测分析报告（analysis.md）和 7 张分析图是什么？
 
-- 每次回测成功后，runner 都会自动生成 `analysis_charts/*.png`（7 张：净值曲线、回撤瀑布、单笔盈亏散点、月度损益热力图、盈亏 vs 持仓时长、MAE/MFE、持仓分桶），不需要额外参数、不烧 LLM token；单张图失败不阻塞回测。
+- 默认回测成功后不会生成 `analysis_charts/*.png`；需要图片时显式加 `--with-charts`，或对已完成 run 调用 MCP `backtest(action="charts")`。生成的是 7 张图：净值曲线、回撤瀑布、单笔盈亏散点、月度损益热力图、盈亏 vs 持仓时长、MAE/MFE、持仓分桶；不烧 LLM token，单张图失败不阻塞回测。
 - 每次回测成功后，runner 会生成 `analysis.digest.json`（2026-08-12 起恢复落库，解决大 run 分析图加载慢）：digest 由回测现场构建并持久化；前端/后端读取时先校验 artifacts 指纹（config/run_card/metrics/trades/equity/positions/validation/risk_xray/OHLCV 统计），一致则直接用缓存，不一致才重建。2026-08-18（V034）起指纹源新增 `positions.csv`；对**旧 run**（此前生成的 digest）读取时会做**增量兼容**——只缺 positions.csv 指纹时仅补算每日持仓/风险序列（约 0.15s），保留原 digest 的 regime/MAE-MFE 等字段，不会触发全量重建（10 年 4H 全量重建约 11s，已避免）。里面包含：全量指标按“性能 / 基准相对 / 风险 / 仓位与换手 / 再平衡 / 其他”分组、逐日权益与基准序列（`equity` 每行含 `benchmark_cum_return_pct` / `benchmark_drawdown_pct`）、`validation`（蒙特卡洛）、交易明细、月度损益、持仓分桶、每日持仓与风险序列（`daily_position` 每日组合持仓、收盘口径，毛/净/单边；`daily_risk` 每天账户风险度、峰值口径）、MAE/MFE 摘要、Regime 摘要（至少 2 个标的时：FUSED 时间占比 / episodes / 按入场日归因的交易盈亏）等。benchmark 未配置时统一记 `equal-weight(universe)`；`benchmark: "auto"` 按 `.SH/.SZ/.BJ` 后缀识别为 a_share 并尝试取市场默认基准（A股=000300.SH），失败时降级为等权基准，并在 run_card warnings 记录 `benchmark fetch failed`。
 - **持仓与风险数据的分层（V034-V036，口径详见 8.45）**：
   - digest 只存**组合级**：`daily_position`（图 1 每日组合持仓，收盘口径）+ `daily_risk`（图 2 每天账户风险度，峰值口径）+ `position_risk_summary`（LLM 派生摘要：收盘毛持仓/风险度的最大、平均、超 50/80/100% 天数与占比、风险度最高日期——**LLM 只拿摘要，不含全量日序列**）；
@@ -838,8 +838,8 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 - 原因：这个 CSV 正被 WPS 表格 / Excel 等程序打开，Windows 下文件被占用时无法覆盖写入；不是代码 bug，也不是路径问题。
 - 解决：先关掉打开 `trades.csv` 的 WPS / Excel 窗口（或退出 WPS），再重跑 `..\.venv\Scripts\python.exe -m backtest.runner "<vibe_home>\runs\<run_id>" --with-analysis`。
 - 只想补生成 `analysis.md`、不重跑回测时：`..\.venv\Scripts\python.exe -c "from backtest.analysis.report import generate_analysis_report; print(generate_analysis_report(r'<vibe_home>\runs\<run_id>', generated_by='runner'))"`（需要 `run_card.json` 和 `artifacts/metrics.csv` 已存在；不写 trades.csv，仍会调用一次 LLM）。
-- 为什么这条命令不用跑回测：`generate_analysis_report` 与回测引擎无关，只检查 `run_card.json` + `artifacts/metrics.csv` 是否存在，然后读取/构建 digest（优先读 `analysis.digest.json` 缓存，指纹过期才重建）→ 拼 prompt → 调一次 LLM → 写 `analysis.md` + `analysis.status.json`；不写 trades.csv，也不启动 loader/engine。`--with-analysis` 则是三段式：runner 先重跑回测（覆盖 artifacts）→ 落库 digest 并生成 `analysis_charts/*.png` → 再调用同一个 `generate_analysis_report`，所以单独调它就是“只取最后一段”。
-- 注意：单独跑 `generate_analysis_report` 不会生成 `analysis_charts/*.png`（PNG 由回测 runner 自动生成）。如果只想补 PNG 而不重跑回测：`..\.venv\Scripts\python.exe -c "from backtest.analysis.charts import generate_chart_artifacts; import json; print(json.dumps(generate_chart_artifacts(r'<vibe_home>\runs\<run_id>'), ensure_ascii=False))"`。WebUI 的“分析图”标签从 API 读缓存 digest 后现算 ECharts 数据，PNG 只是兜底，缺少 PNG 不影响图表显示。
+- 为什么这条命令不用跑回测：`generate_analysis_report` 与回测引擎无关，只检查 `run_card.json` + `artifacts/metrics.csv` 是否存在，然后读取/构建 digest（优先读 `analysis.digest.json` 缓存，指纹过期才重建）→ 拼 prompt → 调一次 LLM → 写 `analysis.md` + `analysis.status.json`；不写 trades.csv，也不启动 loader/engine。`--with-analysis` 会重跑回测并补 digest，再调用同一个报告函数；它不会自动生成 PNG，图片需要额外加 `--with-charts`。
+- 注意：单独跑 `generate_analysis_report` 不会生成 `analysis_charts/*.png`。如果只想补 PNG 而不重跑回测：`..\.venv\Scripts\python.exe -c "from backtest.analysis.charts import generate_chart_artifacts; import json; print(json.dumps(generate_chart_artifacts(r'<vibe_home>\runs\<run_id>'), ensure_ascii=False))"`。WebUI 的“分析图”标签从 API 读缓存 digest 后现算 ECharts 数据，PNG 只是兜底，缺少 PNG 不影响图表显示。MCP `action="charts"` 和 `action="report"` 也都是这种只对已完成 run 做后处理的路径。
 - 注意：重跑 runner 会覆盖 `artifacts/` 下全部文件，查看前最好先关掉相关编辑器。
 
 ### 8.38 已有策略想调参 / 微调，怎么探索最高效？
@@ -931,19 +931,6 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 
 注意：同一份策略用 qfq 和 hfq 的结果不可直接对比；切换口径后要重新评估参数和信号阈值。
 
-## 9. 脚本速查
-
-`agent/scripts/` 下的数据抓取脚本用于把行情落库到本地，供离线回测复用；具体使用见 [`agent/scripts/README.md`](agent/scripts/README.md)。
-
-| 脚本 | 功能 |
-|---|---|
-| `lib/fetch_kline.py` | 按标的、日期区间、数据源抓取日 K（复用 Vibe-Trading 数据层），落盘为 parquet/csv；支持 `--append` 增量补头尾缺口 |
-| `lib/get_csi300_constituents.py` | 获取指数历史成分股（baostock 主源 + akshare 兜底），生成无幸存者偏差的 membership 长表；支持 `--index` 切换沪深300/中证500/上证50 |
-| `run/run_fetch_csi300_kline.py` | 任务胶水：成分股 + 全部历史成分并集 K 线 + 基准指数落库，生成 data-bridge 配置和覆盖率报告 |
-
-`agent/scripts/` 根目录另有 3 个原有开发脚本（`bench_performance.py`、`w4a_run_benches.py`、`w4a_patch_blog.py`），与数据抓取无关。
-
----
 
 ### 8.41 心忆 .min 数据做国内期货多周期回测，怎么组织数据最省事？
 
@@ -1051,6 +1038,31 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 - 交易标的筛选使用 `config.json` 的 `logical_groups`：TA0001~TA0004 等同一逻辑标的的执行 code 会合并统计，交易表仍保留实际执行 code；没有分组配置的旧 run 按单 code 展示。
 - 全量模式使用窗口化表格，所有交易仍可连续滚动访问，但不会一次性把数千/上万行全部创建成 DOM。当前首次响应本身仍会携带全量交易；如果未来需要减少首次网络 payload，需另做后端按需加载。
 
+### 8.47 小周期回测分析口径（2026-08-14 起）
+
+- `config.json` 可新增 `backtest_start` / `backtest_end`：`start_date` / `end_date` 只负责数据加载与指标预热，回测执行、净值、回撤、metrics 从 `backtest_start` 开始，到 `backtest_end`（纯日期包含整天）结束。不配置时行为不变。
+- `trades.csv` 的 `timestamp`：日内 run 显示完整 `YYYY-MM-DD HH:MM:SS`，日线 run 只显示 `YYYY-MM-DD`；新增 `holding_bars` 列，WebUI 交易表同步显示。
+- 指标口径：`avg_holding_bars` 是平均持仓 bar 数；`avg_holding_days` 是按每交易日 bar 数换算的天数，两个值以引擎 metrics 为准。
+- 行情 K 线左上角是周期按钮（5m/15m/20m/1h/2h/4h/1D/1W/1M/1Y，按基础周期动态显示），切换由前端聚合；4h 与 1D 同级，基础周期不大于 4H 时出现，4H 基础周期默认选中并直接展示原始 4H bar，较小基础周期选择 4h 时按自然时间前端聚合，1D 基础回测仍只显示 1D 及以上；1D/1W/1M/1Y 按 `trade_date` 分桶，期货夜盘归下一交易日。周期切换后只显示前端重算指标，后端 indicator_series 隐藏。
+- 分析图：热力图支持日/周/月切换（默认按回测长度自动选）；净值/回撤从回测窗口开始；盈亏 vs 持仓、持仓分桶改用 bar 数。
+- 旧 run 的 `analysis.digest.json` 是缓存，升级后需要重建（schema v3）才会显示新口径；重建方式是重新跑 `backtest.runner` 或删除该文件后刷新 WebUI。
+- 1m 行情显示暂未开放：单标的约 8.5 万根会拖垮前端；后续按“区间/数量切片接口 + 懒加载”方案再补。
+
+## 9. 脚本速查
+
+`agent/scripts/` 下的数据抓取脚本用于把行情落库到本地，供离线回测复用；具体使用见 [`agent/scripts/README.md`](agent/scripts/README.md)。
+
+| 脚本 | 功能 |
+|---|---|
+| `lib/fetch_kline.py` | 按标的、日期区间、数据源抓取日 K（复用 Vibe-Trading 数据层），落盘为 parquet/csv；支持 `--append` 增量补头尾缺口 |
+| `lib/get_csi300_constituents.py` | 获取指数历史成分股（baostock 主源 + akshare 兜底），生成无幸存者偏差的 membership 长表；支持 `--index` 切换沪深300/中证500/上证50 |
+| `run/run_fetch_csi300_kline.py` | 任务胶水：成分股 + 全部历史成分并集 K 线 + 基准指数落库，生成 data-bridge 配置和覆盖率报告 |
+
+`agent/scripts/` 根目录另有 3 个原有开发脚本（`bench_performance.py`、`w4a_run_benches.py`、`w4a_patch_blog.py`），与数据抓取无关。
+
+---
+
+
 ## 10. 命令速查表
 
 | 目的 | 命令 |
@@ -1090,12 +1102,39 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 - 坑的认知与状态：见 [Mistake_Journal.md](Mistake_Journal.md)（8.x 只保留解法；坑是否修复以账本为准）
 - 开工前计划：见 documents/plans/
 
-## 12. 小周期回测分析口径（2026-08-14 起）
+<!-- BEGIN GENERATED: backtest-capabilities -->
+## 12. MCP 回测工作流能力表（自动生成）
 
-- `config.json` 可新增 `backtest_start` / `backtest_end`：`start_date` / `end_date` 只负责数据加载与指标预热，回测执行、净值、回撤、metrics 从 `backtest_start` 开始，到 `backtest_end`（纯日期包含整天）结束。不配置时行为不变。
-- `trades.csv` 的 `timestamp`：日内 run 显示完整 `YYYY-MM-DD HH:MM:SS`，日线 run 只显示 `YYYY-MM-DD`；新增 `holding_bars` 列，WebUI 交易表同步显示。
-- 指标口径：`avg_holding_bars` 是平均持仓 bar 数；`avg_holding_days` 是按每交易日 bar 数换算的天数，两个值以引擎 metrics 为准。
-- 行情 K 线左上角是周期按钮（5m/15m/20m/1h/2h/4h/1D/1W/1M/1Y，按基础周期动态显示），切换由前端聚合；4h 与 1D 同级，基础周期不大于 4H 时出现，4H 基础周期默认选中并直接展示原始 4H bar，较小基础周期选择 4h 时按自然时间前端聚合，1D 基础周期仍只显示 1D 及以上；1D/1W/1M/1Y 按 `trade_date` 分桶，期货夜盘归下一交易日。周期切换后只显示前端重算指标，后端 indicator_series 隐藏。
-- 分析图：热力图支持日/周/月切换（默认按回测长度自动选）；净值/回撤从回测窗口开始；盈亏 vs 持仓、持仓分桶改用 bar 数。
-- 旧 run 的 `analysis.digest.json` 是缓存，升级后需要重建（schema v3）才会显示新口径；重建方式是重新跑 `backtest.runner` 或删除该文件后刷新 WebUI。
-- 1m 行情显示暂未开放：单标的约 8.5 万根会拖垮前端；后续按“区间/数量切片接口 + 懒加载”方案再补。
+> 来源：`agent/src/backtest_capabilities.py`；注册表版本：`2026-08-23.1`。
+> 公开 MCP 工具保持为一个：`backtest`。`fast_backtest`、`generate_charts`、`generate_report` 是 action/能力 ID，不是额外工具。
+
+默认调用：`backtest(run_dir, action="run", speed="fast", use_cache=false)`。
+它会执行真实回测，但不生成 PNG、不调用报告 LLM，也不隐式启用行情缓存。用户明确要求复用行情时，再传入 `use_cache=true`；需要图片或报告时，再显式调用同一个工具的 `action="charts"` 或 `action="report"`。
+
+| 能力 ID | action | 作用 | runner flags | 允许生成 | 明确跳过 |
+|---|---|---|---|---|---|
+| `fast_backtest` | `run` | 快速回测：执行 loader、SignalEngine 和回测引擎，跳过可选的慢速 digest 分析。 | --fastrun | artifacts/metrics.csv、artifacts/trades.csv、artifacts/positions.csv、artifacts/equity.csv、run_card.json、analysis.digest.json | analysis_charts/*.png、analysis.md、LLM 报告 |
+| `normal_backtest` | `run` | 普通回测：执行完整回测和完整 digest，但不隐式生成图片或 LLM 报告。 | — | artifacts/metrics.csv、artifacts/trades.csv、artifacts/positions.csv、artifacts/equity.csv、run_card.json、analysis.digest.json | analysis_charts/*.png、analysis.md、LLM 报告 |
+| `generate_charts` | `charts` | 补生成分析图：读取已完成 run 的派生摘要并生成 PNG，不重新取数或执行策略。 | — | analysis.digest.json（必要时）、analysis_charts/*.png | loader、SignalEngine、回测引擎、analysis.md |
+| `generate_report` | `report` | 补生成分析报告：读取已完成 run 的派生摘要并调用一次报告 LLM，不重新回测。 | — | analysis.digest.json（必要时）、analysis.md、analysis.status.json、analysis.prompt.md | loader、SignalEngine、回测引擎、analysis_charts/*.png |
+| `full_backtest_workflow` | `full` | 完整回测工作流：按普通回测 → 图表后处理 → 报告后处理的顺序显式执行。 | — | 核心回测 artifacts、analysis.digest.json、analysis_charts/*.png、analysis.md、analysis.status.json、analysis.prompt.md | — |
+
+### 公共参数
+
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `run_dir` | 必填 | 已允许路径下的独立 run 目录 |
+| `action` | `run` | `run`、`charts`、`report`、`full` |
+| `speed` | `fast` | `fast` 使用 `--fastrun`；`normal` 生成完整 digest；charts/report 不重新回测 |
+| `use_cache` | `false` | 只影响 run/full 的 loader cache；只有用户明确要求时传 `true`，单次设置不修改全局 `.env` |
+| `execution` | 省略 | 可选覆盖 `config.json` 的三字段；不改写原 config |
+
+`execution` 的字段是 `entry_mode`、`exit_mode`、`stop_loss_mode`。当前四个合法 preset 为：`close/close/hard、close/close/none、next_open/next_open/hard、next_open/next_open/none`。
+旧 `exit_mode=stop` 只用于返回迁移错误，不能自动解释为 hard stop。
+
+小周期回测仍由 `config.json` 的 `interval`、`start_date`、`end_date`、`backtest_start`、`backtest_end` 和策略自身的 `holding_bars` 共同决定；MCP 不会替 Agent 重写数据层或引擎层。
+
+图表/报告是已完成 run 的后处理：它们可以读取或更新派生的 `analysis.digest.json`，但不得改变核心 `config.json`、策略代码、`run_card.json`、`metrics.csv`、`trades.csv`、`positions.csv`、`equity.csv`。
+
+MCP schema 摘要：`['run', 'charts', 'report', 'full']`；缓存默认 `False`。
+<!-- END GENERATED: backtest-capabilities -->

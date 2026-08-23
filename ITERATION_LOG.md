@@ -56,6 +56,8 @@
 | V041 | 2026-08-20 | Reports 列表扩大到前 300 个并按真实时间排序 | 按 mtime 排序并放宽前后端扫描上限，避免自定义命名的最新 run 被截掉 |
 | V042 | 2026-08-22 | 直跑 runner 一次加载缓存环境 | runner 复用统一 dotenv，默认/自定义运行目录均可一次配置缓存，并补充缓存目录使用说明 |
 | V043 | 2026-08-23 | 三字段执行模式与独立硬止损 | `next_open/stop` 落地；四个 preset 用 `entry_mode`/`exit_mode`/`stop_loss_mode` 表达，旧 `exit_mode=stop` 早失败并 warning |
+| V044 | 2026-08-23 | MCP 单入口回测工作流与外部 Agent bridge | capability registry 统一生成 MCP schema/instructions/skill/文档；backtest 默认 fast+cache，charts/report 只做后处理并保护核心 artifacts |
+| V045 | 2026-08-23 | MCP 行情缓存改为显式开启 | MCP/Codex 默认不启用 loader cache，用户明确要求时通过 `use_cache=true` 开启，并移除 Codex 配置中的 cache 环境变量 |
 > 补录说明：V001-V009 为补录条目，依据 git 历史、HowToUse、全局复利与踩坑日志、`C:\Users\mumu\.codex\sessions` 会话记录回溯整理；当时未留痕的字段标“待补”。从下一条起，每次迭代收尾直接写正文。
 
 ## 模板
@@ -513,3 +515,27 @@
 - 已知局限：本期不做实际 next-open 成交价之后的 stop-distance/risk-budget 以损定量；`next_open/stop` 继续使用信号阶段已知的绝对 `stop_prices` 与现有 target-weight sizing。未增加硬止盈、fill callback、`fill_phase` 或 `action` 字段，CSV 继续以 `reason` 做最小区分。
 - 验证：核心回归 `412 passed, 2 skipped`；runner/security/run-card 补充回归 `86 passed`；目标源码 `py_compile` 通过；旧真实 run smoke 在数据加载前以 exit code 1 拒绝 legacy `exit_mode=stop` 并输出迁移提示；执行模式 synthetic/end-to-end 覆盖四 preset、gap、入场当根止损、tick、reason、放宽和阻塞重试。
 - 关联：计划 `P-20260822-risk_exit_execution_modes`；Mistake_Journal M035；HowToUse 8.34；当前改动尚未提交（无 commit）。
+
+### V044 · MCP 单入口回测工作流与外部 Agent bridge（2026-08-23）
+- 一句话总结：把 Vibe-Trading 对外回测协作收敛为一个 MCP `backtest` 入口，用 `action/speed/use_cache/execution` 支持 fast、normal、图表后处理、报告后处理和三字段执行模式，并新增由能力注册表生成的 `vibe-trading-bridge` skill。
+- 为什么：原 MCP 只传 `run_dir`，外部 Codex/Z-Code 不知道 `--fastrun`、PNG/报告的独立后处理、缓存开关和 V043 三字段执行契约，容易重复编写回测引擎、反复触发 LLM 回测循环，且 HowToUse/MCP/skill 手工维护会漂移。
+- 关键细节：
+  - `agent/src/backtest_capabilities.py` 是唯一当前能力入口，登记 action、默认值、runner flags、产物、缓存、三字段 execution schema、四个 preset 和 bridge 的 10 条协作边界；生成器同步 `mcp_server` instructions、MCP schema、`vibe-trading-bridge/SKILL.md`、HowToUse/README 能力块。
+  - 公共工具数量保持一个 `backtest`：默认 `action=run/speed=fast/use_cache=true`，只跑真实 loader/SignalEngine/引擎并跳过 PNG/LLM 报告；`charts` 和 `report` 只读取已完成 run 的 artifacts/digest，不启动 loader、SignalEngine 或引擎，并在执行前后校验核心 artifacts hash；`full` 显式按 run → charts → report 执行。
+  - `execution` 通过 runner 的内存 override 进入现有配置校验和引擎，原 `config.json` 不被改写；旧 `exit_mode=stop` 仍在数据加载前返回迁移错误。缓存只通过 Runner 的 allowlisted env override 传给子进程，不改全局 `.env` 或 cache key 语义。
+  - CLI/直接 runner 的既有默认语义保留；Codex 配置新增本地 stdio Vibe-Trading MCP，shell-capable tools 仍默认关闭。
+- 验证：
+  - 基线 V042/V043 定向回归：31 passed；MCP 冒烟/回归/stdio/registry/新工具集：62 passed；本次改动面最终安全、MCP、runner、analysis、文档定向回归：204 passed、1 skipped。
+  - 真实小型本地 run：fast/normal 的 `metrics.csv`、`trades.csv`、`positions.csv`、`equity.csv` 完全一致；fast digest 仅缺 `regime`/`mae_mfe_summary`；两者均不生成 PNG/`analysis.md`；execution override 生效且原 config 未改写。
+  - 生成器连续执行两次均无 drift；五语言 README、skill 数量和 MCP tool 清单对拍通过；前端 Vitest 458 passed，`npm run build` 成功；Codex CLI `mcp list` 显示 `vibe_trading enabled`。
+  - 完整后端 pytest 记录为 `9526 passed, 86 skipped, 85 failed, 9 errors`；失败归因于 Windows symlink 权限、可选/网络 fixture 与既有共享状态，不涉及本迭代改动面，已记录 M037/E114，不能把全量结果误报为全绿。
+- 影响/注意：`analysis.digest.json` 是派生分析缓存，charts/report 必要时可更新它；核心回测结果 hash 必须保持不变。报告 action 仍会调用一次报告 LLM，但不会生成策略或进入优化循环。新增 skill 不复制 strategy-generate 参数说明，参数和枚举由 MCP schema/registry 提供。
+- 关联：计划 `P-20260822-mcp_backtest_workflow`；HowToUse 8.24/8.35/8.36/8.38；Mistake_Journal M037；全局日志 E114；当前改动尚未提交（无 commit）。
+
+### V045 · MCP 行情缓存改为显式开启（2026-08-23）
+- 一句话总结：将 MCP/Codex 回测路径的 loader cache 默认值从开启改为关闭，只有用户明确要求时 Agent 才传 `use_cache=true`。
+- 为什么：缓存属于实验/调参优化能力，不应在用户未要求时改变取数路径或产生本地缓存；Agent 读取 MCP schema/instructions 后可以按用户意图显式开启。
+- 关键细节：能力注册表 `DEFAULT_USE_CACHE=false`，同步更新 MCP schema、server instructions、`backtest` 函数默认值、bridge 能力文档和 HowToUse/README 生成区块；Codex `config.toml` 保留 Vibe-Trading MCP 注册，但删除 `VIBE_TRADING_DATA_CACHE=1` 环境变量。`use_cache=false` 仍显式传给回测子进程，`true` 仍可单次启用且不改全局 `.env`。
+- 验证：缓存默认值、MCP schema、stdio/回归及 runner 环境回归 `44 passed, 1 skipped`；生成文件 `--check` 无 drift；Codex MCP 注册保持 enabled。
+- 影响/注意：V042 的 runner dotenv/cache 能力不变；普通直接 runner 仍可按 `~/.vibe-trading/.env` 使用缓存，只有 MCP/Codex 默认路由改为不主动开启。
+- 关联：计划 `P-20260822-mcp_backtest_workflow`；V044 后续修正；HowToUse 8.35 / 文末第 12 节能力表；当前改动尚未提交（无 commit）。

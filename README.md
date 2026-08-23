@@ -413,9 +413,9 @@ Beyond OHLCV, **22 read-only data tools** reach into fundamentals & flow — fun
 Detailed inventories are folded below to keep the main README scannable. Open them when you want to inspect the available building blocks.
 
 <details>
-<summary><b>Finance Skill Library</b> <sub>89 skills across 9 categories</sub></summary>
+<summary><b>Finance Skill Library</b> <sub>90 skills across 9 categories</sub></summary>
 
-- 📊 89 specialized finance skills organized into 9 categories
+- 📊 90 specialized finance skills organized into 9 categories
 - 🌐 Complete coverage from traditional markets to crypto & DeFi
 - 🔬 Comprehensive capabilities spanning data sourcing to quantitative research
 
@@ -427,7 +427,7 @@ Detailed inventories are folded below to keep the main README scannable. Open th
 | Asset Class | 9 | `options-strategy`, `options-advanced`, `convertible-bond`, `etf-analysis`, `asset-allocation`, `sector-rotation` |
 | Crypto | 7 | `perp-funding-basis`, `liquidation-heatmap`, `stablecoin-flow`, `defi-yield`, `onchain-analysis` |
 | Flow | 8 | `hk-connect-flow`, `us-etf-flow`, `edgar-sec-filings`, `financial-statement`, `adr-hshare` |
-| Tool | 10 | `backtest-diagnose`, `report-generate`, `pine-script`, `doc-reader`, `web-reader`, `vnpy-export`, `trade-journal` |
+| Tool | 11 | `backtest-diagnose`, `report-generate`, `pine-script`, `doc-reader`, `web-reader`, `vnpy-export`, `trade-journal`, `vibe-trading-bridge` |
 | Research | 2 | `alpha-zoo`, `strategy-dev-manager` |
 | Risk Analysis | 1 | `ashare-pre-st-filter` |
 
@@ -906,6 +906,43 @@ vibe-trading run -p "Backtest a momentum + value + quality multi-factor strategy
 vibe-trading --pine <run_id>
 ```
 
+<!-- BEGIN GENERATED: backtest-capabilities -->
+## MCP 回测工作流能力表（自动生成）
+
+> 来源：`agent/src/backtest_capabilities.py`；注册表版本：`2026-08-23.1`。
+> 公开 MCP 工具保持为一个：`backtest`。`fast_backtest`、`generate_charts`、`generate_report` 是 action/能力 ID，不是额外工具。
+
+默认调用：`backtest(run_dir, action="run", speed="fast", use_cache=false)`。
+它会执行真实回测，但不生成 PNG、不调用报告 LLM，也不隐式启用行情缓存。用户明确要求复用行情时，再传入 `use_cache=true`；需要图片或报告时，再显式调用同一个工具的 `action="charts"` 或 `action="report"`。
+
+| 能力 ID | action | 作用 | runner flags | 允许生成 | 明确跳过 |
+|---|---|---|---|---|---|
+| `fast_backtest` | `run` | 快速回测：执行 loader、SignalEngine 和回测引擎，跳过可选的慢速 digest 分析。 | --fastrun | artifacts/metrics.csv、artifacts/trades.csv、artifacts/positions.csv、artifacts/equity.csv、run_card.json、analysis.digest.json | analysis_charts/*.png、analysis.md、LLM 报告 |
+| `normal_backtest` | `run` | 普通回测：执行完整回测和完整 digest，但不隐式生成图片或 LLM 报告。 | — | artifacts/metrics.csv、artifacts/trades.csv、artifacts/positions.csv、artifacts/equity.csv、run_card.json、analysis.digest.json | analysis_charts/*.png、analysis.md、LLM 报告 |
+| `generate_charts` | `charts` | 补生成分析图：读取已完成 run 的派生摘要并生成 PNG，不重新取数或执行策略。 | — | analysis.digest.json（必要时）、analysis_charts/*.png | loader、SignalEngine、回测引擎、analysis.md |
+| `generate_report` | `report` | 补生成分析报告：读取已完成 run 的派生摘要并调用一次报告 LLM，不重新回测。 | — | analysis.digest.json（必要时）、analysis.md、analysis.status.json、analysis.prompt.md | loader、SignalEngine、回测引擎、analysis_charts/*.png |
+| `full_backtest_workflow` | `full` | 完整回测工作流：按普通回测 → 图表后处理 → 报告后处理的顺序显式执行。 | — | 核心回测 artifacts、analysis.digest.json、analysis_charts/*.png、analysis.md、analysis.status.json、analysis.prompt.md | — |
+
+### 公共参数
+
+| 参数 | 默认值 | 说明 |
+|---|---|---|
+| `run_dir` | 必填 | 已允许路径下的独立 run 目录 |
+| `action` | `run` | `run`、`charts`、`report`、`full` |
+| `speed` | `fast` | `fast` 使用 `--fastrun`；`normal` 生成完整 digest；charts/report 不重新回测 |
+| `use_cache` | `false` | 只影响 run/full 的 loader cache；只有用户明确要求时传 `true`，单次设置不修改全局 `.env` |
+| `execution` | 省略 | 可选覆盖 `config.json` 的三字段；不改写原 config |
+
+`execution` 的字段是 `entry_mode`、`exit_mode`、`stop_loss_mode`。当前四个合法 preset 为：`close/close/hard、close/close/none、next_open/next_open/hard、next_open/next_open/none`。
+旧 `exit_mode=stop` 只用于返回迁移错误，不能自动解释为 hard stop。
+
+小周期回测仍由 `config.json` 的 `interval`、`start_date`、`end_date`、`backtest_start`、`backtest_end` 和策略自身的 `holding_bars` 共同决定；MCP 不会替 Agent 重写数据层或引擎层。
+
+图表/报告是已完成 run 的后处理：它们可以读取或更新派生的 `analysis.digest.json`，但不得改变核心 `config.json`、策略代码、`run_card.json`、`metrics.csv`、`trades.csv`、`positions.csv`、`equity.csv`。
+
+MCP schema 摘要：`['run', 'charts', 'report', 'full']`；缓存默认 `False`。
+<!-- END GENERATED: backtest-capabilities -->
+
 **Bench a pre-built alpha zoo** (one line):
 ```bash
 vibe-trading alpha bench --zoo gtja191 --universe csi300 --period 2018-2025 --top 20
@@ -1182,7 +1219,7 @@ Browse on ClawHub: [clawhub.ai/skills/vibe-trading](https://clawhub.ai/skills/vi
 <details>
 <summary><b>OpenSpace — self-evolving skills</b></summary>
 
-All 89 finance skills are published on [open-space.cloud](https://open-space.cloud) and evolve autonomously through OpenSpace's self-evolution engine.
+All 90 finance skills are published on [open-space.cloud](https://open-space.cloud) and evolve autonomously through OpenSpace's self-evolution engine.
 
 To use with OpenSpace, add both MCP servers to your agent config:
 
@@ -1204,7 +1241,7 @@ To use with OpenSpace, add both MCP servers to your agent config:
 }
 ```
 
-OpenSpace will auto-discover all 89 skills, enabling auto-fix, auto-improve, and community sharing. Search for Vibe-Trading skills via `search_skills("finance backtest")` in any OpenSpace-connected agent.
+OpenSpace will auto-discover all 90 skills, enabling auto-fix, auto-improve, and community sharing. Search for Vibe-Trading skills via `search_skills("finance backtest")` in any OpenSpace-connected agent.
 
 </details>
 
@@ -1499,7 +1536,7 @@ Vibe-Trading/
 │   │   ├── agent/                  # ReAct agent core
 │   │   │   ├── loop.py             #   5-layer compression + read/write tool batching
 │   │   │   ├── context.py          #   system prompt + auto-recall from persistent memory
-│   │   │   ├── skills.py           #   skill loader (89 bundled + user-created via CRUD)
+│   │   │   ├── skills.py           #   skill loader (90 bundled + user-created via CRUD)
 │   │   │   ├── tools.py            #   tool base class + registry
 │   │   │   ├── memory.py           #   lightweight workspace state per run
 │   │   │   ├── frontmatter.py      #   shared YAML frontmatter parser
@@ -1526,7 +1563,7 @@ Vibe-Trading/
 │   │   ├── api/                    # FastAPI route modules
 │   │   │   └── alpha_routes.py     #   /alpha/list, /alpha/{id}, /alpha/bench, SSE stream
 │   │   │
-│   │   ├── skills/                 # 89 finance skills in 9 categories (SKILL.md each)
+│   │   ├── skills/                 # 90 finance skills in 9 categories (SKILL.md each)
 │   │   ├── swarm/                  # Swarm DAG execution engine
 │   │   │   └── presets/            #   30 swarm preset YAML definitions
 │   │   ├── session/                # Multi-turn chat + FTS5 session search

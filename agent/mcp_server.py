@@ -56,7 +56,7 @@ import sys
 from copy import deepcopy
 from importlib import import_module
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, TypedDict
 
 # Ensure agent/ is on sys.path
 AGENT_DIR = Path(__file__).resolve().parent
@@ -72,8 +72,13 @@ from src.market_data import (
     fetch_market_data_json,
     get_loader,
 )
+from src.backtest_capabilities import backtest_tool_schema, render_mcp_instructions
 
-mcp = FastMCP("Vibe-Trading", version=APP_VERSION)
+mcp = FastMCP(
+    "Vibe-Trading",
+    version=APP_VERSION,
+    instructions=render_mcp_instructions(),
+)
 
 logger = logging.getLogger(__name__)
 
@@ -687,13 +692,37 @@ def update_research_goal_status(
 # ---------------------------------------------------------------------------
 
 
-@mcp.tool
-def backtest(run_dir: str) -> str:
-    """Run a vectorized backtest using config.json and code/signal_engine.py.
+class BacktestExecution(TypedDict, total=False):
+    """Optional in-memory execution overrides for the single backtest tool."""
 
-    The run_dir must contain:
+    entry_mode: Literal["next_open", "close"]
+    exit_mode: Literal["next_open", "close", "stop"]
+    stop_loss_mode: Literal["none", "hard"]
+
+
+@mcp.tool
+def backtest(
+    run_dir: str,
+    action: Literal["run", "charts", "report", "full"] = "run",
+    speed: Literal["fast", "normal"] = "fast",
+    use_cache: bool = False,
+    execution: BacktestExecution | None = None,
+) -> str:
+    """Run or post-process a Vibe-Trading run through one backtest entry point.
+
+    Default route: ``action="run"``, ``speed="fast"``, ``use_cache=false``.
+    This runs the existing loader, SignalEngine, and built-in engine, while
+    skipping PNG and the LLM report. Use ``action="charts"`` or
+    ``action="report"`` to post-process a completed run without restarting the
+    loader, SignalEngine, or engine. Use ``action="full"`` only when all stages
+    are explicitly wanted.
+
+    For ``action="run"`` and ``action="full"``, the run_dir must contain:
     - config.json: backtest configuration (source, codes, dates, etc.)
     - code/signal_engine.py: strategy signal generation code
+
+    For ``action="charts"`` and ``action="report"``, an existing completed
+    run must contain ``run_card.json`` and ``artifacts/metrics.csv``.
 
     Supported data sources (set in config.json "source" field):
     - "yfinance": HK/US equities (free, no API key needed)
@@ -707,10 +736,32 @@ def backtest(run_dir: str) -> str:
 
     Args:
         run_dir: Path to the run directory containing config.json and code/.
+        action: ``run``, ``charts``, ``report``, or ``full``.
+        speed: ``fast`` uses ``--fastrun``; ``normal`` computes the full digest.
+        use_cache: Enable loader cache for run/full only. Defaults to false;
+            set true only when the user explicitly asks to reuse cached data.
+        execution: Optional in-memory overrides for entry_mode, exit_mode, and
+            stop_loss_mode. The original config.json is never rewritten.
     """
     from src.tools.backtest_tool import run_backtest
 
-    return run_backtest(run_dir)
+    return run_backtest(
+        run_dir,
+        action=action,
+        speed=speed,
+        use_cache=use_cache,
+        execution=execution,
+    )
+
+
+# The function annotations keep direct Python callers readable; replace the
+# generated parameter shape with the registry-owned schema so MCP and the local
+# BaseTool cannot drift. The decorator remains in place for the existing tool
+# count/registration guards.
+for _registered_backtest_tool in mcp.local_provider._components.values():
+    if getattr(_registered_backtest_tool, "name", None) == "backtest":
+        _registered_backtest_tool.parameters = backtest_tool_schema()
+        break
 
 
 # ---------------------------------------------------------------------------
