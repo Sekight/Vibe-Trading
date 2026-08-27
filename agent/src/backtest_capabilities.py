@@ -20,7 +20,7 @@ from backtest.execution_modes import (
 )
 
 
-CAPABILITY_REGISTRY_VERSION = "2026-08-27.1"
+CAPABILITY_REGISTRY_VERSION = "2026-08-27.2"
 DEFAULT_ACTION = "run"
 DEFAULT_SPEED = "fast"
 DEFAULT_USE_CACHE = False
@@ -205,11 +205,10 @@ def backtest_tool_schema() -> dict[str, Any]:
                 "type": "string",
                 "description": (
                     "Run directory containing config.json and "
-                    "code/signal_engine.py. In config.json, keep "
-                    "start_date/end_date (data and indicator warm-up) separate "
-                    "from backtest_start/backtest_end (execution/statistics); "
-                    "put execution codes for one real instrument in one "
-                    "logical_groups group."
+                    "code/signal_engine.py. The config.json inside it follows "
+                    "the engine-owned BacktestConfigSchema, including indicator "
+                    "warm-up and execution/statistics windows plus logical_groups; config fields "
+                    "are not top-level MCP arguments."
                 ),
             },
             "action": {
@@ -242,6 +241,165 @@ def backtest_tool_schema() -> dict[str, Any]:
         },
         "required": ["run_dir"],
     }
+
+
+def backtest_config_schema() -> dict[str, Any]:
+    """Return the engine-owned JSON schema for ``run_dir/config.json``.
+
+    Import lazily so callers that only need the MCP call schema do not load the
+    full runner module during module import.  The runner model remains the
+    authoritative source for config fields, types, defaults, and descriptions.
+    """
+    from backtest.runner import BacktestConfigSchema
+
+    return BacktestConfigSchema.model_json_schema()
+
+
+def _schema_type_label(schema: Mapping[str, Any]) -> str:
+    """Render a compact human-readable label from a JSON-schema fragment."""
+    any_of = schema.get("anyOf")
+    if isinstance(any_of, list):
+        non_null = [item for item in any_of if item.get("type") != "null"]
+        if len(non_null) == 1 and isinstance(non_null[0], Mapping):
+            return f"optional {_schema_type_label(non_null[0])}"
+        return " | ".join(_schema_type_label(item) for item in any_of)
+
+    ref = schema.get("$ref")
+    if isinstance(ref, str):
+        return ref.rsplit("/", 1)[-1]
+
+    schema_type = schema.get("type")
+    if schema_type == "array":
+        item_schema = schema.get("items")
+        if isinstance(item_schema, Mapping):
+            return f"array[{_schema_type_label(item_schema)}]"
+        return "array"
+    if schema_type == "object":
+        return "object"
+    if isinstance(schema_type, str):
+        return schema_type
+    return "value"
+
+
+def _schema_default_label(schema: Mapping[str, Any], *, required: bool) -> str:
+    if required:
+        return "必填"
+    if "default" not in schema or schema.get("default") is None:
+        return "省略"
+    default = schema["default"]
+    if isinstance(default, bool):
+        return "true" if default else "false"
+    return str(default)
+
+
+def _backtest_config_schema_rows() -> tuple[tuple[str, str, str, str], ...]:
+    schema = backtest_config_schema()
+    return _schema_rows(schema)
+
+
+def _schema_rows(schema: Mapping[str, Any]) -> tuple[tuple[str, str, str, str], ...]:
+    """Return ordered field rows from a JSON-schema object."""
+    properties = schema.get("properties") or {}
+    required = set(schema.get("required") or [])
+    rows: list[tuple[str, str, str, str]] = []
+    for name, raw_field in properties.items():
+        if not isinstance(raw_field, Mapping):
+            continue
+        rows.append(
+            (
+                str(name),
+                _schema_type_label(raw_field),
+                _schema_default_label(raw_field, required=name in required),
+                str(raw_field.get("description") or ""),
+            )
+        )
+    return tuple(rows)
+
+
+def _backtest_config_definition_rows(
+    schema: Mapping[str, Any],
+) -> tuple[tuple[str, str, tuple[tuple[str, str, str, str], ...]], ...]:
+    """Return nested config definitions and their generated field rows."""
+    definitions = schema.get("$defs") or {}
+    result: list[tuple[str, str, tuple[tuple[str, str, str, str], ...]]] = []
+    for name, raw_definition in definitions.items():
+        if not isinstance(raw_definition, Mapping):
+            continue
+        rows = _schema_rows(raw_definition)
+        if rows:
+            result.append(
+                (
+                    str(name),
+                    str(raw_definition.get("description") or ""),
+                    rows,
+                )
+            )
+    return tuple(result)
+
+
+def render_backtest_config_summary(*, markdown: bool = False) -> str:
+    """Render the self-describing config contract for Agents and docs."""
+    rows = _backtest_config_schema_rows()
+    schema = backtest_config_schema()
+    definitions = _backtest_config_definition_rows(schema)
+    if markdown:
+        lines = [
+            "### `config.json` 配置契约（由 `BacktestConfigSchema` 生成）",
+            "",
+            "以下字段属于 `run_dir/config.json`，不是 `backtest` MCP 工具的顶层参数。",
+            "",
+            "| 字段 | 类型 | 必填/默认 | 说明 |",
+            "|---|---|---|---|",
+        ]
+        lines.extend(
+            f"| `{name}` | `{field_type}` | `{default}` | {description} |"
+            for name, field_type, default, description in rows
+        )
+        for name, definition_description, definition_rows in definitions:
+            lines.extend(
+                [
+                    "",
+                    f"#### `{name}` 元素结构",
+                    definition_description,
+                    "",
+                    "| 字段 | 类型 | 必填/默认 | 说明 |",
+                    "|---|---|---|---|",
+                ]
+            )
+            lines.extend(
+                f"| `{field_name}` | `{field_type}` | `{default}` | {description} |"
+                for field_name, field_type, default, description in definition_rows
+            )
+        if schema.get("additionalProperties") is not False:
+            lines.extend(
+                [
+                    "",
+                    "未列出的字段仍可作为引擎专属扩展字段；实际执行以 runner 和对应引擎校验为准。",
+                ]
+            )
+        return "\n".join(lines)
+
+    lines = [
+        "- `run_dir/config.json` follows the engine-owned `BacktestConfigSchema`; "
+        "these are file fields, not top-level MCP arguments.",
+        "  Config fields (generated from `BacktestConfigSchema`):",
+    ]
+    lines.extend(
+        f"  - `{name}` ({field_type}, {default}): {description}"
+        for name, field_type, default, description in rows
+    )
+    for name, definition_description, definition_rows in definitions:
+        lines.append(f"  - `{name}` item structure: {definition_description}")
+        lines.extend(
+            f"    - `{field_name}` ({field_type}, {default}): {description}"
+            for field_name, field_type, default, description in definition_rows
+        )
+    if schema.get("additionalProperties") is not False:
+        lines.append(
+            "  - Unlisted fields remain available for engine-specific extensions; "
+            "the runner and selected engine are authoritative at execution time."
+        )
+    return "\n".join(lines)
 
 
 def execution_presets() -> tuple[dict[str, str], ...]:
@@ -316,6 +474,7 @@ def render_capability_markdown(*, numbered: bool = False) -> str:
         for p in execution_presets()
     )
     schema = backtest_tool_schema()
+    config_summary = render_backtest_config_summary(markdown=True)
     heading = "## 12. MCP 回测工作流能力表（自动生成）" if numbered else "## MCP 回测工作流能力表（自动生成）"
     return f"""{heading}
 
@@ -342,7 +501,9 @@ def render_capability_markdown(*, numbered: bool = False) -> str:
 `execution` 的字段是 `entry_mode`、`exit_mode`、`stop_loss_mode`。当前四个合法 preset 为：`{presets}`。
 旧 `exit_mode=stop` 只用于返回迁移错误，不能自动解释为 hard stop。
 
-数据预热区间与实际回测区间必须分开：`start_date` / `end_date` 用于加载行情并提供指标预热数据，`backtest_start` / `backtest_end` 用于实际交易及收益、回撤、metrics 统计；例如 MA300 至少需要在 `backtest_start` 前准备 300 根有效 K 线，且策略要正确使用或跳过预热 bar，MCP 不会替 Agent 推算 lookback 或重写数据层、引擎层。若同一真实标的拆成多个执行 code，必须在 `config.json.logical_groups` 中归入同一 group，WebUI 才会把 K 线、持仓风险、交易筛选和统计按一个标的显示。
+{config_summary}
+
+配置模型中的 `start_date/end_date`、`backtest_start/end` 和 `logical_groups` 字段说明定义了数据预热、实际执行窗口和逻辑标的合并口径；MCP 不会替 Agent 推算 lookback 或重写数据层、引擎层。
 
 图表/报告是已完成 run 的后处理：它们可以读取或更新派生的 `analysis.digest.json`，但不得改变核心 `config.json`、策略代码、`run_card.json`、`metrics.csv`、`trades.csv`、`positions.csv`、`equity.csv`。
 
@@ -352,9 +513,9 @@ MCP schema 摘要：`{schema['properties']['action']['enum']}`；缓存默认 `{
 
 BRIDGE_WORKFLOW_RULES: tuple[str, ...] = (
     "Vibe-Trading 的目录结构：策略 run 应有 config.json、code/signal_engine.py，以及由系统生成的 artifacts/、run_card.json 等结果文件。",
-    "config.json 的基本格式：由 Agent 配置数据源、标的、周期、日期、回测窗口、成本和当前三字段执行契约；start_date/end_date 用于加载行情并提供指标预热数据，backtest_start/backtest_end 用于实际交易与收益、回撤、metrics 统计（例如 MA300 要提前准备至少 300 根有效 K 线，策略仍需正确处理预热 bar）；同一真实标的若拆成多个执行 code，必须在 config.json.logical_groups 中归入同一 group，WebUI 才会按一个标的显示 K 线、持仓风险、交易筛选和统计；具体字段和允许值以当前引擎契约为准。",
+    "config.json 的基本格式：字段、类型、默认值和使用关系以 MCP 暴露的 BacktestConfigSchema 为准；其中 start_date/end_date 用于行情加载和指标预热，backtest_start/backtest_end 用于实际交易与收益、回撤、metrics 统计（例如 MA300 要提前准备至少 300 根有效 K 线），同一真实标的若拆成多个执行 code，必须在 config.json.logical_groups 中归入同一 group，WebUI 才会按一个标的显示；配置前核对配置 schema，不要把这些字段当成 MCP 顶层参数。",
     "signal_engine.py 的接口要求：只实现 SignalEngine 及其 generate(data_map) 策略逻辑，遵守现有信号、索引和安全约束。",
-    "可调用的 MCP 工具：先使用当前 MCP 注册表提供的工具；回测统一使用单一 backtest 入口，不自行假定已不存在的工具或参数。",
+    "可调用的 MCP 工具：先使用当前 MCP 注册表提供的工具；回测统一使用单一 backtest 入口，调用前核对 MCP tool schema，不自行假定已不存在的工具或参数。",
     "禁止修改回测引擎和数据加载器：市场规则、取数、成交、费用、artifacts 由 Vibe-Trading 负责。",
     "生成阶段与回测阶段必须分离：先完成策略代码和配置，再单独进行 MCP 回测、结果读取和后续分析。",
     "回测前必须经过人工确认：Agent 只能在用户确认策略逻辑、配置和执行模式后调用回测。",
@@ -379,6 +540,7 @@ category: tool
 
 def render_mcp_instructions() -> str:
     """Render server-level routing instructions from the registry."""
+    config_summary = render_backtest_config_summary()
     return f"""Vibe-Trading backtest workflow contract (registry {CAPABILITY_REGISTRY_VERSION}):
 - To run or analyze a backtest, call the `backtest` tool. `fast_backtest`, `generate_charts`, and `generate_report` are workflow labels, not separate tools to install or call.
 - Default external-Agent route: action=run, speed=fast, use_cache=false. This runs loader, SignalEngine, and the built-in engine, but skips PNG, the report LLM, and implicit loader-cache enablement. Set use_cache=true only when the user explicitly asks to reuse cached market data.
@@ -387,8 +549,8 @@ def render_mcp_instructions() -> str:
 - full is an explicit run -> charts -> report workflow.
 - Strategy generation and backtesting are separate phases. Require human confirmation before the first backtest. Do not rewrite backtest engines or loaders.
 - Use execution fields entry_mode, exit_mode, and stop_loss_mode only through the registered schema. Legacy exit_mode=stop must surface a migration error.
-- For small-period runs, keep the data window and execution window separate: `start_date`/`end_date` load bars and provide indicator warm-up data, while `backtest_start`/`backtest_end` define actual trading and return/drawdown/metrics statistics. For example, MA300 needs at least 300 valid bars before `backtest_start`; the strategy must use or skip warm-up bars because MCP does not infer lookback requirements.
-- If multiple execution codes represent one real instrument (for example, pyramid/add-on pseudo codes), place them in the same `config.json.logical_groups` group. This is the source of truth that lets WebUI merge their K-line, position/risk, trade-filter, and statistics views; otherwise they are shown as separate instruments.
+- Configure `run_dir/config.json` from the engine-owned `BacktestConfigSchema` summary below. These are file fields, not top-level `backtest` arguments; the strategy must keep data loading/warm-up and execution/statistics windows separate, and must group execution codes for one real instrument in `logical_groups`.
+{config_summary}
 - If a run fails, classify the failure and stop; never retry indefinitely.
 """.strip()
 

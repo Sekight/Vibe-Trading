@@ -80,26 +80,168 @@ class DataFetchResult:
     effective_sources: List[str]
 
 
+class LogicalGroupConfigSchema(BaseModel):
+    """Describes one logical instrument group in ``config.json``.
+
+    This model documents and validates the JSON shape.  Membership rules that
+    depend on the top-level ``codes`` list remain in ``parse_logical_groups``.
+    """
+
+    model_config = ConfigDict(
+        extra="allow",
+        json_schema_extra={
+            "description": (
+                "将多个代表同一真实标的的执行 code 合并为一个逻辑标的；"
+                "跨字段成员关系由 logical_groups parser 校验。"
+            )
+        },
+    )
+
+    logical_symbol: str = Field(
+        ...,
+        description=(
+            "必填。逻辑标的的稳定标识，用于指标、持仓风险、K 线和交易筛选的合并键。"
+        ),
+    )
+    display_name: Optional[str] = Field(
+        default=None,
+        description="可选。WebUI 展示名称；省略时使用 logical_symbol。",
+    )
+    codes: List[str] = Field(
+        ...,
+        description=(
+            "必填。属于该逻辑标的的实际执行 code 数组；每个 code 必须来自顶层 codes，"
+            "同一 code 不能加入多个 group。"
+        ),
+    )
+    chart_code: Optional[str] = Field(
+        default=None,
+        description=(
+            "可选。该逻辑标的在 WebUI K 线中使用的代表 code；省略时使用本组第一个 code，"
+            "填写时必须属于本组 codes。"
+        ),
+    )
+
+
 class BacktestConfigSchema(BaseModel):
-    """Validates backtest config.json before execution."""
+    """Self-describing contract for the ``config.json`` consumed by runner.
+
+    The JSON schema generated from this model is the configuration reference
+    for external Agents.  The MCP ``backtest`` tool schema remains separate:
+    it describes how to call the tool with a ``run_dir``; this model describes
+    the file inside that directory.
+    """
 
     model_config = ConfigDict(extra="allow")
 
-    codes: List[str]
-    start_date: str
-    end_date: str
-    source: str = "tushare"
-    interval: str = "1D"
-    engine: str = "daily"
-    entry_mode: str = "next_open"
-    exit_mode: str = "next_open"
-    stop_loss_mode: str = "none"
+    codes: List[str] = Field(
+        ...,
+        description=(
+            "必填。实际执行的标的 code 列表，必须与所选 source 和数据配置一致；"
+            "同一真实标的拆成多个执行 code 时，用 logical_groups 合并展示。"
+        ),
+    )
+    start_date: str = Field(
+        ...,
+        description=(
+            "必填。行情加载窗口起点；需要给指标提供预热 bar 时，应早于实际回测起点。"
+            "例如 MA300 至少要在 backtest_start 前准备 300 根有效 K 线。"
+        ),
+    )
+    end_date: str = Field(
+        ...,
+        description=(
+            "必填。行情加载窗口终点；应覆盖实际回测结束日 backtest_end。"
+            "日期格式为 YYYY-MM-DD 或当前 loader 支持的时间格式。"
+        ),
+    )
+    backtest_start: Optional[str] = Field(
+        default=None,
+        description=(
+            "可选。实际交易、净值、收益、回撤和 metrics 的起点；"
+            "start_date 仍负责加载更早的行情和指标预热数据。省略时使用 start_date。"
+        ),
+    )
+    backtest_end: Optional[str] = Field(
+        default=None,
+        description=(
+            "可选。实际交易、净值、收益、回撤和 metrics 的终点；"
+            "省略时使用 end_date，纯日期按包含整天处理。"
+        ),
+    )
+    source: str = Field(
+        default="tushare",
+        description=(
+            "数据源路由；必须使用当前 loader registry 的 VALID_SOURCES 之一："
+            f"{', '.join(sorted(VALID_SOURCES))}。"
+        ),
+    )
+    interval: str = Field(
+        default="1D",
+        description=(
+            "K 线周期；允许值为 "
+            f"{', '.join(sorted(_VALID_INTERVALS))}。"
+            "小周期回测仍需按 lookback 扩大 start_date。"
+        ),
+    )
+    engine: str = Field(
+        default="daily",
+        description=(
+            "回测引擎；允许值为 "
+            f"{', '.join(sorted(_VALID_ENGINES))}。"
+        ),
+    )
+    entry_mode: str = Field(
+        default="next_open",
+        description=(
+            "正常开仓/加仓成交时点；允许 next_open（下一根 bar 开盘）或 close（信号 bar 收盘）。"
+            "正常 entry/exit 组合目前只允许 next_open/next_open 或 close/close。"
+        ),
+    )
+    exit_mode: str = Field(
+        default="next_open",
+        description=(
+            "正常信号平仓/止盈/减仓/反转成交时点；允许 next_open 或 close。"
+            "正常 entry/exit 组合目前只允许 next_open/next_open 或 close/close；"
+            "不要使用旧的 exit_mode=stop。"
+        ),
+    )
+    stop_loss_mode: str = Field(
+        default="none",
+        description=(
+            "独立保护性硬止损；none 为关闭，hard 为启用。"
+            "它与正常 exit_mode 分开配置。"
+        ),
+    )
     # Returns divide by initial_cash, so a non-positive value yields inf/NaN
     # metrics (total_return, annual_return, ...). Reject it at the config
     # boundary instead of letting the run produce non-finite results.
-    initial_cash: float = Field(default=1_000_000, gt=0, allow_inf_nan=False)
-    fundamental_fields: Optional[Dict[str, List[str]]] = None
-    event_feeds: Optional[List[Dict[str, Any]]] = None
+    initial_cash: float = Field(
+        default=1_000_000,
+        gt=0,
+        allow_inf_nan=False,
+        description="初始资金；收益和风险指标以它作为分母，必须为正数。",
+    )
+    fundamental_fields: Optional[Dict[str, List[str]]] = Field(
+        default=None,
+        description=(
+            "可选。按数据表配置基本面字段映射，例如 {income: [revenue]}；"
+            "启用后 runner 在策略生成信号前注入 point-in-time 数据。"
+        ),
+    )
+    event_feeds: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description=(
+            "可选。事件数据 feed 定义数组；每项至少包含 name、route_template、event_type。"
+        ),
+    )
+    logical_groups: Optional[List[LogicalGroupConfigSchema]] = Field(
+        default=None,
+        description=(
+            "可选。将同一真实标的的多个执行 code 归并为一个逻辑标的，供 metrics、"
+            "digest、WebUI K 线、持仓风险和交易筛选使用；省略时每个 code 独立显示。"
+        ),
+    )
 
     @field_validator("codes")
     @classmethod
@@ -110,9 +252,11 @@ class BacktestConfigSchema(BaseModel):
             raise ValueError("codes must not contain empty strings")
         return v
 
-    @field_validator("start_date", "end_date")
+    @field_validator("start_date", "end_date", "backtest_start", "backtest_end")
     @classmethod
-    def valid_date(cls, v: str) -> str:
+    def valid_date(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
         try:
             pd.Timestamp(v)
         except Exception:
@@ -176,6 +320,16 @@ class BacktestConfigSchema(BaseModel):
             raise ValueError(
                 f"start_date ({self.start_date}) must be <= end_date ({self.end_date})"
             )
+        return self
+
+    @model_validator(mode="after")
+    def backtest_window_order(self) -> "BacktestConfigSchema":
+        if self.backtest_start and self.backtest_end:
+            if pd.Timestamp(self.backtest_start) > pd.Timestamp(self.backtest_end):
+                raise ValueError(
+                    f"backtest_start ({self.backtest_start}) must be <= "
+                    f"backtest_end ({self.backtest_end})"
+                )
         return self
 
     @model_validator(mode="after")

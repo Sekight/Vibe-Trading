@@ -46,4 +46,5 @@
 | P-20260820-execution_mode_state_machine | 已废弃 | 2026-08-20 | 回测引擎正常交易与止损成交路径解耦（已废弃，见 P-20260822-risk_exit_execution_modes） | P-20260820-execution_mode_state_machine.md | 待填 |
 | P-20260822-mcp_backtest_workflow | 已完成 | 2026-08-22 | MCP 回测模式与外部 Agent 协作工作流 | P-20260822-mcp_backtest_workflow.md | V044 / V045 |
 | P-20260822-risk_exit_execution_modes | 已完成 | 2026-08-22 | 正常出场与保护性止损执行模式重构 | P-20260822-risk_exit_execution_modes.md | V043 |
+| P-20260827-backtest_config_schema_agent | 已完成 | 2026-08-27 | BacktestConfigSchema 配置契约与 Agent 暴露 | P-20260827-backtest_config_schema_agent.md | V046 |
 

@@ -58,6 +58,7 @@
 | V043 | 2026-08-23 | 三字段执行模式与独立硬止损 | `next_open/stop` 落地；四个 preset 用 `entry_mode`/`exit_mode`/`stop_loss_mode` 表达，旧 `exit_mode=stop` 早失败并 warning |
 | V044 | 2026-08-23 | MCP 单入口回测工作流与外部 Agent bridge | capability registry 统一生成 MCP schema/instructions/skill/文档；backtest 默认 fast+cache，charts/report 只做后处理并保护核心 artifacts |
 | V045 | 2026-08-23 | MCP 行情缓存改为显式开启 | MCP/Codex 默认不启用 loader cache，用户明确要求时通过 `use_cache=true` 开启，并移除 Codex 配置中的 cache 环境变量 |
+| V046 | 2026-08-27 | BacktestConfigSchema 配置契约与 Agent 暴露 | 配置字段说明、窗口和逻辑分组结构进入配置 schema，并自动生成 MCP Agent 可读摘要 |
 > 补录说明：V001-V009 为补录条目，依据 git 历史、HowToUse、全局复利与踩坑日志、`C:\Users\mumu\.codex\sessions` 会话记录回溯整理；当时未留痕的字段标“待补”。从下一条起，每次迭代收尾直接写正文。
 
 ## 模板
@@ -539,3 +540,10 @@
 - 验证：缓存默认值、MCP schema、stdio/回归及 runner 环境回归 `44 passed, 1 skipped`；生成文件 `--check` 无 drift；Codex MCP 注册保持 enabled。
 - 影响/注意：V042 的 runner dotenv/cache 能力不变；普通直接 runner 仍可按 `~/.vibe-trading/.env` 使用缓存，只有 MCP/Codex 默认路由改为不主动开启。
 - 关联：计划 `P-20260822-mcp_backtest_workflow`；V044 后续修正；HowToUse 8.35 / 文末第 12 节能力表；当前改动尚未提交（无 commit）。
+
+### V046 · BacktestConfigSchema 配置契约与 Agent 暴露（2026-08-27）
+- 一句话总结：让 `BacktestConfigSchema` 成为 `config.json` 的自描述配置契约，并把字段摘要自动暴露给 MCP Agent，避免配置说明散落在 skill、MCP 调用 schema 和 HowToUse 中。
+- 为什么：MCP `backtest` 的调用 schema 只描述 `run_dir/action/speed/use_cache/execution`，而 `start_date/end_date`、`backtest_start/end`、`logical_groups` 属于 run 内 `config.json`；Agent 需要看到配置字段的类型、默认值、作用和嵌套结构，才能在回测前正确生成配置。
+- 关键细节：`agent/backtest/runner.py` 增加通用字段描述、可选 `backtest_start/end` 和 `LogicalGroupConfigSchema`；窗口顺序由配置边界校验，逻辑组成员关系继续由 `parse_logical_groups()` 做跨字段校验；`agent/src/backtest_capabilities.py` 从 `BacktestConfigSchema.model_json_schema()` 生成 MCP instructions、HowToUse/README 配置摘要；bridge skill 保持 10 条边界，并明确配置 schema 与 MCP tool schema 分步核对。未收紧 `extra="allow"`，未修改引擎和 loader。
+- 验证：`pytest agent/tests/test_engine_robustness.py agent/tests/test_logical_groups.py agent/tests/test_backtest_workflow.py agent/tests/test_mcp_server_smoke.py agent/tests/test_mcp_regression.py -q` → `94 passed, 1 skipped`；`pytest agent/tests/test_mcp_stdio_integration.py agent/tests/test_runner_coverage.py agent/tests/test_runner_dotenv.py -q` → `16 passed`；目标源码 `py_compile`、生成器 `--check`、`git diff --check` 通过。
+- 关联：计划 `P-20260827-backtest_config_schema_agent`；HowToUse 第 12 节；README MCP 回测工作流能力表；本次提交。

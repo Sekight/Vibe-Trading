@@ -1105,7 +1105,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 <!-- BEGIN GENERATED: backtest-capabilities -->
 ## 12. MCP 回测工作流能力表（自动生成）
 
-> 来源：`agent/src/backtest_capabilities.py`；注册表版本：`2026-08-27.1`。
+> 来源：`agent/src/backtest_capabilities.py`；注册表版本：`2026-08-27.2`。
 > 回测时直接调用 `backtest` 工具即可。`fast_backtest`、`generate_charts`、`generate_report` 只是回测能力名称，不需要单独安装或调用。
 
 默认调用：`backtest(run_dir, action="run", speed="fast", use_cache=false)`。
@@ -1132,7 +1132,41 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 `execution` 的字段是 `entry_mode`、`exit_mode`、`stop_loss_mode`。当前四个合法 preset 为：`close/close/hard、close/close/none、next_open/next_open/hard、next_open/next_open/none`。
 旧 `exit_mode=stop` 只用于返回迁移错误，不能自动解释为 hard stop。
 
-数据预热区间与实际回测区间必须分开：`start_date` / `end_date` 用于加载行情并提供指标预热数据，`backtest_start` / `backtest_end` 用于实际交易及收益、回撤、metrics 统计；例如 MA300 至少需要在 `backtest_start` 前准备 300 根有效 K 线，且策略要正确使用或跳过预热 bar，MCP 不会替 Agent 推算 lookback 或重写数据层、引擎层。若同一真实标的拆成多个执行 code，必须在 `config.json.logical_groups` 中归入同一 group，WebUI 才会把 K 线、持仓风险、交易筛选和统计按一个标的显示。
+### `config.json` 配置契约（由 `BacktestConfigSchema` 生成）
+
+以下字段属于 `run_dir/config.json`，不是 `backtest` MCP 工具的顶层参数。
+
+| 字段 | 类型 | 必填/默认 | 说明 |
+|---|---|---|---|
+| `codes` | `array[string]` | `必填` | 必填。实际执行的标的 code 列表，必须与所选 source 和数据配置一致；同一真实标的拆成多个执行 code 时，用 logical_groups 合并展示。 |
+| `start_date` | `string` | `必填` | 必填。行情加载窗口起点；需要给指标提供预热 bar 时，应早于实际回测起点。例如 MA300 至少要在 backtest_start 前准备 300 根有效 K 线。 |
+| `end_date` | `string` | `必填` | 必填。行情加载窗口终点；应覆盖实际回测结束日 backtest_end。日期格式为 YYYY-MM-DD 或当前 loader 支持的时间格式。 |
+| `backtest_start` | `optional string` | `省略` | 可选。实际交易、净值、收益、回撤和 metrics 的起点；start_date 仍负责加载更早的行情和指标预热数据。省略时使用 start_date。 |
+| `backtest_end` | `optional string` | `省略` | 可选。实际交易、净值、收益、回撤和 metrics 的终点；省略时使用 end_date，纯日期按包含整天处理。 |
+| `source` | `string` | `tushare` | 数据源路由；必须使用当前 loader registry 的 VALID_SOURCES 之一：akshare, alphavantage, auto, baostock, binance, ccxt, eastmoney, finnhub, fmp, futu, india_broker, local, longbridge, mootdx, mt5, okx, pykrx, qveris, sina, stooq, tencent, tiingo, tushare, yahoo, yfinance。 |
+| `interval` | `string` | `1D` | K 线周期；允许值为 15m, 1D, 1H, 1m, 30m, 4H, 5m。小周期回测仍需按 lookback 扩大 start_date。 |
+| `engine` | `string` | `daily` | 回测引擎；允许值为 daily, options。 |
+| `entry_mode` | `string` | `next_open` | 正常开仓/加仓成交时点；允许 next_open（下一根 bar 开盘）或 close（信号 bar 收盘）。正常 entry/exit 组合目前只允许 next_open/next_open 或 close/close。 |
+| `exit_mode` | `string` | `next_open` | 正常信号平仓/止盈/减仓/反转成交时点；允许 next_open 或 close。正常 entry/exit 组合目前只允许 next_open/next_open 或 close/close；不要使用旧的 exit_mode=stop。 |
+| `stop_loss_mode` | `string` | `none` | 独立保护性硬止损；none 为关闭，hard 为启用。它与正常 exit_mode 分开配置。 |
+| `initial_cash` | `number` | `1000000` | 初始资金；收益和风险指标以它作为分母，必须为正数。 |
+| `fundamental_fields` | `optional object` | `省略` | 可选。按数据表配置基本面字段映射，例如 {income: [revenue]}；启用后 runner 在策略生成信号前注入 point-in-time 数据。 |
+| `event_feeds` | `optional array[object]` | `省略` | 可选。事件数据 feed 定义数组；每项至少包含 name、route_template、event_type。 |
+| `logical_groups` | `optional array[LogicalGroupConfigSchema]` | `省略` | 可选。将同一真实标的的多个执行 code 归并为一个逻辑标的，供 metrics、digest、WebUI K 线、持仓风险和交易筛选使用；省略时每个 code 独立显示。 |
+
+#### `LogicalGroupConfigSchema` 元素结构
+将多个代表同一真实标的的执行 code 合并为一个逻辑标的；跨字段成员关系由 logical_groups parser 校验。
+
+| 字段 | 类型 | 必填/默认 | 说明 |
+|---|---|---|---|
+| `logical_symbol` | `string` | `必填` | 必填。逻辑标的的稳定标识，用于指标、持仓风险、K 线和交易筛选的合并键。 |
+| `display_name` | `optional string` | `省略` | 可选。WebUI 展示名称；省略时使用 logical_symbol。 |
+| `codes` | `array[string]` | `必填` | 必填。属于该逻辑标的的实际执行 code 数组；每个 code 必须来自顶层 codes，同一 code 不能加入多个 group。 |
+| `chart_code` | `optional string` | `省略` | 可选。该逻辑标的在 WebUI K 线中使用的代表 code；省略时使用本组第一个 code，填写时必须属于本组 codes。 |
+
+未列出的字段仍可作为引擎专属扩展字段；实际执行以 runner 和对应引擎校验为准。
+
+配置模型中的 `start_date/end_date`、`backtest_start/end` 和 `logical_groups` 字段说明定义了数据预热、实际执行窗口和逻辑标的合并口径；MCP 不会替 Agent 推算 lookback 或重写数据层、引擎层。
 
 图表/报告是已完成 run 的后处理：它们可以读取或更新派生的 `analysis.digest.json`，但不得改变核心 `config.json`、策略代码、`run_card.json`、`metrics.csv`、`trades.csv`、`positions.csv`、`equity.csv`。
 

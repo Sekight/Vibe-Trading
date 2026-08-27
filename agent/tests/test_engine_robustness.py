@@ -411,6 +411,66 @@ class TestBacktestConfigSchema:
         assert c.interval == "1D"
         assert c.engine == "daily"
 
+    def test_execution_window_and_logical_groups_are_declared(self) -> None:
+        c = BacktestConfigSchema(
+            codes=["local:TA0001.ZCE", "local:TA0002.ZCE"],
+            start_date="2025-01-01",
+            end_date="2025-12-31",
+            backtest_start="2025-02-01",
+            backtest_end="2025-12-31",
+            logical_groups=[
+                {
+                    "logical_symbol": "TA_MAIN",
+                    "display_name": "TA 主连",
+                    "codes": ["local:TA0001.ZCE", "local:TA0002.ZCE"],
+                    "chart_code": "local:TA0001.ZCE",
+                }
+            ],
+        )
+
+        assert c.backtest_start == "2025-02-01"
+        assert c.backtest_end == "2025-12-31"
+        assert c.logical_groups is not None
+        assert c.logical_groups[0].logical_symbol == "TA_MAIN"
+        assert c.logical_groups[0].codes == ["local:TA0001.ZCE", "local:TA0002.ZCE"]
+
+    def test_config_json_schema_describes_agent_fields(self) -> None:
+        schema = BacktestConfigSchema.model_json_schema()
+        properties = schema["properties"]
+
+        assert set(schema["required"]) == {"codes", "start_date", "end_date"}
+        for field in (
+            "codes",
+            "start_date",
+            "end_date",
+            "backtest_start",
+            "backtest_end",
+            "logical_groups",
+        ):
+            assert properties[field]["description"]
+        assert properties["backtest_start"]["default"] is None
+        assert properties["backtest_end"]["default"] is None
+        assert "LogicalGroupConfigSchema" in str(properties["logical_groups"])
+
+    def test_reversed_execution_window_rejected(self) -> None:
+        with pytest.raises(Exception, match="backtest_start.*must be <=.*backtest_end"):
+            BacktestConfigSchema(
+                codes=["AAPL.US"],
+                start_date="2025-01-01",
+                end_date="2025-06-01",
+                backtest_start="2025-06-01",
+                backtest_end="2025-01-01",
+            )
+
+    def test_execution_window_date_format_rejected(self) -> None:
+        with pytest.raises(Exception, match="invalid date format"):
+            BacktestConfigSchema(
+                codes=["AAPL.US"],
+                start_date="2025-01-01",
+                end_date="2025-06-01",
+                backtest_start="not-a-date",
+            )
+
     def test_fundamental_fields_must_be_table_to_field_list_mapping(self) -> None:
         with pytest.raises(ValueError, match="fundamental_fields"):
             BacktestConfigSchema(

@@ -98,6 +98,35 @@ def test_registry_contract_has_one_public_tool_and_four_execution_presets() -> N
     ) == {"entry_mode": "close", "exit_mode": "close", "stop_loss_mode": "hard"}
 
 
+def test_backtest_config_schema_is_the_agent_facing_config_contract() -> None:
+    config_schema = capabilities.backtest_config_schema()
+    properties = config_schema["properties"]
+    required = set(config_schema["required"])
+
+    assert {"codes", "start_date", "end_date"}.issubset(required)
+    assert {"backtest_start", "backtest_end", "logical_groups"}.issubset(properties)
+    for field in (
+        "codes",
+        "start_date",
+        "end_date",
+        "backtest_start",
+        "backtest_end",
+        "logical_groups",
+    ):
+        assert properties[field].get("description")
+
+    instructions = capabilities.render_mcp_instructions()
+    assert "BacktestConfigSchema" in instructions
+    assert "Config fields (generated from `BacktestConfigSchema`)" in instructions
+    assert "backtest_start" in instructions
+    assert "logical_groups" in instructions
+    assert "logical_symbol" in instructions
+    assert "chart_code" in instructions
+
+    tool_properties = capabilities.backtest_tool_schema()["properties"]
+    assert set(tool_properties) == {"run_dir", "action", "speed", "use_cache", "execution"}
+
+
 def test_bridge_skill_is_the_ten_rule_boundary_only() -> None:
     from src.agent.skills import SkillsLoader
 
@@ -115,6 +144,8 @@ def test_bridge_skill_is_the_ten_rule_boundary_only() -> None:
     assert "backtest_start/backtest_end" in content
     assert "MA300" in content
     assert "logical_groups" in content
+    assert "核对配置 schema" in content
+    assert "核对 MCP tool schema" in content
 
 
 def test_default_run_forwards_fastrun_without_implicit_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
