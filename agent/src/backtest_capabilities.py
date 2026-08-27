@@ -20,7 +20,7 @@ from backtest.execution_modes import (
 )
 
 
-CAPABILITY_REGISTRY_VERSION = "2026-08-27.2"
+CAPABILITY_REGISTRY_VERSION = "2026-08-27.3"
 DEFAULT_ACTION = "run"
 DEFAULT_SPEED = "fast"
 DEFAULT_USE_CACHE = False
@@ -206,9 +206,8 @@ def backtest_tool_schema() -> dict[str, Any]:
                 "description": (
                     "Run directory containing config.json and "
                     "code/signal_engine.py. The config.json inside it follows "
-                    "the engine-owned BacktestConfigSchema, including indicator "
-                    "warm-up and execution/statistics windows plus logical_groups; config fields "
-                    "are not top-level MCP arguments."
+                    "the engine-owned BacktestConfigSchema; consult that schema "
+                    "before writing it. Config fields are not top-level MCP arguments."
                 ),
             },
             "action": {
@@ -503,7 +502,7 @@ def render_capability_markdown(*, numbered: bool = False) -> str:
 
 {config_summary}
 
-配置模型中的 `start_date/end_date`、`backtest_start/end` 和 `logical_groups` 字段说明定义了数据预热、实际执行窗口和逻辑标的合并口径；MCP 不会替 Agent 推算 lookback 或重写数据层、引擎层。
+配置字段、嵌套结构和字段说明以上方 `BacktestConfigSchema` 配置契约为准；MCP 不会替 Agent 推算 lookback 或重写数据层、引擎层。
 
 图表/报告是已完成 run 的后处理：它们可以读取或更新派生的 `analysis.digest.json`，但不得改变核心 `config.json`、策略代码、`run_card.json`、`metrics.csv`、`trades.csv`、`positions.csv`、`equity.csv`。
 
@@ -513,7 +512,7 @@ MCP schema 摘要：`{schema['properties']['action']['enum']}`；缓存默认 `{
 
 BRIDGE_WORKFLOW_RULES: tuple[str, ...] = (
     "Vibe-Trading 的目录结构：策略 run 应有 config.json、code/signal_engine.py，以及由系统生成的 artifacts/、run_card.json 等结果文件。",
-    "config.json 的基本格式：字段、类型、默认值和使用关系以 MCP 暴露的 BacktestConfigSchema 为准；其中 start_date/end_date 用于行情加载和指标预热，backtest_start/backtest_end 用于实际交易与收益、回撤、metrics 统计（例如 MA300 要提前准备至少 300 根有效 K 线），同一真实标的若拆成多个执行 code，必须在 config.json.logical_groups 中归入同一 group，WebUI 才会按一个标的显示；配置前核对配置 schema，不要把这些字段当成 MCP 顶层参数。",
+    "config.json 的基本格式：每个策略 run 都需要独立的 config.json；字段、类型、默认值和字段间规则以 MCP 当前暴露的 BacktestConfigSchema 为准。配置前先核对该 schema；配置字段写入 run_dir/config.json，不作为 MCP backtest 的顶层参数。",
     "signal_engine.py 的接口要求：只实现 SignalEngine 及其 generate(data_map) 策略逻辑，遵守现有信号、索引和安全约束。",
     "可调用的 MCP 工具：先使用当前 MCP 注册表提供的工具；回测统一使用单一 backtest 入口，调用前核对 MCP tool schema，不自行假定已不存在的工具或参数。",
     "禁止修改回测引擎和数据加载器：市场规则、取数、成交、费用、artifacts 由 Vibe-Trading 负责。",
@@ -549,7 +548,7 @@ def render_mcp_instructions() -> str:
 - full is an explicit run -> charts -> report workflow.
 - Strategy generation and backtesting are separate phases. Require human confirmation before the first backtest. Do not rewrite backtest engines or loaders.
 - Use execution fields entry_mode, exit_mode, and stop_loss_mode only through the registered schema. Legacy exit_mode=stop must surface a migration error.
-- Configure `run_dir/config.json` from the engine-owned `BacktestConfigSchema` summary below. These are file fields, not top-level `backtest` arguments; the strategy must keep data loading/warm-up and execution/statistics windows separate, and must group execution codes for one real instrument in `logical_groups`.
+- Configure `run_dir/config.json` from the engine-owned `BacktestConfigSchema` summary below. These are file fields, not top-level `backtest` arguments; read the required/default markers and field descriptions before writing the file.
 {config_summary}
 - If a run fails, classify the failure and stop; never retry indefinitely.
 """.strip()

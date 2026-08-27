@@ -59,6 +59,7 @@
 | V044 | 2026-08-23 | MCP 单入口回测工作流与外部 Agent bridge | capability registry 统一生成 MCP schema/instructions/skill/文档；backtest 默认 fast+cache，charts/report 只做后处理并保护核心 artifacts |
 | V045 | 2026-08-23 | MCP 行情缓存改为显式开启 | MCP/Codex 默认不启用 loader cache，用户明确要求时通过 `use_cache=true` 开启，并移除 Codex 配置中的 cache 环境变量 |
 | V046 | 2026-08-27 | BacktestConfigSchema 配置契约与 Agent 暴露 | 配置字段说明、窗口和逻辑分组结构进入配置 schema，并自动生成 MCP Agent 可读摘要 |
+| V047 | 2026-08-27 | bridge skill 配置说明收敛与窗口边界审计 | skill 不再重复配置字段；配置 schema 早失败覆盖执行窗口，MCP/文档出口职责闭环 |
 > 补录说明：V001-V009 为补录条目，依据 git 历史、HowToUse、全局复利与踩坑日志、`C:\Users\mumu\.codex\sessions` 会话记录回溯整理；当时未留痕的字段标“待补”。从下一条起，每次迭代收尾直接写正文。
 
 ## 模板
@@ -547,3 +548,10 @@
 - 关键细节：`agent/backtest/runner.py` 增加通用字段描述、可选 `backtest_start/end` 和 `LogicalGroupConfigSchema`；窗口顺序由配置边界校验，逻辑组成员关系继续由 `parse_logical_groups()` 做跨字段校验；`agent/src/backtest_capabilities.py` 从 `BacktestConfigSchema.model_json_schema()` 生成 MCP instructions、HowToUse/README 配置摘要；bridge skill 保持 10 条边界，并明确配置 schema 与 MCP tool schema 分步核对。未收紧 `extra="allow"`，未修改引擎和 loader。
 - 验证：`pytest agent/tests/test_engine_robustness.py agent/tests/test_logical_groups.py agent/tests/test_backtest_workflow.py agent/tests/test_mcp_server_smoke.py agent/tests/test_mcp_regression.py -q` → `94 passed, 1 skipped`；`pytest agent/tests/test_mcp_stdio_integration.py agent/tests/test_runner_coverage.py agent/tests/test_runner_dotenv.py -q` → `16 passed`；目标源码 `py_compile`、生成器 `--check`、`git diff --check` 通过。
 - 关联：计划 `P-20260827-backtest_config_schema_agent`；HowToUse 第 12 节；README MCP 回测工作流能力表；本次提交。
+
+### V047 · bridge skill 配置说明收敛与窗口边界审计（2026-08-27）
+- 一句话总结：将 bridge skill 的配置说明收敛为“读取并遵循 `BacktestConfigSchema`”，清理 MCP instructions/能力表中的重复窗口说明，并补齐数据加载窗口覆盖实际执行窗口的早失败校验。
+- 为什么：配置字段的权威定义已经进入 `BacktestConfigSchema`，skill 再重复解释 `start_date`、`backtest_start/end` 和 `logical_groups` 会形成多处可漂移说明；同时只校验执行窗口自身顺序，无法在回测前阻止它超出行情加载范围。
+- 关键细节：`agent/src/backtest_capabilities.py` 的 skill 规则只保留 schema 指针和两步核对；工具入口只提示读取 schema，MCP instructions/HowToUse/README 继续由 schema 自动生成完整摘要；`BacktestConfigSchema` 按日期-only 的整日语义校验执行窗口包含于数据窗口，逻辑组结构校验与顶层 code 交叉校验仍分层处理。审计现有 163 个 run config，未发现历史窗口越界。
+- 验证：定向配置、逻辑分组、MCP、stdio、runner 回归 `112 passed, 1 skipped`；skill 规则仍为 10 条；生成器 `--check`、目标源码 `py_compile`、`git diff --check` 通过。skill-creator 的 `quick_validate.py` 因项目现有 `category` frontmatter（SkillsLoader 依赖该字段）不在其通用允许列表而无法通过，项目自身 SkillsLoader 加载测试通过，未为适配外部校验器破坏现有分类契约。
+- 关联：计划 `P-20260827-backtest_config_schema_agent` 的后续审计；HowToUse 第 12 节；README MCP 回测工作流能力表；本次提交。

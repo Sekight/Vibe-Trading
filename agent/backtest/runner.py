@@ -69,6 +69,14 @@ _PRICE_PANEL_COLUMNS = ("open", "high", "low", "close", "volume", "vwap", "amoun
 _FUND_PREFIX = "fund:"
 
 
+def _inclusive_config_end(value: str) -> pd.Timestamp:
+    """Parse a config end boundary, treating date-only values as whole days."""
+    timestamp = pd.Timestamp(value)
+    if len(str(value).strip()) == 10:
+        return timestamp + pd.Timedelta(days=1) - pd.Timedelta(nanoseconds=1)
+    return timestamp
+
+
 @dataclass(frozen=True)
 class DataFetchResult:
     """Market data plus the routing metadata selected by the central registry."""
@@ -324,12 +332,26 @@ class BacktestConfigSchema(BaseModel):
 
     @model_validator(mode="after")
     def backtest_window_order(self) -> "BacktestConfigSchema":
+        data_start = pd.Timestamp(self.start_date)
+        data_end = _inclusive_config_end(self.end_date)
         if self.backtest_start and self.backtest_end:
-            if pd.Timestamp(self.backtest_start) > pd.Timestamp(self.backtest_end):
+            execution_start = pd.Timestamp(self.backtest_start)
+            execution_end = _inclusive_config_end(self.backtest_end)
+            if execution_start > execution_end:
                 raise ValueError(
                     f"backtest_start ({self.backtest_start}) must be <= "
                     f"backtest_end ({self.backtest_end})"
                 )
+        if self.backtest_start and pd.Timestamp(self.backtest_start) < data_start:
+            raise ValueError(
+                f"backtest_start ({self.backtest_start}) must be >= "
+                f"start_date ({self.start_date})"
+            )
+        if self.backtest_end and _inclusive_config_end(self.backtest_end) > data_end:
+            raise ValueError(
+                f"backtest_end ({self.backtest_end}) must be <= "
+                f"end_date ({self.end_date})"
+            )
         return self
 
     @model_validator(mode="after")

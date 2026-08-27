@@ -462,6 +462,32 @@ class TestBacktestConfigSchema:
                 backtest_end="2025-01-01",
             )
 
+    def test_execution_window_must_be_inside_data_window(self) -> None:
+        with pytest.raises(Exception, match="backtest_start.*must be >=.*start_date"):
+            BacktestConfigSchema(
+                codes=["AAPL.US"],
+                start_date="2025-01-01",
+                end_date="2025-06-01",
+                backtest_start="2024-12-31",
+            )
+        with pytest.raises(Exception, match="backtest_end.*must be <=.*end_date"):
+            BacktestConfigSchema(
+                codes=["AAPL.US"],
+                start_date="2025-01-01",
+                end_date="2025-06-01",
+                backtest_end="2025-06-02",
+            )
+
+    def test_date_only_execution_end_includes_intraday_bars(self) -> None:
+        c = BacktestConfigSchema(
+            codes=["AAPL.US"],
+            start_date="2025-01-01",
+            end_date="2025-01-01",
+            backtest_start="2025-01-01 09:30:00",
+            backtest_end="2025-01-01",
+        )
+        assert c.backtest_end == "2025-01-01"
+
     def test_execution_window_date_format_rejected(self) -> None:
         with pytest.raises(Exception, match="invalid date format"):
             BacktestConfigSchema(

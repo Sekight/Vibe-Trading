@@ -1105,7 +1105,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 <!-- BEGIN GENERATED: backtest-capabilities -->
 ## 12. MCP 回测工作流能力表（自动生成）
 
-> 来源：`agent/src/backtest_capabilities.py`；注册表版本：`2026-08-27.2`。
+> 来源：`agent/src/backtest_capabilities.py`；注册表版本：`2026-08-27.3`。
 > 回测时直接调用 `backtest` 工具即可。`fast_backtest`、`generate_charts`、`generate_report` 只是回测能力名称，不需要单独安装或调用。
 
 默认调用：`backtest(run_dir, action="run", speed="fast", use_cache=false)`。
@@ -1166,7 +1166,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 
 未列出的字段仍可作为引擎专属扩展字段；实际执行以 runner 和对应引擎校验为准。
 
-配置模型中的 `start_date/end_date`、`backtest_start/end` 和 `logical_groups` 字段说明定义了数据预热、实际执行窗口和逻辑标的合并口径；MCP 不会替 Agent 推算 lookback 或重写数据层、引擎层。
+配置字段、嵌套结构和字段说明以上方 `BacktestConfigSchema` 配置契约为准；MCP 不会替 Agent 推算 lookback 或重写数据层、引擎层。
 
 图表/报告是已完成 run 的后处理：它们可以读取或更新派生的 `analysis.digest.json`，但不得改变核心 `config.json`、策略代码、`run_card.json`、`metrics.csv`、`trades.csv`、`positions.csv`、`equity.csv`。
 

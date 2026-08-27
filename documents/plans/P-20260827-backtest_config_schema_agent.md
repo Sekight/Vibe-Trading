@@ -89,6 +89,7 @@
 - 生成物：bridge skill 仍为 10 条工作流边界，并加入配置 schema / MCP tool schema 分步核对；HowToUse 第 12 节和 README 能力区块已同步，嵌套 `logical_groups` 元素结构可见。
 - 验证：配置、逻辑分组、MCP workflow、冒烟和回归定向测试 `94 passed, 1 skipped`；stdio/runner 定向测试 `16 passed`；目标源码 `py_compile`、生成器 `--check`、`git diff --check` 通过。
 - 范围核对：本次只修改配置 schema、MCP registry/说明生成、bridge skill、生成文档和测试；未修改 `backtest/engines`、`backtest/loaders`、成交/指标/缓存业务逻辑，因此未新增真实回测 run。
+- 后续审计修正（V047）：清理 bridge skill 和 MCP/能力表中的重复配置语义；在核对 163 个现有 run config 均无越界后，补充数据加载窗口覆盖实际执行窗口的早失败校验，并按 date-only end 的整日语义处理盘中时间。
 
 ## 讨论记录
 

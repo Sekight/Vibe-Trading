@@ -5,7 +5,7 @@ category: tool
 ---
 
 1. Vibe-Trading 的目录结构：策略 run 应有 config.json、code/signal_engine.py，以及由系统生成的 artifacts/、run_card.json 等结果文件。
-2. config.json 的基本格式：字段、类型、默认值和使用关系以 MCP 暴露的 BacktestConfigSchema 为准；其中 start_date/end_date 用于行情加载和指标预热，backtest_start/backtest_end 用于实际交易与收益、回撤、metrics 统计（例如 MA300 要提前准备至少 300 根有效 K 线），同一真实标的若拆成多个执行 code，必须在 config.json.logical_groups 中归入同一 group，WebUI 才会按一个标的显示；配置前核对配置 schema，不要把这些字段当成 MCP 顶层参数。
+2. config.json 的基本格式：每个策略 run 都需要独立的 config.json；字段、类型、默认值和字段间规则以 MCP 当前暴露的 BacktestConfigSchema 为准。配置前先核对该 schema；配置字段写入 run_dir/config.json，不作为 MCP backtest 的顶层参数。
 3. signal_engine.py 的接口要求：只实现 SignalEngine 及其 generate(data_map) 策略逻辑，遵守现有信号、索引和安全约束。
 4. 可调用的 MCP 工具：先使用当前 MCP 注册表提供的工具；回测统一使用单一 backtest 入口，调用前核对 MCP tool schema，不自行假定已不存在的工具或参数。
 5. 禁止修改回测引擎和数据加载器：市场规则、取数、成交、费用、artifacts 由 Vibe-Trading 负责。
