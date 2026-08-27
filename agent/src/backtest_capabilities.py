@@ -20,7 +20,7 @@ from backtest.execution_modes import (
 )
 
 
-CAPABILITY_REGISTRY_VERSION = "2026-08-23.1"
+CAPABILITY_REGISTRY_VERSION = "2026-08-27.1"
 DEFAULT_ACTION = "run"
 DEFAULT_SPEED = "fast"
 DEFAULT_USE_CACHE = False
@@ -205,7 +205,11 @@ def backtest_tool_schema() -> dict[str, Any]:
                 "type": "string",
                 "description": (
                     "Run directory containing config.json and "
-                    "code/signal_engine.py"
+                    "code/signal_engine.py. In config.json, keep "
+                    "start_date/end_date (data and indicator warm-up) separate "
+                    "from backtest_start/backtest_end (execution/statistics); "
+                    "put execution codes for one real instrument in one "
+                    "logical_groups group."
                 ),
             },
             "action": {
@@ -338,7 +342,7 @@ def render_capability_markdown(*, numbered: bool = False) -> str:
 `execution` 的字段是 `entry_mode`、`exit_mode`、`stop_loss_mode`。当前四个合法 preset 为：`{presets}`。
 旧 `exit_mode=stop` 只用于返回迁移错误，不能自动解释为 hard stop。
 
-小周期回测仍由 `config.json` 的 `interval`、`start_date`、`end_date`、`backtest_start`、`backtest_end` 和策略自身的 `holding_bars` 共同决定；MCP 不会替 Agent 重写数据层或引擎层。
+数据预热区间与实际回测区间必须分开：`start_date` / `end_date` 用于加载行情并提供指标预热数据，`backtest_start` / `backtest_end` 用于实际交易及收益、回撤、metrics 统计；例如 MA300 至少需要在 `backtest_start` 前准备 300 根有效 K 线，且策略要正确使用或跳过预热 bar，MCP 不会替 Agent 推算 lookback 或重写数据层、引擎层。若同一真实标的拆成多个执行 code，必须在 `config.json.logical_groups` 中归入同一 group，WebUI 才会把 K 线、持仓风险、交易筛选和统计按一个标的显示。
 
 图表/报告是已完成 run 的后处理：它们可以读取或更新派生的 `analysis.digest.json`，但不得改变核心 `config.json`、策略代码、`run_card.json`、`metrics.csv`、`trades.csv`、`positions.csv`、`equity.csv`。
 
@@ -348,7 +352,7 @@ MCP schema 摘要：`{schema['properties']['action']['enum']}`；缓存默认 `{
 
 BRIDGE_WORKFLOW_RULES: tuple[str, ...] = (
     "Vibe-Trading 的目录结构：策略 run 应有 config.json、code/signal_engine.py，以及由系统生成的 artifacts/、run_card.json 等结果文件。",
-    "config.json 的基本格式：由 Agent 配置数据源、标的、周期、日期、回测窗口、成本和当前三字段执行契约；具体字段和允许值以 MCP schema/当前引擎契约为准。",
+    "config.json 的基本格式：由 Agent 配置数据源、标的、周期、日期、回测窗口、成本和当前三字段执行契约；start_date/end_date 用于加载行情并提供指标预热数据，backtest_start/backtest_end 用于实际交易与收益、回撤、metrics 统计（例如 MA300 要提前准备至少 300 根有效 K 线，策略仍需正确处理预热 bar）；同一真实标的若拆成多个执行 code，必须在 config.json.logical_groups 中归入同一 group，WebUI 才会按一个标的显示 K 线、持仓风险、交易筛选和统计；具体字段和允许值以当前引擎契约为准。",
     "signal_engine.py 的接口要求：只实现 SignalEngine 及其 generate(data_map) 策略逻辑，遵守现有信号、索引和安全约束。",
     "可调用的 MCP 工具：先使用当前 MCP 注册表提供的工具；回测统一使用单一 backtest 入口，不自行假定已不存在的工具或参数。",
     "禁止修改回测引擎和数据加载器：市场规则、取数、成交、费用、artifacts 由 Vibe-Trading 负责。",
@@ -383,7 +387,8 @@ def render_mcp_instructions() -> str:
 - full is an explicit run -> charts -> report workflow.
 - Strategy generation and backtesting are separate phases. Require human confirmation before the first backtest. Do not rewrite backtest engines or loaders.
 - Use execution fields entry_mode, exit_mode, and stop_loss_mode only through the registered schema. Legacy exit_mode=stop must surface a migration error.
-- For small-period runs, preserve the config-driven interval/data window/execution window semantics and inspect timestamped trades plus holding_bars after the run.
+- For small-period runs, keep the data window and execution window separate: `start_date`/`end_date` load bars and provide indicator warm-up data, while `backtest_start`/`backtest_end` define actual trading and return/drawdown/metrics statistics. For example, MA300 needs at least 300 valid bars before `backtest_start`; the strategy must use or skip warm-up bars because MCP does not infer lookback requirements.
+- If multiple execution codes represent one real instrument (for example, pyramid/add-on pseudo codes), place them in the same `config.json.logical_groups` group. This is the source of truth that lets WebUI merge their K-line, position/risk, trade-filter, and statistics views; otherwise they are shown as separate instruments.
 - If a run fails, classify the failure and stop; never retry indefinitely.
 """.strip()
 

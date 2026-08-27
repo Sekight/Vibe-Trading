@@ -72,9 +72,18 @@ def _call(run_dir: Path, monkeypatch: pytest.MonkeyPatch, **kwargs) -> dict:
 
 def test_registry_contract_has_one_public_tool_and_four_execution_presets() -> None:
     schema = capabilities.backtest_tool_schema()
+    instructions = capabilities.render_mcp_instructions()
+    capability_markdown = capabilities.render_capability_markdown()
 
     assert capabilities.BACKTEST_ACTIONS == ("run", "charts", "report", "full")
-    assert "use_cache=false" in capabilities.render_mcp_instructions()
+    assert "use_cache=false" in instructions
+    assert "start_date" in instructions and "backtest_start" in instructions
+    assert "logical_groups" in instructions
+    assert "indicator warm-up" in schema["properties"]["run_dir"]["description"]
+    assert "execution/statistics" in schema["properties"]["run_dir"]["description"]
+    assert "logical_groups" in schema["properties"]["run_dir"]["description"]
+    assert "start_date" in capability_markdown and "backtest_start" in capability_markdown
+    assert "logical_groups" in capability_markdown
     assert schema["properties"]["action"]["enum"] == list(capabilities.BACKTEST_ACTIONS)
     assert schema["properties"]["speed"]["default"] == "fast"
     assert schema["properties"]["use_cache"]["default"] is False
@@ -102,6 +111,10 @@ def test_bridge_skill_is_the_ten_rule_boundary_only() -> None:
     assert len(numbered) == 10
     assert "action=\"charts\"" not in content
     assert "stop_loss_mode=\"hard\"" not in content
+    assert "start_date/end_date" in content
+    assert "backtest_start/backtest_end" in content
+    assert "MA300" in content
+    assert "logical_groups" in content
 
 
 def test_default_run_forwards_fastrun_without_implicit_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

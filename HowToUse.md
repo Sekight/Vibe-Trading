@@ -1105,7 +1105,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 <!-- BEGIN GENERATED: backtest-capabilities -->
 ## 12. MCP 回测工作流能力表（自动生成）
 
-> 来源：`agent/src/backtest_capabilities.py`；注册表版本：`2026-08-23.1`。
+> 来源：`agent/src/backtest_capabilities.py`；注册表版本：`2026-08-27.1`。
 > 回测时直接调用 `backtest` 工具即可。`fast_backtest`、`generate_charts`、`generate_report` 只是回测能力名称，不需要单独安装或调用。
 
 默认调用：`backtest(run_dir, action="run", speed="fast", use_cache=false)`。
@@ -1132,7 +1132,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 `execution` 的字段是 `entry_mode`、`exit_mode`、`stop_loss_mode`。当前四个合法 preset 为：`close/close/hard、close/close/none、next_open/next_open/hard、next_open/next_open/none`。
 旧 `exit_mode=stop` 只用于返回迁移错误，不能自动解释为 hard stop。
 
-小周期回测仍由 `config.json` 的 `interval`、`start_date`、`end_date`、`backtest_start`、`backtest_end` 和策略自身的 `holding_bars` 共同决定；MCP 不会替 Agent 重写数据层或引擎层。
+数据预热区间与实际回测区间必须分开：`start_date` / `end_date` 用于加载行情并提供指标预热数据，`backtest_start` / `backtest_end` 用于实际交易及收益、回撤、metrics 统计；例如 MA300 至少需要在 `backtest_start` 前准备 300 根有效 K 线，且策略要正确使用或跳过预热 bar，MCP 不会替 Agent 推算 lookback 或重写数据层、引擎层。若同一真实标的拆成多个执行 code，必须在 `config.json.logical_groups` 中归入同一 group，WebUI 才会把 K 线、持仓风险、交易筛选和统计按一个标的显示。
 
 图表/报告是已完成 run 的后处理：它们可以读取或更新派生的 `analysis.digest.json`，但不得改变核心 `config.json`、策略代码、`run_card.json`、`metrics.csv`、`trades.csv`、`positions.csv`、`equity.csv`。
 
