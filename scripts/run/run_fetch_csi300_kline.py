@@ -8,7 +8,7 @@
    和 manifest.json 覆盖率报告。
 
 用法（建议在 vibe-trading-src 仓库根目录用 venv python 运行）：
-    E:\\gitCloneProgram\\vibe-trading-src\\.venv\\Scripts\\python.exe agent/scripts/run/run_fetch_csi300_kline.py --start-date 2020-01-01 --end-date 2026-12-31 --out-dir C:/tmp/csi300
+    E:\\gitCloneProgram\\vibe-trading-src\\.venv\\Scripts\\python.exe scripts/run/run_fetch_csi300_kline.py --start-date 2020-01-01 --end-date 2026-12-31 --out-dir C:/tmp/csi300
 
 默认输出目录：C:\\Users\\<user>\\.vibe-trading\\data-bridge\\csi300。
 --append 会把增量模式透传给 fetch_kline：已有 parquet 的标只补头尾缺口。

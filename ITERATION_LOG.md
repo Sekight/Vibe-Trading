@@ -60,7 +60,7 @@
 | V045 | 2026-08-23 | MCP 行情缓存改为显式开启 | MCP/Codex 默认不启用 loader cache，用户明确要求时通过 `use_cache=true` 开启，并移除 Codex 配置中的 cache 环境变量 |
 | V046 | 2026-08-27 | BacktestConfigSchema 配置契约与 Agent 暴露 | 配置字段说明、窗口和逻辑分组结构进入配置 schema，并自动生成 MCP Agent 可读摘要 |
 | V047 | 2026-08-27 | bridge skill 配置说明收敛与窗口边界审计 | skill 不再重复配置字段；配置 schema 早失败覆盖执行窗口，MCP/文档出口职责闭环 |
-| V048 | 2026-09-05 | local loader extra_columns 透传与 stockdb 导出工具 | data-bridge 新增 extra_columns 配置透传非 OHLCV 列（加新列只改配置不改代码）；新增 agent/scripts/export_stockdb_ashare.py 导出 A 股日线数据仓；100 只端到端对照验证透传真实生效 |
+| V048 | 2026-09-05 | local loader extra_columns 透传与 stockdb 导出工具 | data-bridge 新增 extra_columns 配置透传非 OHLCV 列（加新列只改配置不改代码）；新增 scripts/export_stockdb_ashare.py 导出 A 股日线数据仓；100 只端到端对照验证透传真实生效 |
 > 补录说明：V001-V009 为补录条目，依据 git 历史、HowToUse、全局复利与踩坑日志、`C:\Users\mumu\.codex\sessions` 会话记录回溯整理；当时未留痕的字段标“待补”。从下一条起，每次迭代收尾直接写正文。
 
 ## 模板
@@ -558,7 +558,7 @@
 - 关联：计划 `P-20260827-backtest_config_schema_agent` 的后续审计；HowToUse 第 12 节；README MCP 回测工作流能力表；本次提交。
 
 ### V048 · local loader extra_columns 透传与 stockdb 导出工具（2026-09-05）
-- 一句话总结：data-bridge 新增 `extra_columns` 配置，把本地文件里的非 OHLCV 列透传给信号引擎（策略侧按列名直接读取，之后加新列只改配置不改代码），并新增 `agent/scripts/export_stockdb_ashare.py` 把本地 stockdb 的沪深 A 股日线（含后复权、换手率/成交额/流通股本、生命周期、申万一级、交易日历）导出为 data-bridge 可读 Parquet；100 只样本做带/不带透传的对照回测，证明换手率列真实到达信号引擎。
+- 一句话总结：data-bridge 新增 `extra_columns` 配置，把本地文件里的非 OHLCV 列透传给信号引擎（策略侧按列名直接读取，之后加新列只改配置不改代码），并新增 `scripts/export_stockdb_ashare.py` 把本地 stockdb 的沪深 A 股日线（含后复权、换手率/成交额/流通股本、生命周期、申万一级、交易日历）导出为 data-bridge 可读 Parquet；100 只样本做带/不带透传的对照回测，证明换手率列真实到达信号引擎。
 - 为什么：研报复现（《均线收敛与发散》TRCF）的策略层需要换手率等非 OHLCV 字段，local loader 保留列硬编码为 OHLCV，信号引擎拿不到；采用方案 A（local loader 透传 + 导出快照）而非新增 stockdb 直连 loader，因为登录墙更小、离线可复现，且不把开源仓库绑定到私有 `.pyd` 与常驻服务；导出体积实测（5201 只、2011 起约 1920 万行）Parquet ≈1.5GB，远小于原始库 24GB（大头是分钟线，不导）。
 - 关键细节：`local_loader.py` 新增 `_parse_extra_columns`（支持 list 同名透传与 dict 重命名映射），`_normalize_columns`、CSV/Parquet/DuckDB 三个 reader、`_resample_to_interval` 全部透传额外列（coarser 聚合取桶末 last，与 trade_date 同语义）；缓存 key 把 extra 配置折叠进 `fields` 传入 `cached_loader_fetch`，避免改配置命中旧缓存；未声明 `extra_columns` 时行为与现状一致。导出工具按前缀分片、幂等重建、manifest 记录版本；hfq 走与 stock_sdk `fq="hfq"` 同款折算路径（`raw / (1.0/cum)`）保证逐位一致；退市表为历史记录流（同一代码多条），按唯一代码去重后是退市代码集。
 - 验证：既有 local loader 测试组 + 新增超单测（list/dict/缺列/parquet/resample/缓存隔离 fixture）在默认 cache=1 环境 `42 passed`；loader/registry/runner 定向回归 `75 passed, 1 skipped`（`test_loader_retry_helpers` 缓存环境基线失败，stash 可复现，非本次引入）；导出 100 只 2015 起 26.9 万行，hfq 与 SDK 对照逐行一致 `70715/70715`；端到端 100 只 run（透传 vs 无透传对照组）`trade_count 1651 vs 829`、`total_return 12.4% vs 39.0%`、`avg_turnover 0.168 vs 0.084`，结果显著不同证明 turnover 列真实驱动信号。

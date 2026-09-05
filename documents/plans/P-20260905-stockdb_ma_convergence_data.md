@@ -39,7 +39,7 @@
 
 ## 实现方案
 
-### 阶段 1：stockdb 导出工具（`agent/scripts/export_stockdb_ashare.py`）
+### 阶段 1：stockdb 导出工具（`scripts/export_stockdb_ashare.py`）
 
 产物（Parquet 分片，行=date；全沪深 A 股，2011-01 起，含 MA120 预热）：
 1. `daily.parquet`：`date/code/open/high/low/close/pre_close/volume/amount/turnover/float_share/float_mv/total_mv/is_st` + 后复权 `open_hfq/high_hfq/low_hfq/close_hfq`（SDK `fq="hfq"` 单次取数，不做二次折算）；原样保留的 `turnover(%)`、`amount(元)`、`float_share(股)` 是策略层非 OHLCV 字段的来源。

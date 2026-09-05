@@ -9,7 +9,7 @@
 - 输出 membership.parquet / membership.csv / snapshots.json 到 out-dir。
 
 用法（建议在 vibe-trading-src 仓库根目录用 venv python 运行）：
-    E:\\gitCloneProgram\\vibe-trading-src\\.venv\\Scripts\\python.exe agent/scripts/lib/get_csi300_constituents.py --start-date 2020-01-01 --end-date 2026-12-31 --out-dir C:/tmp/csi300
+    E:\\gitCloneProgram\\vibe-trading-src\\.venv\\Scripts\\python.exe scripts/lib/get_csi300_constituents.py --start-date 2020-01-01 --end-date 2026-12-31 --out-dir C:/tmp/csi300
 
 参数：
     --index          成分指数代码，默认 399300.SZ；支持 300/000300/000905 等

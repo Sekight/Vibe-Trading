@@ -1054,15 +1054,16 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 
 ## 9. 脚本速查
 
-`agent/scripts/` 下的数据抓取脚本用于把行情落库到本地，供离线回测复用；具体使用见 [`agent/scripts/README.md`](agent/scripts/README.md)。
+`scripts/` 下的数据抓取脚本用于把行情落库到本地，供离线回测复用；具体使用见 [`scripts/README.md`](scripts/README.md)。
 
 | 脚本 | 功能 |
 |---|---|
 | `lib/fetch_kline.py` | 按标的、日期区间、数据源抓取日 K（复用 Vibe-Trading 数据层），落盘为 parquet/csv；支持 `--append` 增量补头尾缺口 |
 | `lib/get_csi300_constituents.py` | 获取指数历史成分股（baostock 主源 + akshare 兜底），生成无幸存者偏差的 membership 长表；支持 `--index` 切换沪深300/中证500/上证50 |
 | `run/run_fetch_csi300_kline.py` | 任务胶水：成分股 + 全部历史成分并集 K 线 + 基准指数落库，生成 data-bridge 配置和覆盖率报告 |
+| `export_stockdb_ashare.py` | stockdb A 股日线导出为 data-bridge Parquet 数据仓（全字段 + 后复权 4 列），幂等可重建 |
 
-`agent/scripts/` 根目录另有 3 个原有开发脚本（`bench_performance.py`、`w4a_run_benches.py`、`w4a_patch_blog.py`），与数据抓取无关。
+`agent/scripts/` 根目录另有开发/能力脚本（`bench_performance.py`、`w4a_run_benches.py`、`w4a_patch_blog.py`、`sync_backtest_capabilities.py`），与数据抓取无关。
 
 ---
 

@@ -9,16 +9,16 @@
   多标的同时生效，已完整覆盖的标的不再联网。
 
 用法（建议在 vibe-trading-src 仓库根目录用 venv python 运行）：
-    E:\\gitCloneProgram\\vibe-trading-src\\.venv\\Scripts\\python.exe agent/scripts/lib/fetch_kline.py --codes 600519.SH,000001.SZ --start-date 2025-01-01 --end-date 2025-12-31 --out-dir C:/tmp/kline --source auto
+    E:\\gitCloneProgram\\vibe-trading-src\\.venv\\Scripts\\python.exe scripts/lib/fetch_kline.py --codes 600519.SH,000001.SZ --start-date 2025-01-01 --end-date 2025-12-31 --out-dir C:/tmp/kline --source auto
 
     # 从文件读标的（每行一个代码，多个标的一起抓）
-    E:\\gitCloneProgram\\vibe-trading-src\\.venv\\Scripts\\python.exe agent/scripts/lib/fetch_kline.py --codes-file universe.txt --start-date 2025-01-01 --end-date 2025-12-31 --out-dir C:/tmp/kline
+    E:\\gitCloneProgram\\vibe-trading-src\\.venv\\Scripts\\python.exe scripts/lib/fetch_kline.py --codes-file universe.txt --start-date 2025-01-01 --end-date 2025-12-31 --out-dir C:/tmp/kline
 
     # 增量补齐：600519.SH、600300.SH 已有旧区间，只下载缺失的头尾
-    E:\\gitCloneProgram\\vibe-trading-src\\.venv\\Scripts\\python.exe agent/scripts/lib/fetch_kline.py --append --codes 600519.SH,600300.SH --start-date 2018-01-02 --end-date 2025-12-31 --out-dir C:/tmp/kline
+    E:\\gitCloneProgram\\vibe-trading-src\\.venv\\Scripts\\python.exe scripts/lib/fetch_kline.py --append --codes 600519.SH,600300.SH --start-date 2018-01-02 --end-date 2025-12-31 --out-dir C:/tmp/kline
 
 说明：
-- agent 目录默认按本文件位置推导（agent/scripts/lib -> agent），
+- agent 目录默认按本文件位置推导（scripts/lib -> 仓库根），
   也可用环境变量 VIBE_TRADING_SRC 覆盖仓库根目录。
 - 写 parquet 需要 pyarrow；未安装时自动降级为 CSV，并在日志中提示。
 - append 只补头部/尾部缺口；如果怀疑旧文件中间缺数据，用普通模式整段重拉。
@@ -40,8 +40,8 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-# 默认取本文件所在仓库根目录：agent/scripts/lib -> agent -> 仓库根。
-_DEFAULT_SRC_ROOT = Path(__file__).resolve().parents[2].parent
+# 默认取本文件所在仓库根目录：scripts/lib -> scripts -> 仓库根。
+_DEFAULT_SRC_ROOT = Path(__file__).resolve().parents[2]
 _SRC_ROOT = Path(os.environ.get("VIBE_TRADING_SRC", str(_DEFAULT_SRC_ROOT)))
 _AGENT_DIR = _SRC_ROOT / "agent"
 
