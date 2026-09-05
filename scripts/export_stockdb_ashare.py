@@ -126,39 +126,71 @@ def _fetch_daily(rd, code: str, start: str, end: str, fq: dict, retries: int = 3
     return []
 
 
-def _export_daily(rd, codes: list[str], start: str, end: str, out_dir: Path, fq: dict) -> pd.DataFrame:
-    frames = []
+def _export_daily(rd, codes: list[str], start: str, end: str, out_dir: Path, fq: dict) -> int:
+    """逐股取数，按行数分片落盘（daily_shard_*.parquet），最后流式合并 daily.parquet。
+
+    全市场 5000+ 只、1200 万+ 行无法一次进内存（曾触发 ArrayMemoryError），
+    分片把峰值压到单片体积；合并用 ParquetWriter 逐片流式写出，不整体 concat。
+    返回总行数。
+    """
+    import pyarrow.parquet as pq
+
+    SHARD_ROWS = 800_000
+    frames: list[pd.DataFrame] = []
+    shards: list[Path] = []
+    total_rows = 0
     t0 = time.time()
     for i, code in enumerate(codes):
         rows = _fetch_daily(rd, code, start, end, fq)
         if rows:
             frames.append(pd.DataFrame(rows))
+        cur_rows = sum(len(f) for f in frames)
+        if frames and (cur_rows >= SHARD_ROWS or i == len(codes) - 1):
+            df = pd.concat(frames, ignore_index=False)
+            df["date"] = pd.to_datetime(df["date"].astype(str), format="%Y%m%d")
+            df = df.sort_values(["date", "code"]).reset_index(drop=True)
+            shard = out_dir / f"daily_shard_{len(shards):03d}.parquet"
+            df.to_parquet(shard, index=False)
+            shards.append(shard)
+            total_rows += len(df)
+            frames = []
         if (i + 1) % 200 == 0 or i == len(codes) - 1:
             el = time.time() - t0
             print(f"[daily] {i + 1}/{len(codes)} 只，{el / (i + 1):.2f}s/只，累计 {el:.0f}s")
-    if not frames:
-        return pd.DataFrame()
-    df = pd.concat(frames, ignore_index=True)
-    df["date"] = pd.to_datetime(df["date"].astype(str), format="%Y%m%d")
-    df = df.sort_values(["date", "code"]).reset_index(drop=True)
-    df.to_parquet(out_dir / "daily.parquet", index=False)
-    return df
+    if not shards:
+        return 0
+    # 流式合并分片 -> daily.parquet（逐片只读单片，峰值可控）
+    schema = pq.read_schema(shards[0])
+    with pq.ParquetWriter(out_dir / "daily.parquet", schema) as writer:
+        for shard in shards:
+            writer.write_table(pq.read_table(shard))
+    for shard in shards:
+        shard.unlink()
+    return total_rows
 
 
-def _export_calendar(daily: pd.DataFrame, out_dir: Path) -> None:
-    cal = pd.DataFrame({"trade_date": sorted(daily["date"].dt.strftime("%Y-%m-%d").unique())})
+def _export_calendar(out_dir: Path) -> None:
+    import pyarrow.compute as pc
+    import pyarrow.parquet as pq
+
+    dates = pc.unique(pq.read_table(out_dir / "daily.parquet", columns=["date"])["date"])
+    cal = pd.DataFrame({"trade_date": [d.strftime("%Y-%m-%d") for d in dates.to_pylist()]})
     cal.to_parquet(out_dir / "calendar.parquet", index=False)
     print(f"[calendar] {len(cal)} 个交易日（由 daily 日期并集推导）")
 
 
-def _export_securities(daily: pd.DataFrame, delisted: set[str], out_dir: Path) -> None:
-    g = daily.groupby("code")
+def _export_securities(delisted: set[str], out_dir: Path) -> None:
+    import pyarrow.parquet as pq
+
+    tab = pq.read_table(out_dir / "daily.parquet", columns=["code", "name", "date"])
+    df = tab.to_pandas()
+    g = df.groupby("code")
     rows = []
     for code, sub in g:
         rows.append(
             {
                 "code": code,
-                "name": sub["name"].dropna().iloc[-1] if "name" in sub.columns and sub["name"].notna().any() else "",
+                "name": sub["name"].dropna().iloc[-1] if sub["name"].notna().any() else "",
                 "list_date": sub["date"].min().strftime("%Y-%m-%d"),
                 "delist_date": sub["date"].max().strftime("%Y-%m-%d"),
                 "is_delisted": code in delisted,
@@ -242,18 +274,19 @@ def main() -> None:
     except Exception as exc:  # noqa: BLE001
         print(f"[securities] 读取退市表失败: {exc}")
 
-    daily: pd.DataFrame | None = None
+    daily_rows = 0
     if "daily" in stages:
         fq = _load_fq_cums(rd)
         print(f"[daily] 复权因子覆盖 {len(fq)} 只")
-        daily = _export_daily(rd, codes, args.start, end, out_dir, fq)
-        manifest["daily_rows"] = int(len(daily)) if daily is not None else 0
+        daily_rows = _export_daily(rd, codes, args.start, end, out_dir, fq)
+        manifest["daily_rows"] = daily_rows
 
-    if "calendar" in stages and daily is not None and not daily.empty:
-        _export_calendar(daily, out_dir)
+    daily_exists = (out_dir / "daily.parquet").exists()
+    if "calendar" in stages and daily_exists:
+        _export_calendar(out_dir)
 
-    if "securities" in stages and daily is not None and not daily.empty:
-        _export_securities(daily, delisted, out_dir)
+    if "securities" in stages and daily_exists:
+        _export_securities(delisted, out_dir)
 
     if "industry" in stages:
         _export_industry(rd, codes, out_dir)
