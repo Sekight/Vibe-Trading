@@ -12,6 +12,20 @@ import yaml
 import backtest.loaders.local_loader as local_loader
 
 
+@pytest.fixture(autouse=True)
+def _isolate_loader_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These tests must not read or write the host's opt-in loader cache.
+
+    The cache is enabled via ``vibe_home/.env`` (VIBE_TRADING_DATA_CACHE=1),
+    and pytest imports ``backtest.runner`` while collecting, which loads that
+    env. A stale frame served from disk skips the fetch path and breaks
+    warning/caplog assertions (see Mistake_Journal M040).
+    """
+    import backtest.loaders.base as base
+
+    monkeypatch.setattr(base, "loader_cache_enabled", lambda: False)
+
+
 def _configure(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, sources: list[dict]) -> None:
     """Point the local loader at a temp config file."""
     config_path = tmp_path / "config.yaml"

@@ -75,6 +75,7 @@
 | M037 | 2026-08-23 | 🟡坑 | Windows 全量 pytest 混入 symlink/可选依赖/共享状态基线失败，需按改动面归因 |
 | M038 | 2026-08-26 | 🟡坑 | 生成策略顶层非字面量常量被 runner 安全预检拒绝 |
 | M039 | 2026-08-26 | 🔴错误 | trade.csv 期货持仓占比漏乘合约乘数，股票与期货口径不一致 |
+| M040 | 2026-09-05 | 🟡坑 | pytest 组合跑时 loader 缓存命中旧帧污染测试结果（.env 开缓存 + 测试未隔离） |
 
 ## 正文
 
@@ -333,3 +334,12 @@
 - 可复用方法：跨市场交易明细验收先从引擎的 PnL/保证金/size 公式反推名义金额，再用真实 RB/TA 样本逐行对拍；同时明确 `notional_weight` 与 `margin_weight`，不要用一个无说明的 `position_weight` 混用。
 - 状态：有效（未修复；待独立计划）。
 - 关联：来源 V002；实现入口 `agent/backtest/engines/base.py`；期货口径 `agent/backtest/engines/futures_base.py`。
+
+### M040 · pytest 组合跑时 loader 缓存命中旧帧污染测试结果（2026-09-05）· 🟡坑
+- 现象：新增 local loader 测试后单文件全过，但与本地其他 loader 测试组合跑时个别用例偶发失败；先 stash 对比误判为"基线失败"，实际是本机 `vibe_home/.env` 开了 `VIBE_TRADING_DATA_CACHE=1`，pytest 收集阶段 `import backtest.runner` 经 dotenv 开启 loader 缓存，之前一次运行写入的陈旧缓存帧被同 key 用例命中（例如修 bug 前写入的"无额外列"帧），返回时不触发 fetch/warning 导致断言失败。
+- 根因：loader 缓存是环境级 opt-in（.env/环境变量），测试未显式隔离缓存环境；缓存 key 只含 source/symbol/timeframe/start/end/fields，不含数据文件内容与配置（文件更新后命中旧帧是 M013 同类）。
+- 解决：新测试文件加 autouse fixture `monkeypatch.setattr(base, "loader_cache_enabled", lambda: False)` 隔离缓存；按缓存 key（`loader_cache_path` 精确计算）删除校验期间写坏的帧，未动用户真实缓存。
+- 教训：涉及 loader/缓存的测试必须显式隔离缓存，不能依赖运行环境默认关闭；"stash 后仍失败"不等于基线失败——先排除环境级缓存/状态污染再归因。
+- 可复用方法：loader 测试统一加缓存禁用 fixture；组合测试与单测不一致时先查环境级开关（`.env` 的 `VIBE_TRADING_DATA_CACHE`）；定位陈旧缓存用 `loader_cache_path` 按测试 key 精确清理，不要全目录删除（可能含用户真实缓存）。
+- 状态：已解决（测试侧隔离；产品侧缓存命中旧帧仍是 M013 已知坑）。
+- 关联：本迭代 V048；既有坑 M013（loader 缓存不过期/坏数据反复命中）；HowToUse 8.35/8.22。

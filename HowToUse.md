@@ -529,6 +529,10 @@ sources:
 - `columns`：把文件列名映射成标准 `date/open/high/low/close/volume`，缺省即按标准列名读取。
 - `date_format`：可选，如 `%Y-%m-%d`、`%Y-%m-%d %H:%M:%S`。
 - 校验：文件必须含日期列和 `open/high/low/close`；`volume` 缺省自动补 0。配置为空或文件不存在时，local loader 不可用且不会静默回退到网络数据源。
+- `extra_columns`（可选，2026-09-05 新增）：把文件里的非 OHLCV 列原样透传给信号引擎，策略里直接 `df["列名"]` 读取。两种写法：
+  - 列表：`extra_columns: [turnover, amount, float_share]`（列名与文件一致，同名透传）；
+  - 字典：`extra_columns: {turnover: turnover_rate_pct, amount: amount_yuan}`（策略名: 文件列名，重命名透传）。
+  以后想新增读取列：只要该列在本地文件里存在，加进 `extra_columns` 即可生效，**loader/引擎代码不用改**；列不存在会被静默忽略。声明 `extra_columns` 会写入 loader 缓存 key 的一部分，但替换数据文件 / 改配置后仍建议按 8.35 清一次缓存再跑（缓存命中旧帧是已知坑，见 M013/M040）。
 - 期货代码后缀（2026-08-16 踩坑）：国内期货 symbol 的交易所后缀按引擎约定的缩写写，郑商所必须用 `.ZCE`（如 `FG0000.ZCE`、`RM0000.ZCE`），不要写 `.CZCE`。引擎的市场识别正则只认 `ZCE|DCE|SHFE|INE|CFFEX|GFEX`，写 `.CZCE` 匹配不上会被误判成 A 股引擎：数据能正常加载、回测能跑完，但所有开仓订单被拒——症状是回测 **0 笔交易、无任何报错/警告**（`metrics.csv` 里 `trade_count=0` 但 `rebalance_count>0`）。把 config 和 `config.json` 的 codes 都改成 `.ZCE` 即可；乘数/涨跌停/手续费等随后按品种表自动生效（如 FG=20、RM=10，见 8.41 的心忆期货流程）。
 
 `date_format` 常用格式（Python strftime/strptime 规则，local loader 用 `pd.to_datetime(..., format=date_format)` 解析）：

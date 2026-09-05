@@ -31,6 +31,7 @@ Example config::
 
 from __future__ import annotations
 
+import json
 import logging
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -83,7 +84,12 @@ _OHLCV_AGG = {
 _TRADE_DATE_AGG = {"trade_date": "last"}
 
 
-def _resample_to_interval(df: pd.DataFrame, interval: str, symbol: str) -> pd.DataFrame:
+def _resample_to_interval(
+    df: pd.DataFrame,
+    interval: str,
+    symbol: str,
+    extra_columns: tuple[str, ...] = (),
+) -> pd.DataFrame:
     """Resample an OHLCV frame to the requested bar ``interval``.
 
     Local files can hold any native granularity, so a requested interval the
@@ -95,6 +101,9 @@ def _resample_to_interval(df: pd.DataFrame, interval: str, symbol: str) -> pd.Da
     aggregation. A finer-than-source request cannot be fabricated from a file,
     so the source bars are returned unchanged with a warning. Requests that
     already match the source granularity are returned unchanged.
+
+    Extra (non-OHLCV) columns survive coarser resampling by taking the last
+    value in each bucket, matching the ``trade_date`` convention.
     """
     rule = _RESAMPLE_RULES.get(interval)
     if df.empty:
@@ -126,6 +135,9 @@ def _resample_to_interval(df: pd.DataFrame, interval: str, symbol: str) -> pd.Da
     agg_rules = dict(_OHLCV_AGG)
     if "trade_date" in df.columns:
         agg_rules.update(_TRADE_DATE_AGG)
+    for col in extra_columns:
+        if col not in agg_rules and col in df.columns:
+            agg_rules[col] = "last"
     resampled = df.resample(rule).agg(agg_rules)
     resampled = resampled.dropna(subset=["open", "high", "low", "close"])
     resampled.index.name = df.index.name
@@ -139,10 +151,38 @@ def _load_config() -> dict[str, Any] | None:
         return yaml.safe_load(f) or {}
 
 
+def _parse_extra_columns(
+    extra_columns: Any,
+) -> tuple[dict[str, str], list[str]]:
+    """Normalize an ``extra_columns`` config value into (source->display, display list).
+
+    Supported forms:
+    - list of names: column is passed through under its own name
+    - dict {display_name: source_name}: source column is renamed to the
+      display name the strategy expects
+    """
+    if not extra_columns:
+        return {}, []
+    if isinstance(extra_columns, dict):
+        pairs = [
+            (src, out)
+            for out, src in extra_columns.items()
+            if isinstance(src, str) and isinstance(out, str)
+        ]
+    else:
+        names = [c for c in extra_columns if isinstance(c, str)]
+        pairs = [(c, c) for c in names]
+    rename = dict(pairs)
+    keep = [out for _, out in pairs]
+    return rename, keep
+
+
 def _normalize_columns(
     df: pd.DataFrame,
     col_map: dict[str, str],
     date_fmt: str | None,
+    extra_cols_src_to_out: dict[str, str] | None = None,
+    extra_columns: tuple[str, ...] = (),
 ) -> pd.DataFrame | None:
     rename: dict[str, str] = {}
     for std_name, src_name in col_map.items():
@@ -150,6 +190,10 @@ def _normalize_columns(
             continue
         if src_name in df.columns:
             rename[src_name] = std_name
+    if extra_cols_src_to_out:
+        rename.update(
+            {src: out for src, out in extra_cols_src_to_out.items() if src in df.columns}
+        )
     df = df.rename(columns=rename)
 
     required = {"open", "high", "low", "close"}
@@ -182,6 +226,10 @@ def _normalize_columns(
     keep_cols = list(ohlcv_cols)
     if "trade_date" in df.columns:
         keep_cols.append("trade_date")
+    # Extra columns survive only when their source column actually existed.
+    for col in extra_columns:
+        if col in df.columns and col not in keep_cols:
+            keep_cols.append(col)
     df = df[keep_cols]
     for col in ohlcv_cols:
         df[col] = pd.to_numeric(df[col], errors="coerce")
@@ -196,29 +244,46 @@ def _normalize_columns(
     return df
 
 
-def _read_csv(path: str, col_map: dict[str, str], date_fmt: str | None) -> pd.DataFrame | None:
+def _read_csv(
+    path: str,
+    col_map: dict[str, str],
+    date_fmt: str | None,
+    extra_cols_src_to_out: dict[str, str] | None = None,
+    extra_columns: tuple[str, ...] = (),
+) -> pd.DataFrame | None:
     df = pd.read_csv(path)
-    return _normalize_columns(df, col_map, date_fmt)
+    return _normalize_columns(df, col_map, date_fmt, extra_cols_src_to_out, extra_columns)
 
 
-def _read_parquet(path: str, col_map: dict[str, str], date_fmt: str | None) -> pd.DataFrame | None:
+def _read_parquet(
+    path: str,
+    col_map: dict[str, str],
+    date_fmt: str | None,
+    extra_cols_src_to_out: dict[str, str] | None = None,
+    extra_columns: tuple[str, ...] = (),
+) -> pd.DataFrame | None:
     df = pd.read_parquet(path)
     if isinstance(df.index, pd.DatetimeIndex):
         df = df.reset_index()
         if date_fmt is None and col_map.get("date", "date") not in df.columns:
             col_map = dict(col_map)
             col_map["date"] = df.columns[0]
-    return _normalize_columns(df, col_map, date_fmt)
+    return _normalize_columns(df, col_map, date_fmt, extra_cols_src_to_out, extra_columns)
 
 
 def _read_duckdb(
-    db_path: str, query: str, col_map: dict[str, str], date_fmt: str | None
+    db_path: str,
+    query: str,
+    col_map: dict[str, str],
+    date_fmt: str | None,
+    extra_cols_src_to_out: dict[str, str] | None = None,
+    extra_columns: tuple[str, ...] = (),
 ) -> pd.DataFrame | None:
     import duckdb
 
     with duckdb.connect(db_path, read_only=True) as conn:
         df = conn.execute(query).df()
-    return _normalize_columns(df, col_map, date_fmt)
+    return _normalize_columns(df, col_map, date_fmt, extra_cols_src_to_out, extra_columns)
 
 
 _READERS = {
@@ -290,13 +355,23 @@ class DataLoader:
                 logger.warning("local loader: no config entry for symbol %s", clean)
                 continue
             try:
+                # ``fields`` is not consumed by local sources; fold the
+                # extra_columns config into it so cache keys change when the
+                # passthrough config changes (no stale frames without the
+                # requested extra columns).
+                cache_fields: list[str] | None = None
+                extra_spec = entry.get("extra_columns")
+                if extra_spec:
+                    cache_fields = [
+                        "extra:" + json.dumps(extra_spec, ensure_ascii=False, sort_keys=True)
+                    ]
                 df = cached_loader_fetch(
                     source=self.name,
                     symbol=clean,
                     timeframe=interval,
                     start_date=start_date,
                     end_date=end_date,
-                    fields=None,
+                    fields=cache_fields,
                     fetch=lambda c=clean: self._fetch_one(c, start_date, end_date, interval),
                 )
                 if df is not None and not df.empty:
@@ -319,6 +394,8 @@ class DataLoader:
             logger.warning("local loader: unsupported type %r for symbol %s", src_type, symbol)
             return None
 
+        extra_src_to_out, extra_keep = _parse_extra_columns(entry.get("extra_columns"))
+
         col_map: dict[str, str] = dict(_DEFAULT_COLUMNS)
         user_cols = entry.get("columns")
         if isinstance(user_cols, dict):
@@ -339,14 +416,16 @@ class DataLoader:
                     "local loader: missing db_path or query for duckdb symbol %s", symbol
                 )
                 return None
-            df = _read_duckdb(db_path, query, col_map, date_fmt)
+            df = _read_duckdb(
+                db_path, query, col_map, date_fmt, extra_src_to_out, tuple(extra_keep)
+            )
         else:
             path = entry.get("path", "").strip()
             if not path:
                 logger.warning("local loader: missing path for symbol %s", symbol)
                 return None
             expanded = str(Path(path).expanduser())
-            df = reader(expanded, col_map, date_fmt)
+            df = reader(expanded, col_map, date_fmt, extra_src_to_out, tuple(extra_keep))
 
         if df is None:
             return None
@@ -359,7 +438,7 @@ class DataLoader:
         df = df[(df.index >= start) & (df.index <= end)]
         if df.empty:
             return None
-        df = _resample_to_interval(df, interval, symbol)
+        df = _resample_to_interval(df, interval, symbol, tuple(extra_keep))
         if df.empty:
             return None
         return df
