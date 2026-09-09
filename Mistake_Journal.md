@@ -76,6 +76,7 @@
 | M038 | 2026-08-26 | 🟡坑 | 生成策略顶层非字面量常量被 runner 安全预检拒绝 |
 | M039 | 2026-08-26 | 🔴错误 | trade.csv 期货持仓占比漏乘合约乘数，股票与期货口径不一致 |
 | M040 | 2026-09-05 | 🟡坑 | pytest 组合跑时 loader 缓存命中旧帧污染测试结果（.env 开缓存 + 测试未隔离） |
+| M041 | 2026-09-09 | 🔴错误 | 全市场 run 打开 WebUI 报告必 OOM：后端先全量读 5200 个 OHLCV 文件再按标过滤（先加载后过滤反模式） |
 
 ## 正文
 
@@ -343,3 +344,13 @@
 - 可复用方法：loader 测试统一加缓存禁用 fixture；组合测试与单测不一致时先查环境级开关（`.env` 的 `VIBE_TRADING_DATA_CACHE`）；定位陈旧缓存用 `loader_cache_path` 按测试 key 精确清理，不要全目录删除（可能含用户真实缓存）。
 - 状态：已解决（测试侧隔离；产品侧缓存命中旧帧仍是 M013 已知坑）。
 - 关联：本迭代 V048；既有坑 M013（loader 缓存不过期/坏数据反复命中）；HowToUse 8.35/8.22。
+
+### M041 · 全市场 run 打开 WebUI 报告必 OOM（2026-09-09）· 🔴错误
+- 现象：全市场 run（5200 只）打开 WebUI 报告页即 `MemoryError`，且首个请求崩掉后进程内存被占满，后续 `/analysis/charts` 连 `importlib get_data` 读 .py 都失败——表现为"某个 tab 或图加载不出、最后整个服务 OOM"。用户一度怀疑是"分析图 tab"问题、以及"digest 已落库为何不直接读"。
+- 根因：`build_run_analysis`（`ui_services.py:556`）先无条件 `load_price_series(run_dir)` 把 5200 个 `ohlcv_*.csv`（1839 万行 / 1.3GB）全量读进内存，再在内存里按请求的 chart_symbol 过滤——**先全量加载、后过滤的反模式**。前端 `RunDetail.tsx` 打开页面即自动请求首标的 K 线（`chart_symbol=000001.SZ`），叠加触发。digest 本就走轻量路径（`analysis.digest.json` 2.13MB / 0.03s），是受害者非元凶。
+- 解决：`load_price_series`/`_load_ohlcv_artifacts` 新增 `symbols` 过滤参数（按请求只读匹配的单个 `ohlcv_{code}.csv`）；`build_run_analysis` 把 symbols 前置传给加载器、`chart_symbols` 兜底走 `_artifact_symbols`（只读文件名）；前端 K 线改默认空态、选标的才加载。修复后 5200 只 run 单标的分析 0.56s / 13.6MB。
+- 二期补充（同一坑的延伸，2026-09-09 复测发现）：带 `chart_symbol` 的请求修好后，**无参 `api.getRun()`**（Compare 对比页 `Compare.tsx:271/302`、Agent 报告判定 `Agent.tsx:570/919`、聊天卡片 `RunCompleteCard.tsx:40`）仍触发全量加载——`build_run_analysis` 在 `selected_symbols` 为空时传 `symbols=None` 走全量。修复：`selected_symbols` 为空时 `price_rows=[]` 不加载任何 OHLCV（这些调用方只要 metrics/equity_curve）。**坑：改后端代码后必须重启 vibe-trading 服务，旧进程仍会 OOM**——用户重启前一度误判"修复没生效"。
+- 教训：宽表/多文件产物"按需取子集"时，必须先按请求键过滤到最小读取范围再加载，绝不能全量加载后内存里过滤；WebUI 打开页自动发起的首个请求是最危险的（页面加载路径）。
+- 可复用方法：文件级产物（每 symbol 一个文件）用"请求键 → 精确文件名"读取；页面打开只发轻量 summary，重数据按用户操作懒加载；排查 OOM 看首个失败请求 + 进程内存占用，后续连锁失败都是被第一个请求拖垮。
+- 状态：已修复（2026-09-09，V049）。
+- 关联：本迭代 V049；计划 `P-20260909-ohlcv_no_persist_and_chart_lazy`；HowToUse 8.38（`--no-ohlcv`）。

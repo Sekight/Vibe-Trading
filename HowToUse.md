@@ -874,6 +874,7 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 - **默认跳过 PNG 图表**：runner 默认不再生成 7 张 `analysis_charts/*.png`（WebUI 分析图读 `analysis.digest.json` 算 ECharts，PNG 只是兜底图片），需要时加 `--with-charts`。3 年 15m 回测里 7 张 PNG 约 557 秒，占全程 93%，是唯一瓶颈。
 - **loader 缓存**：`VIBE_TRADING_DATA_CACHE=1`（8.35）缓存同一 数据源 + 标的 + 周期 + 区间 的行情，命中后数据加载仅 0.6 秒。
 - **`--fastrun` 跳过 digest 慢分析（2026-08-17 起）**：3 年 5m 场景下回测后 digest 的 regime（相关性）与 MAE/MFE 分析是新的耗时大头（约 750s，占 98%）。加 `--fastrun` 跳过这两项（等价 `--without-regime --without-mae-mfe`，以后新增耗时步骤也会并入 fastrun 跳表）；digest 不再含 regime / mae_mfe 字段，WebUI 分析图里 MAE/MFE 卡片显示"未计算"占位、LLM 报告不含这两段。注意：fastrun 重跑会**覆盖**该 run 已有 digest 为精简版，MAE/MFE 图与报告 Regime 段随之降级，完整重跑可恢复；digest 文件缺失或 artifacts 变化时 WebUI 会按完整版重建（该场景不加速）。
+- **`--no-ohlcv` 跳过 OHLCV 落盘（2026-09-09 起）**：全市场类超大 run（几千只标的）会写 5200 个 `ohlcv_*.csv`（实测 1.3GB / 1839 万行），占 artifacts 体积 99% 且打开报告时全量读取易 OOM。加 `--no-ohlcv` 后跳过 OHLCV 落盘，equity/trades/metrics/positions/digest 等其余产物照常。默认（不传该 flag）OHLCV 仍照常落库，旧行为不变。副作用（按需接受）：该 run 的 K 线行情图显示"没有保存价格数据"空态（前端也不会自动请求全量 K 线，默认空态、选标的才加载单只）；digest 的 MAE/MFE、regime 分析自然缺失；MCP 图表形态识别（pattern）因强依赖 OHLCV 文件对该 run 不可用。适合"只关心指标/交易，不细看 K 线"的全市场扫描。
 - 实测耗时分布（3 年 15m、缓存命中、含本地 1m 数据）：完整跑 596s → 默认跑约 11s。
 
   | 阶段 | 耗时 | 说明 |

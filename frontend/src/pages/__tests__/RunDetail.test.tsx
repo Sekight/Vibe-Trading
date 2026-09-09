@@ -92,40 +92,67 @@ describe("RunDetail page", () => {
     expect(screen.queryByText("OLD_CODE")).not.toBeInTheDocument();
   });
 
-  it("ignores a chart response that finishes after the route changes", async () => {
-    const oldChart = deferred<RunData>();
+  it("does not auto-load any chart K-line on page open; loads lazily when the user adds a symbol", async () => {
+    const chart = deferred<RunData>();
     apiMock.getRun.mockImplementation((runId: string, params: Record<string, string>) => {
-      if (runId === "old" && params.chart_payload === "summary") {
-        return Promise.resolve({ status: "success", run_id: "old", prompt: "Old run", chart_symbols: ["OLD"] });
+      if (params.chart_payload === "summary") {
+        return Promise.resolve({
+          status: "success",
+          run_id: runId,
+          prompt: `${runId} run`,
+          chart_symbols: runId === "old" ? ["OLD"] : [],
+        });
       }
-      if (runId === "old" && params.chart_symbol === "OLD") return oldChart.promise;
-      return Promise.resolve({ status: "success", run_id: "new", prompt: "New run" });
+      if (params.chart_symbol === "OLD") return chart.promise;
+      return Promise.resolve({ status: "success", run_id: runId, prompt: `${runId} run` });
     });
     apiMock.getRunCode.mockResolvedValue({});
 
     const router = renderRunDetail();
-    expect(await screen.findByText("Old run")).toBeInTheDocument();
+    expect(await screen.findByText("old run")).toBeInTheDocument();
+    // Opening the page must NOT trigger a chart_symbol request.
+    expect(apiMock.getRun).not.toHaveBeenCalledWith("old", { chart_symbol: "OLD" });
+
+    // User adds a symbol -> lazy load fires the chart_symbol request.
+    fireEvent.click(screen.getByRole("button", { name: "Add symbol" }));
     await waitFor(() => {
       expect(apiMock.getRun).toHaveBeenCalledWith("old", { chart_symbol: "OLD" });
     });
 
     await act(async () => { await router.navigate("/runs/new"); });
-    expect(await screen.findByText("New run")).toBeInTheDocument();
+    expect(await screen.findByText("new run")).toBeInTheDocument();
 
     await act(async () => {
-      oldChart.resolve({
+      chart.resolve({
         status: "success",
         run_id: "old",
         chart_symbols: ["OLD"],
         trade_log: [{ note: "OLD TRADE" }],
       });
-      await oldChart.promise;
+      await chart.promise;
     });
 
-    expect(screen.getByText("New run")).toBeInTheDocument();
+    expect(screen.getByText("new run")).toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "OLD" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("tab", { name: "Trades" }));
     expect(screen.queryByText("OLD TRADE")).not.toBeInTheDocument();
+  });
+
+  it("shows the empty chart state when no symbol has been loaded yet", async () => {
+    apiMock.getRun.mockImplementation((runId: string, params: Record<string, string>) => {
+      if (params.chart_payload === "summary") {
+        return Promise.resolve({ status: "success", run_id: runId, prompt: "Empty run", chart_symbols: ["000001.SZ"] });
+      }
+      return Promise.resolve({ status: "success", run_id: runId, prompt: "Empty run" });
+    });
+    apiMock.getRunCode.mockResolvedValue({});
+
+    renderRunDetail();
+    expect(await screen.findByText("Empty run")).toBeInTheDocument();
+    // No K-line requested on open.
+    expect(apiMock.getRun).not.toHaveBeenCalledWith("empty", expect.objectContaining({ chart_symbol: expect.any(String) }));
+    // Empty-state prompt is visible until the user picks a symbol.
+    expect(await screen.findByText("Pick a symbol to load chart data.")).toBeInTheDocument();
   });
 
   it("exposes run status and tab state while keeping the trades table scrollable", async () => {

@@ -61,6 +61,7 @@
 | V046 | 2026-08-27 | BacktestConfigSchema 配置契约与 Agent 暴露 | 配置字段说明、窗口和逻辑分组结构进入配置 schema，并自动生成 MCP Agent 可读摘要 |
 | V047 | 2026-08-27 | bridge skill 配置说明收敛与窗口边界审计 | skill 不再重复配置字段；配置 schema 早失败覆盖执行窗口，MCP/文档出口职责闭环 |
 | V048 | 2026-09-05 | local loader extra_columns 透传与 stockdb 导出工具 | data-bridge 新增 extra_columns 配置透传非 OHLCV 列（加新列只改配置不改代码）；新增 scripts/export_stockdb_ashare.py 导出 A 股日线数据仓；100 只端到端对照验证透传真实生效 |
+| V049 | 2026-09-09 | 全市场 run OHLCV 不落库与 K 线默认空态 | 报告页 K 线默认空态按需加载 + --no-ohlcv 跳过 1.3GB/5200 文件 OHLCV 落盘（默认仍落库），根治全市场 run 打开报告 OOM |
 > 补录说明：V001-V009 为补录条目，依据 git 历史、HowToUse、全局复利与踩坑日志、`C:\Users\mumu\.codex\sessions` 会话记录回溯整理；当时未留痕的字段标“待补”。从下一条起，每次迭代收尾直接写正文。
 
 ## 模板
@@ -563,3 +564,15 @@
 - 关键细节：`local_loader.py` 新增 `_parse_extra_columns`（支持 list 同名透传与 dict 重命名映射），`_normalize_columns`、CSV/Parquet/DuckDB 三个 reader、`_resample_to_interval` 全部透传额外列（coarser 聚合取桶末 last，与 trade_date 同语义）；缓存 key 把 extra 配置折叠进 `fields` 传入 `cached_loader_fetch`，避免改配置命中旧缓存；未声明 `extra_columns` 时行为与现状一致。导出工具按前缀分片、幂等重建、manifest 记录版本；hfq 走与 stock_sdk `fq="hfq"` 同款折算路径（`raw / (1.0/cum)`）保证逐位一致；退市表为历史记录流（同一代码多条），按唯一代码去重后是退市代码集。
 - 验证：既有 local loader 测试组 + 新增超单测（list/dict/缺列/parquet/resample/缓存隔离 fixture）在默认 cache=1 环境 `42 passed`；loader/registry/runner 定向回归 `75 passed, 1 skipped`（`test_loader_retry_helpers` 缓存环境基线失败，stash 可复现，非本次引入）；导出 100 只 2015 起 26.9 万行，hfq 与 SDK 对照逐行一致 `70715/70715`；端到端 100 只 run（透传 vs 无透传对照组）`trade_count 1651 vs 829`、`total_return 12.4% vs 39.0%`、`avg_turnover 0.168 vs 0.084`，结果显著不同证明 turnover 列真实驱动信号。
 - 关联：计划 `P-20260905-stockdb_ma_convergence_data`；研报复现文档《20240414_均线收敛与发散_复现实验.md》；HowToUse 8.16/8.22；Mistake_Journal M040；本次提交。
+
+### V049 · 全市场 run OHLCV 不落库与 K 线默认空态（2026-09-09）
+- 一句话总结：WebUI 报告页 K 线行情改为默认空态、用户选择标的才按需加载（打开页面不再自动请求首标的 K 线）；回测新增 `--no-ohlcv` 命令行开关跳过 `ohlcv_*.csv` 落盘（默认仍落库）；后端 `load_price_series` 支持按请求 symbols 过滤，根治全市场 5200 只 run 打开报告必 OOM 的问题。
+- 为什么：全市场 run（5200 只）的 `artifacts/ohlcv_*.csv` 共 1.3GB/1839 万行。报告页打开即自动请求首标的 K 线，后端 `build_run_analysis` 先全量读 5200 个 OHLCV 文件进内存再过滤（`ui_services.py:556/388`），进程 MemoryError，后续 `/analysis/charts` 等请求连锁崩。digest 本就走轻量路径（`analysis.digest.json` 2.13MB / 0.03s），是受害者非元凶。用户拍板：K 线默认空态；`--no-ohlcv` 做成命令行（类似 `--fastrun`）；不做"无本地 OHLCV 时网络重建单标的"兜底，缺文件按现状空态/降级。
+- 关键细节：
+  - 后端 `ui_services.py`：`_load_ohlcv_artifacts` / `load_price_series` 新增 `symbols` 过滤参数，传值只读匹配的 `ohlcv_{code}.csv`（单文件），`None` 保持全量旧行为；`build_run_analysis` 把请求的 symbols 前置传给加载器，`chart_symbols` 兜底改从 `_artifact_symbols`（只读文件名）取，不再依赖全量 price_rows。
+  - 前端 `RunDetail.tsx`：删除打开即自动 `loadChartSymbol(firstSymbol)` 的调用、`selectedSymbols` 默认 `[]`（保留首标的作下拉默认值），触发已存在的空态文案；用户经"添加标的/仅显示"才请求该标的 K 线。
+  - CLI `runner.py`：新增 `--no-ohlcv` flag → `main(without_ohlcv)` → `config["save_ohlcv"] = not without_ohlcv`（默认 True 落库，不写回 config.json）；`engines/base.py:_write_artifacts` 与 `options_portfolio.py` 按 `self.config.get("save_ohlcv", True)` 跳过 OHLCV 循环，其余产物照常；`BacktestConfigSchema` 是 `extra="allow"` 直接透传无需改 schema。
+  - `--no-ohlcv` 副作用（用户接受）：digest 的 MAE/MFE、regime 自然降级（缺 OHLCV 时 graceful）；MCP `pattern_tool` 强依赖 OHLCV 文件、对该类 run 不可用属预期。
+  - 二期修复（2026-09-09 复测发现）：`build_run_analysis` 在**不带 `chart_symbol` 的完整请求**（`selected_symbols` 为空 → 之前 `symbols=None`）时仍全量加载所有 OHLCV，导致无参 `api.getRun()`（Compare 对比页 `Compare.tsx:271/302`、Agent 报告判定 `Agent.tsx:570/919`、聊天卡片 `RunCompleteCard.tsx:40`）触发全量加载 OOM。修复：`selected_symbols` 为空时 `price_rows=[]` 不加载任何 OHLCV（`price_series`/`indicator_series` 返回空），只返回 chart_symbols/chart_groups/equity/trades；`load_price_series(symbols=None)` 的全量语义保留给直接调用者。**需重启 vibe-trading 服务让新代码生效**（旧进程仍会 OOM）。
+- 验证：新增 `tests/test_ohlcv_persistence.py` 6 个回归用例（过滤加载/默认全量/默认落库/关开关/analysis）通过；既有 `test_analysis_*` 49 passed 无回归；前端 `RunDetail.test.tsx` 14 passed（更新 1 个断言 + 新增空态用例）；`tsc -b` 通过。真实 5200 只 run `ma_acf_full_top50_neu` 冒烟：`build_run_analysis(symbols=["000001.SZ"])` 0.56s / 峰值内存 13.6MB（此前必 OOM）。`--no-ohlcv` 在本地 1D run 副本实测：无 ohlcv 产物、equity/trades/metrics/positions 完整、digest 正常。二期补充：新增 `test_build_run_analysis_without_symbols_does_not_load_ohlcv`（无 symbols 时 K 线空、chart_symbols 仍可用），`test_ohlcv_persistence` 7 passed、相关 `test_analysis_*` 50 passed 无回归、前端 RunDetail 14 passed、`tsc -b` 通过（全为临时小 run / mock，未碰真实全量 run）。
+- 关联：计划 `P-20260909-ohlcv_no_persist_and_chart_lazy`；HowToUse 回测命令节（`--no-ohlcv` 用法）；本次提交。

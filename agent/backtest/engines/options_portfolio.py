@@ -490,8 +490,10 @@ def run_options_backtest(
     out = run_dir / "artifacts"
     out.mkdir(parents=True, exist_ok=True)
 
-    for code, df in data_map.items():
-        df.to_csv(out / f"ohlcv_{code}.csv")
+    # OHLCV is skippable via config["save_ohlcv"]=False (runner --no-ohlcv).
+    if config.get("save_ohlcv", True):
+        for code, df in data_map.items():
+            df.to_csv(out / f"ohlcv_{code}.csv")
 
     equity_df.to_csv(out / "equity.csv", index=False)
 

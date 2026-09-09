@@ -1082,6 +1082,7 @@ def main(
     *,
     without_regime: bool = False,
     without_mae_mfe: bool = False,
+    without_ohlcv: bool = False,
     execution_overrides: dict[str, str] | None = None,
 ) -> None:
     """Load config, fetch data, run the selected backtest engine.
@@ -1098,6 +1099,9 @@ def main(
             analysis digest (see ``--fastrun`` in ``__main__``).
         without_mae_mfe: Skip MAE/MFE analysis when building the analysis
             digest (see ``--fastrun`` in ``__main__``).
+        without_ohlcv: Skip writing per-symbol ``ohlcv_*.csv`` artifacts
+            (see ``--no-ohlcv`` in ``__main__``). Defaults to ``False`` so
+            OHLCV is persisted unless explicitly disabled.
         execution_overrides: Optional in-memory execution-mode overrides used by
             the MCP workflow. The run's config.json is never rewritten.
     """
@@ -1161,6 +1165,9 @@ def main(
 
     source = config.get("source", "tushare")
     codes = config.get("codes", [])
+    # CLI-only flag: persist OHLCV artifacts unless --no-ohlcv is given.
+    # Not written back to config.json; the engine reads it from self.config.
+    config["save_ohlcv"] = not without_ohlcv
 
     # Load signal engine
     signal_path = run_dir / "code" / "signal_engine.py"
@@ -1674,6 +1681,7 @@ if __name__ == "__main__":
     parser.add_argument("--without-regime", action="store_true", help="Skip correlation-regime analysis (digest omits the regime field and report section)")
     parser.add_argument("--without-mae-mfe", action="store_true", help="Skip MAE/MFE analysis (digest omits the mae_mfe_summary field and report section)")
     parser.add_argument("--fastrun", action="store_true", help="Skip all skippable analysis (currently regime + MAE/MFE) to surface metrics/trades/run_card quickly")
+    parser.add_argument("--no-ohlcv", action="store_true", help="Skip writing per-symbol OHLCV CSV artifacts (ohlcv_*.csv); WebUI K-line falls back to the empty state and digest MAE/MFE + regime are omitted")
     parser.add_argument(
         "--execution-json",
         default=None,
@@ -1701,5 +1709,6 @@ if __name__ == "__main__":
         with_charts=args.with_charts,
         without_regime="regime" in skips,
         without_mae_mfe="mae_mfe" in skips,
+        without_ohlcv=args.no_ohlcv,
         execution_overrides=execution_overrides,
     )

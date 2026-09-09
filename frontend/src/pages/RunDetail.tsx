@@ -185,15 +185,16 @@ export function RunDetail() {
       setRun(r);
       setCode(c || {});
       const firstSymbol = r?.chart_symbols?.[0] || Object.keys(r?.price_series || {})[0] || "";
+      // Keep the first symbol as the picker default (UI only), but do NOT
+      // auto-load any K-line on page open: chart data is fetched lazily when
+      // the user picks a symbol. This keeps very wide runs (e.g. whole-market
+      // thousands of symbols) from triggering an OHLCV load on page load.
       setSelectedSymbol(firstSymbol);
       setChartPickerSymbol(firstSymbol);
-      setSelectedSymbols(firstSymbol ? [firstSymbol] : []);
+      setSelectedSymbols([]);
       const initialCache = cacheFromRun(r, firstSymbol);
       chartCacheRef.current = initialCache;
       setChartCache(initialCache);
-      if (firstSymbol && !initialCache[firstSymbol]?.price_series?.[firstSymbol]?.length) {
-        void loadChartSymbol(firstSymbol, requestedRunId, generation);
-      }
     }).finally(() => {
       if (runGenerationRef.current === generation) setLoading(false);
     });

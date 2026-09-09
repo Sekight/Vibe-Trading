@@ -1773,9 +1773,12 @@ class BaseEngine(ABC):
         out = run_dir / "artifacts"
         out.mkdir(parents=True, exist_ok=True)
 
-        # OHLCV per symbol
-        for code, df in data_map.items():
-            df.to_csv(out / f"ohlcv_{code}.csv")
+        # OHLCV per symbol. Skippable via config["save_ohlcv"]=False (the
+        # runner's ``--no-ohlcv``). Without the files, the WebUI K-line tab
+        # shows its empty state and digest MAE/MFE + regime degrade gracefully.
+        if self.config.get("save_ohlcv", True):
+            for code, df in data_map.items():
+                df.to_csv(out / f"ohlcv_{code}.csv")
 
         # Equity curve
         port_ret = equity_series.pct_change().fillna(0.0)

@@ -365,7 +365,10 @@ def build_indicator_series(
     return output
 
 
-def _load_ohlcv_artifacts(run_dir: Path) -> List[Dict[str, Any]]:
+def _load_ohlcv_artifacts(
+    run_dir: Path,
+    symbols: Optional[List[str]] = None,
+) -> List[Dict[str, Any]]:
     """Read individual ohlcv_*.csv files saved by the backtest engine.
 
     The engine writes ``ohlcv_{code}.csv`` per symbol with columns
@@ -374,6 +377,11 @@ def _load_ohlcv_artifacts(run_dir: Path) -> List[Dict[str, Any]]:
 
     Args:
         run_dir: The run directory under ``runs/``.
+        symbols: When given, only read ``ohlcv_{code}.csv`` for the
+            requested codes. ``None`` keeps the old full-scan behavior.
+            This is what keeps very wide runs (e.g. whole-market 5200
+            symbols) from loading every OHLCV file into memory just to
+            chart one symbol.
 
     Returns:
         Normalized OHLC rows, empty list if no files found.
@@ -381,7 +389,15 @@ def _load_ohlcv_artifacts(run_dir: Path) -> List[Dict[str, Any]]:
     artifacts = run_dir / "artifacts"
     if not artifacts.is_dir():
         return []
-    ohlcv_files = sorted(artifacts.glob("ohlcv_*.csv"))
+    if symbols:
+        wanted = {str(code) for code in symbols if str(code).strip()}
+        ohlcv_files = [
+            artifacts / f"ohlcv_{code}.csv"
+            for code in sorted(wanted)
+            if (artifacts / f"ohlcv_{code}.csv").is_file()
+        ]
+    else:
+        ohlcv_files = sorted(artifacts.glob("ohlcv_*.csv"))
     if not ohlcv_files:
         return []
     rows: List[Dict[str, Any]] = []
@@ -401,19 +417,28 @@ def _load_ohlcv_artifacts(run_dir: Path) -> List[Dict[str, Any]]:
     return _normalize_price_rows(rows)
 
 
-def load_price_series(run_dir: Path) -> List[Dict[str, Any]]:
+def load_price_series(
+    run_dir: Path,
+    symbols: Optional[List[str]] = None,
+) -> List[Dict[str, Any]]:
     """Load chart-ready price rows: price_series.csv > ohlcv_*.csv > API reconstruct.
 
     Args:
         run_dir: The run directory under ``runs/``.
+        symbols: When given, only load rows for the requested codes. ``None``
+            keeps the old full-load behavior (all symbols).
 
     Returns:
         Normalized OHLC rows sorted by (code, date).
     """
     artifact_path = run_dir / "artifacts" / "price_series.csv"
     if artifact_path.exists():
-        return _normalize_price_rows(load_csv_records(artifact_path))
-    rows = _load_ohlcv_artifacts(run_dir)
+        rows = _normalize_price_rows(load_csv_records(artifact_path))
+        if symbols:
+            wanted = {str(code) for code in symbols if str(code).strip()}
+            rows = [row for row in rows if str(row.get("code") or "") in wanted]
+        return rows
+    rows = _load_ohlcv_artifacts(run_dir, symbols)
     if rows:
         return rows
     return reconstruct_price_series(run_dir)
@@ -553,16 +578,20 @@ def build_run_analysis(
             "run_logs": collect_run_logs(run_dir),
         }
 
-    price_rows = load_price_series(run_dir)
-    if include_symbol_list and not chart_symbols:
-        chart_symbols = sorted({str(row.get("code") or "") for row in price_rows if row.get("code")})
-        chart_groups = [
-            {"logical_symbol": code, "display_name": code, "codes": [code], "chart_code": code}
-            for code in chart_symbols
-        ]
     requested_symbols = {str(symbol) for symbol in (symbols or []) if str(symbol).strip()}
     selected_symbols: set[str] = set()
     code_aliases: Dict[str, str] = {}
+    if not chart_groups:
+        # No logical groups (e.g. historical run without config groups):
+        # fall back to per-symbol singleton groups from the artifact listing
+        # (file-name scan only, never a full OHLCV load).
+        artifact_codes = _artifact_symbols(run_dir)
+        if artifact_codes:
+            chart_symbols = artifact_codes
+            chart_groups = [
+                {"logical_symbol": code, "display_name": code, "codes": [code], "chart_code": code}
+                for code in artifact_codes
+            ]
     for group in chart_groups:
         chart_code = str(group["chart_code"])
         members = [str(code) for code in group.get("codes") or []]
@@ -572,8 +601,17 @@ def build_run_analysis(
                 code_aliases.update({member: chart_code for member in members})
     if requested_symbols and not selected_symbols:
         selected_symbols = requested_symbols
-    if selected_symbols:
-        price_rows = [row for row in price_rows if str(row.get("code") or "") in selected_symbols]
+    # Load price rows only for the symbols actually requested. A parameterless
+    # full request (no chart_symbol) does not need any K-line data, and loading
+    # every OHLCV artifact for a whole-market run (thousands of files) would
+    # exhaust memory before the caller ever filters. `symbols=None` in
+    # load_price_series keeps the old full-scan behavior for direct callers
+    # that explicitly want everything.
+    price_rows = (
+        load_price_series(run_dir, symbols=sorted(selected_symbols))
+        if selected_symbols
+        else []
+    )
     periods = infer_indicator_periods(run_dir)
     trades = load_csv_records(run_dir / "artifacts" / "trades.csv")
 
