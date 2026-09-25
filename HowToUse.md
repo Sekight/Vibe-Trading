@@ -1087,7 +1087,7 @@ VIBE_TRADING_STOCKDB_FQ=hfq                # 可选，hfq(默认)/qfq/none
 - **pre_close 重建（重要）**：stockdb 的 `pre_close` 字段被前复权污染（约 73% 行 < 0.99× 真实昨收，外部坑、实测复核），loader **丢弃该字段**重建：日线用 `close/(1+pct_chg/100)`（pct_chg 干净；ETF 无 pct_chg 回退 `close.shift(1)`）；分钟 bar 的涨跌停基准是当日交易所昨收（当日恒定），映射当日日线重建值。
 - **额外列**：`extra_fields` 声明式透传（同 tushare 约定），日线白名单 turnover/amount/float_share/float_mv/total_mv/is_st/pe_ttm/pb/vol_ratio/name/pct_chg/industry_l1；分钟表只有 amount，分钟白名单 amount/industry_l1。`industry_l1` 是申万一级**当前状态**（历史 bar 也带现在的标签，做行业中性化注意近似），category dtype 存储。
 - **行为**：仅显式 `source="stockdb"` 使用，不进自动兜底链；服务掉线时显式报错不降级到网络源（fail-closed），重启 `stockdb.exe` 即可；不接 loader 缓存（`VIBE_TRADING_DATA_CACHE` 不产生 stockdb 缓存）；全市场日线（5200 只）可跑（loader 分批取数），全市场分钟任何数据源都不可行（~5 亿行），分钟回测适合数百只内小池。
-- 验证：单测 43 passed（含 live smoke）；对拍 SDK/方案 A 快照/pre_close 自洽（除权日 0.0000pp）/分钟聚合自洽全过；端到端日线 50 只 644 笔成交、5m 10 只 960 笔盘中分钟时点成交。
+- 验证：单测 43 passed（含 live smoke）；对拍 SDK/方案 A 快照/pre_close 自洽（除权日 0.0000pp）/分钟聚合自洽全过；端到端日线 50 只 644 笔成交、5m 10 只 960 笔盘中分钟时点成交、**1m 4 只两个月 258 笔成交（时点精确到分钟，run：`vt_e2e_stockdb_min1`）**。
 
 ## 9. 脚本速查
 
