@@ -936,6 +936,8 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 
 注意：同一份策略用 qfq 和 hfq 的结果不可直接对比；切换口径后要重新评估参数和信号阈值。
 
+> 2026-09-26 更新：`source="stockdb"` 直连数据源自带后复权（默认 hfq，`VIBE_TRADING_STOCKDB_FQ` 可切 qfq/none），见 8.48；方案 A 导出快照也含 `close_hfq` 四列。
+
 
 ### 8.41 心忆 .min 数据做国内期货多周期回测，怎么组织数据最省事？
 
@@ -1052,6 +1054,40 @@ config.yaml 里不写周期，周期由你文件的原始粒度决定。判断�
 - 分析图：热力图支持日/周/月切换（默认按回测长度自动选）；净值/回撤从回测窗口开始；盈亏 vs 持仓、持仓分桶改用 bar 数。
 - 旧 run 的 `analysis.digest.json` 是缓存，升级后需要重建（schema v3）才会显示新口径；重建方式是重新跑 `backtest.runner` 或删除该文件后刷新 WebUI。
 - 1m 行情显示暂未开放：单标的约 8.5 万根会拖垮前端；后续按“区间/数量切片接口 + 懒加载”方案再补。
+
+### 8.48 stockdb 直连数据源（`source="stockdb"`，日线 / 分钟 / ETF / 行业列）
+
+本地装了 stockdb（`stockdb.exe` 常驻，`127.0.0.1:7899`）时，可以让 VTD 实时直连取数，**不导出、不落任何数据文件**（与 8.16/8.21 的方案 A 导出快照 + data-bridge 登记相比，省掉导出与逐标的登记；两套并存：离线复现 / 无服务环境仍用方案 A 快照）。
+
+一次性配置 `<vibe_home>\.env`（必填第一行，其余可选）：
+
+```
+VIBE_TRADING_STOCKDB_SDK_PATH=E:\data\free-stockdb-windows-v0.3.2-more-power\stockdb\pybao
+VIBE_TRADING_STOCKDB_HOST=127.0.0.1        # 可选，默认 127.0.0.1
+VIBE_TRADING_STOCKDB_PORT=7899             # 可选，默认 7899
+VIBE_TRADING_STOCKDB_TIMEOUT=10            # 可选，秒；SDK 自带 1s 对大查询偏紧
+VIBE_TRADING_STOCKDB_FQ=hfq                # 可选，hfq(默认)/qfq/none
+```
+
+`config.json` 用法（data-bridge 完全不用配）：
+
+```json
+{
+  "source": "stockdb",
+  "codes": ["600519.SH", "000001.SZ", "510050.SH"],
+  "start_date": "2024-01-02", "end_date": "2024-12-31",
+  "interval": "1D",
+  "extra_fields": ["turnover", "amount", "float_share", "industry_l1", "is_st"]
+}
+```
+
+要点与口径（2026-09-26 实测）：
+- **覆盖范围**：日线 2011 起；**1m 分钟 2025-01-02 → 库同步日**（约一年半，窗口早于该日期无分钟数据）；ETF = 沪 5 前缀 / 深 1 前缀基金；北交所不支持。`interval` 支持 `1D` 与 `1m/5m/15m/30m/1H`（分钟由 1m 聚合，自然时钟，与引擎/天勤一致；**1H 与看盘软件 60m 交易时钟不同**：11:30/15:00 收盘时刻 bar 会独立成尾桶，一天 5m 得 50 桶而非 48）。
+- **复权**：默认 hfq（`VIBE_TRADING_STOCKDB_FQ` 切 qfq/none）；折算用复权因子表在 loader 内完成，与 SDK `fq="hfq"`、方案 A 快照 `close_hfq` 同式（除法路径 + 股票 2 位/基金 3 位 round），对拍一致（round 边界 ≤1 分差异约 0.1% 行，Python 逐标量 round 与 numpy 向量化 round 实现差异）。
+- **pre_close 重建（重要）**：stockdb 的 `pre_close` 字段被前复权污染（约 73% 行 < 0.99× 真实昨收，外部坑、实测复核），loader **丢弃该字段**重建：日线用 `close/(1+pct_chg/100)`（pct_chg 干净；ETF 无 pct_chg 回退 `close.shift(1)`）；分钟 bar 的涨跌停基准是当日交易所昨收（当日恒定），映射当日日线重建值。
+- **额外列**：`extra_fields` 声明式透传（同 tushare 约定），日线白名单 turnover/amount/float_share/float_mv/total_mv/is_st/pe_ttm/pb/vol_ratio/name/pct_chg/industry_l1；分钟表只有 amount，分钟白名单 amount/industry_l1。`industry_l1` 是申万一级**当前状态**（历史 bar 也带现在的标签，做行业中性化注意近似），category dtype 存储。
+- **行为**：仅显式 `source="stockdb"` 使用，不进自动兜底链；服务掉线时显式报错不降级到网络源（fail-closed），重启 `stockdb.exe` 即可；不接 loader 缓存（`VIBE_TRADING_DATA_CACHE` 不产生 stockdb 缓存）；全市场日线（5200 只）可跑（loader 分批取数），全市场分钟任何数据源都不可行（~5 亿行），分钟回测适合数百只内小池。
+- 验证：单测 43 passed（含 live smoke）；对拍 SDK/方案 A 快照/pre_close 自洽（除权日 0.0000pp）/分钟聚合自洽全过；端到端日线 50 只 644 笔成交、5m 10 只 960 笔盘中分钟时点成交。
 
 ## 9. 脚本速查
 

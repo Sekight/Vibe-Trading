@@ -49,4 +49,6 @@
 | P-20260827-backtest_config_schema_agent | 已完成 | 2026-08-27 | BacktestConfigSchema 配置契约与 Agent 暴露 | P-20260827-backtest_config_schema_agent.md | V046 |
 | P-20260905-stockdb_ma_convergence_data | 已完成 | 2026-09-05 | stockdb 数据源接入（A 股日线 + local loader 额外列透传） | P-20260905-stockdb_ma_convergence_data.md | V048 |
 | P-20260909-ohlcv_no_persist_and_chart_lazy | 已完成 | 2026-09-09 | 全市场 run OHLCV 不落库（--no-ohlcv，默认落库）+ 报告页 K 线默认空态按需加载 | P-20260909-ohlcv_no_persist_and_chart_lazy.md | V049 |
+| P-20260915-rag_demo | 已完成 | 2026-09-15 | RAG demo：vibe-trading 文档库 + Spring AI 1.0 + SimpleVectorStore（面试项目，独立目录不入仓库） | P-20260915-rag_demo.md | 待填 |
+| P-20260925-stockdb_direct_loader | 已完成 | 2026-09-25 | stockdb 直连 loader（source="stockdb"，日线+分钟+ETF+行业列，零落盘；= P-20260905 方案 B） | P-20260925-stockdb_direct_loader.md | V050 |
 

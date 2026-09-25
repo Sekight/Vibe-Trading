@@ -34,6 +34,8 @@ _TRADING_DAYS = {
     # resampling sources (local files / paid data — interval depends on source
     # data granularity; model as US equity session as a conservative default)
     "local": 252, "qveris": 252,
+    # stockdb direct-connect (local A-share service): 4.0h sessions, P-20260925
+    "stockdb": 252,
     # Indian equity
     "india_broker": 252,
     # Korean equity (KRX)
@@ -56,6 +58,7 @@ _BARS_PER_DAY = {
             # A-share equity (4.0h session)
             "tushare": 240, "akshare": 240, "baostock": 240, "tencent": 240,
             "eastmoney": 240, "sina": 240, "mootdx": 240, "futu": 240,
+            "stockdb": 240,
             # crypto (24h)
             "okx": 1440, "ccxt": 1440, "binance": 1440,
             # forex/CFD (24h intraday)
@@ -70,6 +73,7 @@ _BARS_PER_DAY = {
             "local": 78, "qveris": 78,
             "tushare": 48,  "akshare": 48,  "baostock": 48,  "tencent": 48,
             "eastmoney": 48,  "sina": 48,  "mootdx": 48,  "futu": 48,
+            "stockdb": 48,
             "okx": 288,  "ccxt": 288,  "binance": 288,
             "mt5": 288,
             "india_broker": 75,
@@ -80,6 +84,7 @@ _BARS_PER_DAY = {
             "local": 26, "qveris": 26,
             "tushare": 16,  "akshare": 16,  "baostock": 16,  "tencent": 16,
             "eastmoney": 16,  "sina": 16,  "mootdx": 16,  "futu": 16,
+            "stockdb": 16,
             "okx": 96,   "ccxt": 96,   "binance": 96,
             "mt5": 96,
             "india_broker": 25,
@@ -90,6 +95,7 @@ _BARS_PER_DAY = {
             "local": 13, "qveris": 13,
             "tushare": 8,   "akshare": 8,   "baostock": 8,   "tencent": 8,
             "eastmoney": 8,   "sina": 8,   "mootdx": 8,   "futu": 8,
+            "stockdb": 8,
             "okx": 48,   "ccxt": 48,   "binance": 48,
             "mt5": 48,
             "india_broker": 13,
@@ -100,6 +106,7 @@ _BARS_PER_DAY = {
             "local": 7, "qveris": 7,
             "tushare": 4,   "akshare": 4,   "baostock": 4,   "tencent": 4,
             "eastmoney": 4,   "sina": 4,   "mootdx": 4,   "futu": 4,
+            "stockdb": 4,
             "okx": 24,   "ccxt": 24,   "binance": 24,
             "mt5": 24,
             "india_broker": 7,
@@ -110,6 +117,7 @@ _BARS_PER_DAY = {
             "local": 2, "qveris": 2,
             "tushare": 1,   "akshare": 1,   "baostock": 1,   "tencent": 1,
             "eastmoney": 1,   "sina": 1,   "mootdx": 1,   "futu": 1,
+            "stockdb": 1,
             "okx": 6,    "ccxt": 6,    "binance": 6,
             "mt5": 6,
             "india_broker": 2,
@@ -120,6 +128,7 @@ _BARS_PER_DAY = {
             "local": 1, "qveris": 1,
             "tushare": 1,   "akshare": 1,   "baostock": 1,   "tencent": 1,
             "eastmoney": 1,   "sina": 1,   "mootdx": 1,   "futu": 1,
+            "stockdb": 1,
             "okx": 1,    "ccxt": 1,    "binance": 1,
             "mt5": 1,
             "india_broker": 1,

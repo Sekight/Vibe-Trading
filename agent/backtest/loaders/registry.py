@@ -55,6 +55,7 @@ VALID_SOURCES: set[str] = {
     "longbridge",
     "mt5",
     "local",
+    "stockdb",  # direct-connect local stockdb service (P-20260925)
     "auto",
 }
 
@@ -105,6 +106,7 @@ def _ensure_registered() -> None:
         "backtest.loaders.longbridge",
         "backtest.loaders.mt5_loader",
         "backtest.loaders.local_loader",
+        "backtest.loaders.stockdb_loader",
     ]
     import importlib
     for mod in _loader_modules:
@@ -116,12 +118,13 @@ def _ensure_registered() -> None:
 
 # Sources that must NEVER silently fall through to a network loader when the
 # caller asked for them explicitly. ``local`` reads the user's own configured
-# files (``~/.vibe-trading/data-bridge/config.yaml``); its ``markets`` set spans
-# every market only so the cross-market auto-resolver can *reach* it, not so an
-# unavailable ``local`` request can degrade into an unrelated network source.
-# An explicit ``local`` request that is unavailable is a config problem the user
-# must see, not something to paper over with a Yahoo/Tencent fetch.
-_NO_NETWORK_FALLBACK_SOURCES: frozenset[str] = frozenset({"local", "qveris"})  # QVERIS-INTEGRATION
+# files (``~/.vibe-trading/data-bridge/config.yaml``); ``stockdb`` reads the
+# user's own local stockdb service — its ``markets`` set spans every market only
+# so the cross-market auto-resolver can *reach* it, not so an unavailable
+# request can degrade into an unrelated network source with different price
+# semantics. An explicit request that is unavailable is a config/service problem
+# the user must see, not something to paper over.
+_NO_NETWORK_FALLBACK_SOURCES: frozenset[str] = frozenset({"local", "qveris", "stockdb"})  # QVERIS-INTEGRATION
 
 
 # ---------------------------------------------------------------------------
