@@ -23,8 +23,8 @@ agent/scripts/
   `--check` 检测生成物漂移。用法：
 
   ```powershell
-  E:\gitCloneProgram\vibe-trading-src\.venv\Scripts\python.exe agent/scripts/sync_backtest_capabilities.py
-  E:\gitCloneProgram\vibe-trading-src\.venv\Scripts\python.exe agent/scripts/sync_backtest_capabilities.py --check
+  E:\myProgram\vibe-trading-src\.venv\Scripts\python.exe agent/scripts/sync_backtest_capabilities.py
+  E:\myProgram\vibe-trading-src\.venv\Scripts\python.exe agent/scripts/sync_backtest_capabilities.py --check
   ```
 
 - **bench_performance.py**：性能基准，对比新旧 operator/equity 路径（开发专用，

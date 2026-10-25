@@ -30,7 +30,7 @@ scripts/
 `<repo>/agent` 加入 sys.path；也可用环境变量 `VIBE_TRADING_SRC` 覆盖仓库根）：
 
 ```powershell
-E:\gitCloneProgram\vibe-trading-src\.venv\Scripts\python.exe -m pip install baostock pyarrow
+E:\myProgram\vibe-trading-src\.venv\Scripts\python.exe -m pip install baostock pyarrow
 ```
 
 ## 脚本说明
@@ -45,7 +45,7 @@ float_mv/is_st 等 21 列 + 后复权 4 列，后复权与 stockdb SDK `fq="hfq"
 
 ```powershell
 PYTHONPATH=E:/data/free-stockdb-windows-v0.3.2-more-power/stockdb/pybao `
-  E:\gitCloneProgram\vibe-trading-src\.venv\Scripts\python.exe scripts/export_stockdb_ashare.py `
+  E:\myProgram\vibe-trading-src\.venv\Scripts\python.exe scripts/export_stockdb_ashare.py `
   --out data/stockdb_ashare --start 20110101
 ```
 
@@ -56,7 +56,7 @@ PYTHONPATH=E:/data/free-stockdb-windows-v0.3.2-more-power/stockdb/pybao `
 输出 `out_dir/kline/<code>.parquet` + `manifest.json`。
 
 ```powershell
-E:\gitCloneProgram\vibe-trading-src\.venv\Scripts\python.exe scripts/lib/fetch_kline.py --codes 600519.SH,000001.SZ --start-date 2025-01-01 --end-date 2025-12-31 --out-dir C:/tmp/kline --source auto
+E:\myProgram\vibe-trading-src\.venv\Scripts\python.exe scripts/lib/fetch_kline.py --codes 600519.SH,000001.SZ --start-date 2025-01-01 --end-date 2025-12-31 --out-dir C:/tmp/kline --source auto
 ```
 
 ### lib/get_csi300_constituents.py
@@ -66,7 +66,7 @@ akshare/sina 兜底（兜底只能取最新一期，会标记近似）。输出 
 （无幸存者偏差）。`--snapshot-dates` 可覆盖候选查询日。
 
 ```powershell
-E:\gitCloneProgram\vibe-trading-src\.venv\Scripts\python.exe scripts/lib/get_csi300_constituents.py --start-date 2020-01-01 --end-date 2026-12-31 --out-dir C:/tmp/csi300
+E:\myProgram\vibe-trading-src\.venv\Scripts\python.exe scripts/lib/get_csi300_constituents.py --start-date 2020-01-01 --end-date 2026-12-31 --out-dir C:/tmp/csi300
 ```
 
 ### run/run_fetch_csi300_kline.py
@@ -76,7 +76,7 @@ E:\gitCloneProgram\vibe-trading-src\.venv\Scripts\python.exe scripts/lib/get_csi
 与 `manifest.json` 覆盖率报告。`--append` 增量补齐、`--limit-codes N` 分批续跑。
 
 ```powershell
-E:\gitCloneProgram\vibe-trading-src\.venv\Scripts\python.exe scripts/run/run_fetch_csi300_kline.py --start-date 2020-01-01 --end-date 2026-12-31 --out-dir C:/tmp/csi300 --source auto
+E:\myProgram\vibe-trading-src\.venv\Scripts\python.exe scripts/run/run_fetch_csi300_kline.py --start-date 2020-01-01 --end-date 2026-12-31 --out-dir C:/tmp/csi300 --source auto
 ```
 
 ## 与 agent/scripts 的分工

@@ -9,13 +9,13 @@
   多标的同时生效，已完整覆盖的标的不再联网。
 
 用法（建议在 vibe-trading-src 仓库根目录用 venv python 运行）：
-    E:\\gitCloneProgram\\vibe-trading-src\\.venv\\Scripts\\python.exe scripts/lib/fetch_kline.py --codes 600519.SH,000001.SZ --start-date 2025-01-01 --end-date 2025-12-31 --out-dir C:/tmp/kline --source auto
+    E:\\myProgram\\vibe-trading-src\\.venv\\Scripts\\python.exe scripts/lib/fetch_kline.py --codes 600519.SH,000001.SZ --start-date 2025-01-01 --end-date 2025-12-31 --out-dir C:/tmp/kline --source auto
 
     # 从文件读标的（每行一个代码，多个标的一起抓）
-    E:\\gitCloneProgram\\vibe-trading-src\\.venv\\Scripts\\python.exe scripts/lib/fetch_kline.py --codes-file universe.txt --start-date 2025-01-01 --end-date 2025-12-31 --out-dir C:/tmp/kline
+    E:\\myProgram\\vibe-trading-src\\.venv\\Scripts\\python.exe scripts/lib/fetch_kline.py --codes-file universe.txt --start-date 2025-01-01 --end-date 2025-12-31 --out-dir C:/tmp/kline
 
     # 增量补齐：600519.SH、600300.SH 已有旧区间，只下载缺失的头尾
-    E:\\gitCloneProgram\\vibe-trading-src\\.venv\\Scripts\\python.exe scripts/lib/fetch_kline.py --append --codes 600519.SH,600300.SH --start-date 2018-01-02 --end-date 2025-12-31 --out-dir C:/tmp/kline
+    E:\\myProgram\\vibe-trading-src\\.venv\\Scripts\\python.exe scripts/lib/fetch_kline.py --append --codes 600519.SH,600300.SH --start-date 2018-01-02 --end-date 2025-12-31 --out-dir C:/tmp/kline
 
 说明：
 - agent 目录默认按本文件位置推导（scripts/lib -> 仓库根），

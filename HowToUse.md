@@ -1185,7 +1185,7 @@ VIBE_TRADING_STOCKDB_FQ=hfq                # 可选，hfq(默认)/qfq/none
 | `end_date` | `string` | `必填` | 必填。行情加载窗口终点；应覆盖实际回测结束日 backtest_end。日期格式为 YYYY-MM-DD 或当前 loader 支持的时间格式。 |
 | `backtest_start` | `optional string` | `省略` | 可选。实际交易、净值、收益、回撤和 metrics 的起点；start_date 仍负责加载更早的行情和指标预热数据。省略时使用 start_date。 |
 | `backtest_end` | `optional string` | `省略` | 可选。实际交易、净值、收益、回撤和 metrics 的终点；省略时使用 end_date，纯日期按包含整天处理。 |
-| `source` | `string` | `tushare` | 数据源路由；必须使用当前 loader registry 的 VALID_SOURCES 之一：akshare, alphavantage, auto, baostock, binance, ccxt, eastmoney, finnhub, fmp, futu, india_broker, local, longbridge, mootdx, mt5, okx, pykrx, qveris, sina, stooq, tencent, tiingo, tushare, yahoo, yfinance。 |
+| `source` | `string` | `tushare` | 数据源路由；必须使用当前 loader registry 的 VALID_SOURCES 之一：akshare, alphavantage, auto, baostock, binance, ccxt, eastmoney, finnhub, fmp, futu, india_broker, local, longbridge, mootdx, mt5, okx, pykrx, qveris, sina, stockdb, stooq, tencent, tiingo, tushare, yahoo, yfinance。 |
 | `interval` | `string` | `1D` | K 线周期；允许值为 15m, 1D, 1H, 1m, 30m, 4H, 5m。小周期回测仍需按 lookback 扩大 start_date。 |
 | `engine` | `string` | `daily` | 回测引擎；允许值为 daily, options。 |
 | `entry_mode` | `string` | `next_open` | 正常开仓/加仓成交时点；允许 next_open（下一根 bar 开盘）或 close（信号 bar 收盘）。正常 entry/exit 组合目前只允许 next_open/next_open 或 close/close。 |

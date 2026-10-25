@@ -724,12 +724,19 @@ def backtest(
     For ``action="charts"`` and ``action="report"``, an existing completed
     run must contain ``run_card.json`` and ``artifacts/metrics.csv``.
 
+    Note: ``run``/``full`` always persist per-symbol OHLCV CSV artifacts
+    (``ohlcv_*.csv``; ~1.3GB for a 5200-symbol universe); there is no MCP
+    switch to disable this. For very large universes, prefer running the CLI
+    directly with ``--no-ohlcv``.
+
     Supported data sources (set in config.json "source" field):
     - "yfinance": HK/US equities (free, no API key needed)
     - "okx": cryptocurrency (free, no API key needed)
     - "tushare": China A-shares (requires TUSHARE_TOKEN env var)
     - "akshare": A-shares, US, HK, futures, forex (free, no API key)
     - "ccxt": crypto from 100+ exchanges (free, no API key)
+    - "local": user-provided CSV/Parquet/DuckDB via data-bridge config (offline)
+    - "stockdb": direct-connect local stockdb service (offline, A-share/ETF)
     - "auto": auto-detect based on symbol format (with fallback)
 
     Returns metrics (Sharpe, return, drawdown, etc.) and artifact paths.
