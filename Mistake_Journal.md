@@ -79,6 +79,8 @@
 | M041 | 2026-09-09 | 🔴错误 | 全市场 run 打开 WebUI 报告必 OOM：后端先全量读 5200 个 OHLCV 文件再按标过滤（先加载后过滤反模式） |
 | M043 | 2026-09-27 | 🟡坑 | stockdb 个别标的日线只有 data1 滑动窗口（4/30 ETF 池标的仅 663 行、2024-01-02 起），"抽 5 只全历史"以偏概全；数据覆盖必须逐标的实测 |
 | M044 | 2026-09-27 | 🟡坑 | MCP 派生的 runner 子进程把 source=stockdb 路由成 tushare（直跑 runner 同配置正常），根因待查；绕行=命令行直跑 |
+| M045 | 2026-10-25 | 🟡坑 | P0-2 live_demo 首跑：Runner 子进程临时 HOME 未透传 VIBE_TRADING_ALLOWED_RUN_ROOTS，真实 run 目录被 safe_run_dir 拒绝；行情返回 {symbol:{rows,data}} 被按 list 解析得 0 symbols |
+| M046 | 2026-10-25 | 🟡坑 | opencode-go 网关要求 x-opencode-session，默认 provider 400 MissingSessionID；DeepSeek 直连可用 |
 
 ## 正文
 
@@ -374,3 +376,21 @@
 - 可复用方法：MCP 工具失败先跑同参数 CLI 对照（本次一分钟定位到"环境差异"层）；对 dotenv 型配置，核对宿主进程与子进程的 `os.environ` 合并顺序（已存在变量不被 .env 覆盖是默认行为）。
 - 状态：有效（根因待查；绕行可用）。
 - 关联：M022（直跑 runner 不加载 .env，已修复——本坑是其反面：MCP 子进程环境与 CLI 不一致）；run `etf30_1d_s001_baseline`。
+
+### M045 · P0-2 live_demo 首跑：Runner 沙箱 HOME 与行情返回结构（2026-10-25）· 🟡坑
+- 现象：`python -m langgraph_agent.live_demo` 首跑两处失败：① `market_data` 返回 `0 symbols returned`，但直接调用 `MarketDataTool` 能拿到 242 行；② `backtest` 报 `run_dir ... outside allowed run roots`，并列出 `<sandbox_home>/.vibe-trading/runs`。
+- 根因：① 生产 `get_market_data` 的返回是 `{symbol: {rows, returned, data: [...]}}`，不是 `{symbol: [...]}`；摘要代码按 list 判断，整段被跳过。② `Runner` 为生成策略的子进程创建临时 HOME（TV-001 防御），`safe_run_dir` 在子进程只认 `VIBE_TRADING_ALLOWED_RUN_ROOTS` + 沙箱默认根；父进程没把真实 `<vibe_home>/runs` 透传时，子进程拒绝真实 run 目录。
+- 解决：① 摘要同时兼容 `payload["data"]`/`payload["rows"]`；② `BacktestAdapter._prepare_run_dir` 把真实 run 根并入 `VIBE_TRADING_ALLOWED_RUN_ROOTS` 并 `reset_env_config()`，Runner 再透传给子进程；复跑 market 2.93s / backtest 8.29s / report 20.6s 全 ok。
+- 教训：调生产工具先读它的**真实返回结构**，不要按直觉的 list 写解析；跨进程/沙箱调用时，“父进程能访问的路径”不等于“子进程允许的路径”，路径白名单要显式透传。
+- 可复用方法：工具适配器先打印一次 raw JSON 再写字段解析；Runner 类子进程失败先看子进程环境里的 allowed roots / HOME，而不是只看父进程。
+- 状态：已修复（2026-10-25，V051）。
+- 关联：本迭代 V051；计划 `P-20261025-P02_interview_langgraph_agent`；HowToUse 8.49。
+
+### M046 · opencode-go 网关缺少 x-opencode-session（2026-10-25）· 🟡坑
+- 现象：`~/.vibe-trading/.env` 配置 `LANGCHAIN_PROVIDER=opencode-go`、`LANGCHAIN_MODEL_NAME=deepseek-v4-flash`，`ChatLLM().chat(...)` 返回 400 `MissingSessionID: Request is missing x-opencode-session`；同一 key 走 DeepSeek 直连（`LANGCHAIN_PROVIDER=deepseek`、`LANGCHAIN_MODEL_NAME=deepseek-chat`）1.2s 正常返回。
+- 根因：opencode zen/go 网关新增会话头要求；项目 provider 配置未带 `x-opencode-session`，请求被网关拒绝。与 E001/E013 同族：网关按上游/模型路由，行为会独立变化。
+- 解决：本次评测/演示用 DeepSeek 直连绕行；`run_eval` 记录实际 `provider`，不跨 provider 混算。opencode-go 的会话头补法待查（可能需要自定义 header 或改用官方 CLI 通道）。
+- 教训：把“默认 provider 可用”当成前提会阻塞评测；启动前先跑一次最小 chat 预检，失败就切可用 provider 并记录。
+- 可复用方法：LLM 评测前 `--check-llm` 预检；报告 meta 必带 provider/model。
+- 状态：有效（绕行=DeepSeek 直连；根因待查）。
+- 关联：本迭代 V051；E001/E013（网关行为差异）；HowToUse 4.6。

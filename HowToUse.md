@@ -149,6 +149,36 @@ vibe-trading --list                                 # 等同 vibe-trading list
 - 单次限制迭代：`vibe-trading run -p "..." --max-iter 12`，效果等同 .env 里的 `AGENT_MAX_ITERATIONS=12`，只影响这一次。
 - 长 prompt 建议写进文件再跑：`vibe-trading run -f prompt.txt`，避免命令行引号和换行问题。
 
+### 4.6 LangGraph 量化 Agent 原型（P0-2，离线）
+
+> 面试用原型，不改生产 AgentLoop / API；代码在 `agent/langgraph_agent/`，详细说明见该目录 README。
+
+用途：把“多步子任务”画成显式状态图，演示计划/拆解/校验/回测前人工确认/断点恢复。
+
+```powershell
+cd <repo_root>\agent
+$env:LANGCHAIN_PROVIDER="deepseek"; $env:LANGCHAIN_MODEL_NAME="deepseek-chat"
+
+# 45 条量化语料结构校验
+..\.venv\Scripts\python.exe -m langgraph_agent.run_eval --check-data
+
+# 真实链路：取数 → 回测 → 报告（约 30 秒）
+..\.venv\Scripts\python.exe -m langgraph_agent.live_demo --symbols 600519.SH,000001.SZ --start 2024-01-01 --end 2024-12-31 --source baostock
+
+# 线性 vs 状态图对比
+..\.venv\Scripts\python.exe -m langgraph_agent.run_eval --impl graph
+..\.venv\Scripts\python.exe -m langgraph_agent.run_eval --impl linear
+
+# 本地 demo 服务（127.0.0.1:9200）
+..\.venv\Scripts\python.exe -m langgraph_agent.server --port 9200
+```
+
+要点：
+- 评测默认用 stub 工具（只记录动作，秒级）；真实回测/报告由 `live_demo.py` 单独验证。
+- 默认 `baostock`；stockdb 需先启动 7899 服务。
+- 当前 `opencode-go` 可能返回 `400 MissingSessionID`，用 DeepSeek 直连（上面两行 env）即可。
+- 不修改生产 `AgentLoop`、`api_server.py`、`agent/src/tools/`；隔离证明见计划收尾。
+
 ---
 
 ## 5. 启动 Web UI（前端）
@@ -1088,6 +1118,15 @@ VIBE_TRADING_STOCKDB_FQ=hfq                # 可选，hfq(默认)/qfq/none
 - **额外列**：`extra_fields` 声明式透传（同 tushare 约定），日线白名单 turnover/amount/float_share/float_mv/total_mv/is_st/pe_ttm/pb/vol_ratio/name/pct_chg/industry_l1；分钟表只有 amount，分钟白名单 amount/industry_l1。`industry_l1` 是申万一级**当前状态**（历史 bar 也带现在的标签，做行业中性化注意近似），category dtype 存储。
 - **行为**：仅显式 `source="stockdb"` 使用，不进自动兜底链；服务掉线时显式报错不降级到网络源（fail-closed），重启 `stockdb.exe` 即可；不接 loader 缓存（`VIBE_TRADING_DATA_CACHE` 不产生 stockdb 缓存）；全市场日线（5200 只）可跑（loader 分批取数），全市场分钟任何数据源都不可行（~5 亿行），分钟回测适合数百只内小池。
 - 验证：单测 43 passed（含 live smoke）；对拍 SDK/方案 A 快照/pre_close 自洽（除权日 0.0000pp）/分钟聚合自洽全过；端到端日线 50 只 644 笔成交、5m 10 只 960 笔盘中分钟时点成交、**1m 4 只两个月 258 笔成交（时点精确到分钟，run：`vt_e2e_stockdb_min1`）**。
+
+### 8.49 P0-2 `live_demo` 报 `run_dir ... outside allowed run roots`？
+
+- 根因：回测 runner 会给生成代码的子进程一个临时 HOME；父进程没把真实 run 根透传给 `VIBE_TRADING_ALLOWED_RUN_ROOTS` 时，子进程的 `safe_run_dir` 只认沙箱里的默认路径。
+- 处理：P0-2 的 `BacktestAdapter` 已自动把 `<vibe_home>\runs` 加进该变量并重置配置缓存；自定义入口需自己设置：
+  ```powershell
+  $env:VIBE_TRADING_ALLOWED_RUN_ROOTS="<vibe_home>\runs"
+  ```
+- 相关：M045。
 
 ## 9. 脚本速查
 

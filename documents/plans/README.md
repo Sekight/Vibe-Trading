@@ -51,4 +51,5 @@
 | P-20260909-ohlcv_no_persist_and_chart_lazy | 已完成 | 2026-09-09 | 全市场 run OHLCV 不落库（--no-ohlcv，默认落库）+ 报告页 K 线默认空态按需加载 | P-20260909-ohlcv_no_persist_and_chart_lazy.md | V049 |
 | P-20260915-rag_demo | 已完成 | 2026-09-15 | RAG demo：vibe-trading 文档库 + Spring AI 1.0 + SimpleVectorStore（面试项目，独立目录不入仓库） | P-20260915-rag_demo.md | 待填 |
 | P-20260925-stockdb_direct_loader | 已完成 | 2026-09-25 | stockdb 直连 loader（source="stockdb"，日线+分钟+ETF+行业列，零落盘；= P-20260905 方案 B） | P-20260925-stockdb_direct_loader.md | V050 |
+| P-20261025-P02_interview_langgraph_agent | 已完成 | 2026-10-25 | LangGraph 版量化 Agent（状态图 + 规划拆解 + 人工接管，量化原生语料，P0-2 面试原型） | P-20261025-P02_interview_langgraph_agent.md | V051 |
 

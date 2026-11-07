@@ -24,6 +24,7 @@ CLAUDE.md
 learn-claude-code-main/
 agent/sessions/
 agent/runs/
+agent/langgraph_agent/runs/
 agent/.ui_runtime/
 agent/.tasks/
 agent/uploads/
@@ -65,6 +66,9 @@ data/backup/
 
 # Internal docs (plans, specs)
 docs/
+# P0-2 deliverable: comparison report (not an internal doc/run artifact)
+!agent/langgraph_agent/docs/
+!agent/langgraph_agent/docs/**
 !wiki/docs/
 !wiki/docs/**
 docs/screenshots/agent-run.png

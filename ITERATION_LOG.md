@@ -62,6 +62,8 @@
 | V047 | 2026-08-27 | bridge skill 配置说明收敛与窗口边界审计 | skill 不再重复配置字段；配置 schema 早失败覆盖执行窗口，MCP/文档出口职责闭环 |
 | V048 | 2026-09-05 | local loader extra_columns 透传与 stockdb 导出工具 | data-bridge 新增 extra_columns 配置透传非 OHLCV 列（加新列只改配置不改代码）；新增 scripts/export_stockdb_ashare.py 导出 A 股日线数据仓；100 只端到端对照验证透传真实生效 |
 | V049 | 2026-09-09 | 全市场 run OHLCV 不落库与 K 线默认空态 | 报告页 K 线默认空态按需加载 + --no-ohlcv 跳过 1.3GB/5200 文件 OHLCV 落盘（默认仍落库），根治全市场 run 打开报告 OOM |
+| V050 | 2026-09-26 | stockdb 直连 loader | source="stockdb" 经 SDK 实时取数，日线/分钟/ETF/行业列，零落盘，fail-closed 不降级 |
+| V051 | 2026-10-25 | LangGraph 量化 Agent 原型（P0-2） | 9 节点状态图 + 规划/拆解/校验/中断/checkpoint；45 条量化语料，多意图动作集 exact 0%→100% |
 > 补录说明：V001-V009 为补录条目，依据 git 历史、HowToUse、全局复利与踩坑日志、`C:\Users\mumu\.codex\sessions` 会话记录回溯整理；当时未留痕的字段标“待补”。从下一条起，每次迭代收尾直接写正文。
 
 ## 模板
@@ -586,3 +588,14 @@
   - 实测钉死的事实：SDK `get_data(frequency="1m")` 在默认 socket_timeout=1s 下静默返回空（大查询超时被吞），底层 `rd.vals`/`pipe` 正常；pipe.do() 多只符号按符号分组、单只符号返回扁平行列表（len 相等性判别，否则 zip 错切）；分钟表仅 amount/无 pre_close/pct_chg；stockdb 分钟 bar 含 09:30 集合竞价与 11:30/15:00 收盘时刻 bar，自然时钟 5m 聚合一天 50 桶（非看盘软件交易时钟的 48，口径文档标注）。
 - 验证：单测 43 passed（monkeypatch 单元 + live smoke：600519 日线/5m=50 桶）；对拍——hfq vs SDK get_data(fq='hfq') 5220 cells 仅 6 差 ±0.01（round 边界 0.11%，Python 逐标量 round vs numpy 向量化 round 实现差异）、raw vs 方案 A 快照 1305 行 0 mismatch、hfq vs 快照 close_hfq 2 差 ±0.01、pre_close 自洽（含除权日）max 0.0000pp、ETF 三只非空、分钟 1m→5m 首桶 OHLC 自洽且 pre_close 与日线逐位一致；端到端——日线 50 只（含 ETF）2024 全年 644 笔成交、data_map 透传列全部到达（industry_l1=category"食品饮料"）、run 卡片 data_sources=["stockdb"]；5m 10 只 2025-06~09 共 960 笔成交全部为盘中分钟时点（11:15/09:30/15:00），run 卡片 interval=5m。
 - 关联：计划 `P-20260925-stockdb_direct_loader`（= P-20260905 方案 B）；HowToUse 8.48（新增）/8.40（复权指针）；run `~/.vibe-trading/runs/vt_e2e_stockdb_daily`、`~/.vibe-trading/runs/vt_e2e_stockdb_min5`；本次提交。
+
+### V051 · LangGraph 量化 Agent 原型（P0-2）（2026-10-25）
+- 一句话总结：新增 `agent/langgraph_agent/` 离线原型——9 个节点（decode/plan/decompose/route/human_review/execute/validate/fallback/summarize）+ 3 条条件边 + 动态 `interrupt()`/checkpoint；复用现有 ToolRegistry；同一模型/工具/协议下对比线性 ReAct，45 条量化语料上多意图动作集完全一致率 0%→100%，单意图 95%→97.5%（小样本差异，不作为状态图更准的证据），状态图平均 1.156 步/679.8 Token，线性 0.978 步/1233.2 Token。
+- 为什么：现有 `AgentLoop` 把“取数→回测→报告”的流程写在系统提示词里（`agent/src/agent/context.py:70-79`），计划/进度/校验/中断/恢复都不在代码里；P0-2 用状态图把流程变成可检查的节点和边，为昂贵回测加人工门，为长任务加断点恢复。落点限定 vibe-trading，HR 语料不进入本仓库。
+- 关键细节：
+  - `agent/langgraph_agent/`：`state.py`（显式 State + 动作枚举）、`prompts.py`（量化协议 + JSON 计划契约）、`tools.py`（get_market_data/backtest/write_run_analysis 薄适配器 + clarify/stop，stub/live 双模式）、`nodes.py`（9 节点 + 条件边 + 失败路径）、`graph.py`（StateGraph + MemorySaver/SqliteSaver + decide/resume）、`baseline.py`（同构线性 ReAct）、`evaluator.py`/`run_eval.py`（45 条量化语料评分）、`server.py`（独立 9200 demo）、`live_demo.py`（真取数/回测/报告）。
+  - 语料：40 条单意图（行情/回测/报告/追问/结束各 8）+ 5 条多意图；不含 HR/简历/岗位；`--check-data` 校验 45 条、id 唯一、动作枚举、无 HR 词表。
+  - 隔离：不改 `agent/src/agent/`、`api_server.py`、`cli`、`backtest`、`agent/src/tools/`；只新增目录 + 2 个测试 + 计划；`pyproject.toml` 仅加 optional extra `langgraph-demo`；`.gitignore` 加 runs。
+  - 环境：`opencode-go` 当前 400 MissingSessionID，评测/演示用 DeepSeek 直连（`LANGCHAIN_PROVIDER=deepseek`、`LANGCHAIN_MODEL_NAME=deepseek-chat`）；stockdb 未运行，真实链路用 baostock。
+- 验证：新增单测 14 passed；`--check-llm` DeepSeek 1.45s 返回 3 子任务合法 JSON；全量 45×2（deepseek-chat，temperature 0）：graph single 0.975 / multi exact 1.000 / recall 1.000 / steps 1.156 / 679.8 tok / P95 1458.21ms；linear single 0.950 / multi exact 0.000 / recall 0.433 / steps 0.978 / 1233.2 tok / P95 1202.2ms；真实链路 market 2.93s → backtest 8.29s（30 笔，run `p02_langgraph_bt_1792921417981`）→ report 20.6s（analysis.md）；demo server decide 触发 interrupt、resume 批准后 actions=[BACKTEST]、state next=[]；SqliteSaver 跨进程 resume 成功；回归子集 47 passed / 3 既有失败（`test_agent_loop_dsml_tool_calls`、`test_agent_loop_no_assistant_prefill`、`test_agent_loop_trace`，均为 `_SecretRegistry` 缺 `tool_names` 导致 status=warning），与改动前一致；ruff 通过。
+- 关联：计划 `P-20261025-P02_interview_langgraph_agent`；HowToUse 4.6 / 8.49；对比报告 `agent/langgraph_agent/docs/compare.md`；当前改动未提交（commit 待用户确认）。

@@ -1,0 +1,45 @@
+{"id": "md001", "type": "market_data", "question": "拉一下 600519.SH 2024 年的日线", "expect": {"actions": ["MARKET_DATA"]}, "tags": ["single", "market_data"], "source": "synthetic", "reviewed": true, "notes": "单标的年度日线"}
+{"id": "md002", "type": "market_data", "question": "取 000001.SZ 2023-01-01 到 2023-12-31 的日线行情", "expect": {"actions": ["MARKET_DATA"]}, "tags": ["single", "market_data"], "source": "synthetic", "reviewed": true, "notes": "显式日期区间"}
+{"id": "md003", "type": "market_data", "question": "给我 300750.SZ 2024 年上半年的 K 线数据", "expect": {"actions": ["MARKET_DATA"]}, "tags": ["single", "market_data"], "source": "synthetic", "reviewed": true, "notes": "半年区间"}
+{"id": "md004", "type": "market_data", "question": "下载 510300.SH 2022 年全年的日线", "expect": {"actions": ["MARKET_DATA"]}, "tags": ["single", "market_data"], "source": "synthetic", "reviewed": true, "notes": "ETF 年度日线"}
+{"id": "md005", "type": "market_data", "question": "查一下 601318.SH 2024 年的日线行情", "expect": {"actions": ["MARKET_DATA"]}, "tags": ["single", "market_data"], "source": "synthetic", "reviewed": true, "notes": "单标的年度日线（显式年份，避免相对时间解析）"}
+{"id": "md006", "type": "market_data", "question": "把 000858.SZ 2024-01-01 到 2024-06-30 的行情拉出来", "expect": {"actions": ["MARKET_DATA"]}, "tags": ["single", "market_data"], "source": "synthetic", "reviewed": true, "notes": "显式起止日期"}
+{"id": "md007", "type": "market_data", "question": "获取 002415.SZ 2023 年的日线数据", "expect": {"actions": ["MARKET_DATA"]}, "tags": ["single", "market_data"], "source": "synthetic", "reviewed": true, "notes": "单标的年度日线"}
+{"id": "md008", "type": "market_data", "question": "跑一下 600036.SH 2024 年的日线行情", "expect": {"actions": ["MARKET_DATA"]}, "tags": ["single", "market_data"], "source": "synthetic", "reviewed": true, "notes": "口语化取数"}
+{"id": "bt001", "type": "backtest", "question": "用 20 日均线策略回测 600519.SH 2024 年", "expect": {"actions": ["BACKTEST"]}, "tags": ["single", "backtest"], "source": "synthetic", "reviewed": true, "notes": "均线策略"}
+{"id": "bt002", "type": "backtest", "question": "对 000001.SZ 跑一个 2023 年的双均线回测", "expect": {"actions": ["BACKTEST"]}, "tags": ["single", "backtest"], "source": "synthetic", "reviewed": true, "notes": "双均线"}
+{"id": "bt003", "type": "backtest", "question": "帮我回测 300750.SZ 2024 年的动量策略", "expect": {"actions": ["BACKTEST"]}, "tags": ["single", "backtest"], "source": "synthetic", "reviewed": true, "notes": "动量策略"}
+{"id": "bt004", "type": "backtest", "question": "用 510300.SH 做 2022 年全年回测，20 日动量", "expect": {"actions": ["BACKTEST"]}, "tags": ["single", "backtest"], "source": "synthetic", "reviewed": true, "notes": "ETF 动量"}
+{"id": "bt005", "type": "backtest", "question": "回测 601318.SH 2024 年，策略用 10 日均线上穿 30 日均线", "expect": {"actions": ["BACKTEST"]}, "tags": ["single", "backtest"], "source": "synthetic", "reviewed": true, "notes": "金叉策略"}
+{"id": "bt006", "type": "backtest", "question": "跑一下 000858.SZ 2023 年的均线策略回测", "expect": {"actions": ["BACKTEST"]}, "tags": ["single", "backtest"], "source": "synthetic", "reviewed": true, "notes": "均线策略"}
+{"id": "bt007", "type": "backtest", "question": "对 002415.SZ 做 2024 年上半年回测，20 日动量", "expect": {"actions": ["BACKTEST"]}, "tags": ["single", "backtest"], "source": "synthetic", "reviewed": true, "notes": "半年区间动量"}
+{"id": "bt008", "type": "backtest", "question": "回测 600036.SH 2023 年，双均线策略", "expect": {"actions": ["BACKTEST"]}, "tags": ["single", "backtest"], "source": "synthetic", "reviewed": true, "notes": "双均线"}
+{"id": "rp001", "type": "report", "question": "给刚才那次回测写一份报告", "expect": {"actions": ["REPORT"]}, "tags": ["single", "report"], "source": "synthetic", "reviewed": true, "notes": "指代最近一次回测"}
+{"id": "rp002", "type": "report", "question": "生成 600519.SH 2024 回测的分析报告", "expect": {"actions": ["REPORT"]}, "tags": ["single", "report"], "source": "synthetic", "reviewed": true, "notes": "显式标的"}
+{"id": "rp003", "type": "report", "question": "解释一下最近这次回测的最大回撤", "expect": {"actions": ["REPORT"]}, "tags": ["single", "report"], "source": "synthetic", "reviewed": true, "notes": "指标解释"}
+{"id": "rp004", "type": "report", "question": "把 000001.SZ 回测结果整理成报告", "expect": {"actions": ["REPORT"]}, "tags": ["single", "report"], "source": "synthetic", "reviewed": true, "notes": "结果整理"}
+{"id": "rp005", "type": "report", "question": "对 300750.SZ 的回测做收益归因分析", "expect": {"actions": ["REPORT"]}, "tags": ["single", "report"], "source": "synthetic", "reviewed": true, "notes": "归因分析"}
+{"id": "rp006", "type": "report", "question": "写一份 510300.SH 2022 年回测的总结", "expect": {"actions": ["REPORT"]}, "tags": ["single", "report"], "source": "synthetic", "reviewed": true, "notes": "总结"}
+{"id": "rp007", "type": "report", "question": "分析 601318.SH 回测的夏普和回撤", "expect": {"actions": ["REPORT"]}, "tags": ["single", "report"], "source": "synthetic", "reviewed": true, "notes": "指标分析"}
+{"id": "rp008", "type": "report", "question": "给 000858.SZ 的回测出一份文字报告", "expect": {"actions": ["REPORT"]}, "tags": ["single", "report"], "source": "synthetic", "reviewed": true, "notes": "文字报告"}
+{"id": "cl001", "type": "clarify", "question": "帮我跑个回测", "expect": {"actions": ["CLARIFY"]}, "tags": ["single", "clarify"], "source": "synthetic", "reviewed": true, "notes": "缺标的/日期/策略"}
+{"id": "cl002", "type": "clarify", "question": "拉一下日线数据", "expect": {"actions": ["CLARIFY"]}, "tags": ["single", "clarify"], "source": "synthetic", "reviewed": true, "notes": "缺标的"}
+{"id": "cl003", "type": "clarify", "question": "回测一下这个策略", "expect": {"actions": ["CLARIFY"]}, "tags": ["single", "clarify"], "source": "synthetic", "reviewed": true, "notes": "缺标的/日期/策略指代不明"}
+{"id": "cl004", "type": "clarify", "question": "给我一份报告", "expect": {"actions": ["CLARIFY"]}, "tags": ["single", "clarify"], "source": "synthetic", "reviewed": true, "notes": "缺回测对象"}
+{"id": "cl005", "type": "clarify", "question": "看看行情怎么样", "expect": {"actions": ["CLARIFY"]}, "tags": ["single", "clarify"], "source": "synthetic", "reviewed": true, "notes": "缺标的"}
+{"id": "cl006", "type": "clarify", "question": "用均线策略回测一下", "expect": {"actions": ["CLARIFY"]}, "tags": ["single", "clarify"], "source": "synthetic", "reviewed": true, "notes": "缺标的/日期"}
+{"id": "cl007", "type": "clarify", "question": "跑个动量策略", "expect": {"actions": ["CLARIFY"]}, "tags": ["single", "clarify"], "source": "synthetic", "reviewed": true, "notes": "缺标的/日期"}
+{"id": "cl008", "type": "clarify", "question": "分析一下回测结果", "expect": {"actions": ["CLARIFY"]}, "tags": ["single", "clarify"], "source": "synthetic", "reviewed": true, "notes": "缺回测对象"}
+{"id": "st001", "type": "stop", "question": "谢谢，先这样", "expect": {"actions": ["STOP"]}, "tags": ["single", "stop"], "source": "synthetic", "reviewed": true, "notes": "致谢结束"}
+{"id": "st002", "type": "stop", "question": "好的，结束了", "expect": {"actions": ["STOP"]}, "tags": ["single", "stop"], "source": "synthetic", "reviewed": true, "notes": "明确结束"}
+{"id": "st003", "type": "stop", "question": "暂时不用了，谢谢", "expect": {"actions": ["STOP"]}, "tags": ["single", "stop"], "source": "synthetic", "reviewed": true, "notes": "结束"}
+{"id": "st004", "type": "stop", "question": "先聊到这吧", "expect": {"actions": ["STOP"]}, "tags": ["single", "stop"], "source": "synthetic", "reviewed": true, "notes": "结束"}
+{"id": "st005", "type": "stop", "question": "收到，没别的事了", "expect": {"actions": ["STOP"]}, "tags": ["single", "stop"], "source": "synthetic", "reviewed": true, "notes": "结束"}
+{"id": "st006", "type": "stop", "question": "可以了，结束", "expect": {"actions": ["STOP"]}, "tags": ["single", "stop"], "source": "synthetic", "reviewed": true, "notes": "结束"}
+{"id": "st007", "type": "stop", "question": "不用继续了", "expect": {"actions": ["STOP"]}, "tags": ["single", "stop"], "source": "synthetic", "reviewed": true, "notes": "结束"}
+{"id": "st008", "type": "stop", "question": "好的，再见", "expect": {"actions": ["STOP"]}, "tags": ["single", "stop"], "source": "synthetic", "reviewed": true, "notes": "结束"}
+{"id": "m001", "type": "multi_intent", "question": "拉 600519.SH 2024 日线，然后跑 20 日均线回测", "expect": {"actions": ["MARKET_DATA", "BACKTEST"]}, "tags": ["multi_intent"], "source": "synthetic", "reviewed": true, "notes": "行情 + 回测"}
+{"id": "m002", "type": "multi_intent", "question": "跑 000001.SZ 2024 双均线回测，再给一份报告", "expect": {"actions": ["BACKTEST", "REPORT"]}, "tags": ["multi_intent"], "source": "synthetic", "reviewed": true, "notes": "回测 + 报告"}
+{"id": "m003", "type": "multi_intent", "question": "先看 300750.SZ 2024 年行情，再跑动量回测并出报告", "expect": {"actions": ["MARKET_DATA", "BACKTEST", "REPORT"]}, "tags": ["multi_intent"], "source": "synthetic", "reviewed": true, "notes": "三意图"}
+{"id": "m004", "type": "multi_intent", "question": "用 510300.SH 做 2023 年回测；另外把 2024 年日线也拉一下", "expect": {"actions": ["BACKTEST", "MARKET_DATA"]}, "tags": ["multi_intent"], "source": "synthetic", "reviewed": true, "notes": "回测 + 行情（顺序反转）"}
+{"id": "m005", "type": "multi_intent", "question": "拉 600519.SH 2024 日线，跑回测，再解释最大回撤", "expect": {"actions": ["MARKET_DATA", "BACKTEST", "REPORT"]}, "tags": ["multi_intent"], "source": "synthetic", "reviewed": true, "notes": "三意图含报告"}

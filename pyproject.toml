@@ -146,6 +146,12 @@ ashare = [
     # A-share loader needs no extra dependency (stdlib HTTP only).
     "baostock>=0.8.8",
 ]
+langgraph-demo = [
+    # Optional SqliteSaver for the P0-2 interview prototype's cross-process
+    # resume demo (agent/langgraph_agent). Base installs keep MemorySaver and
+    # never import this package.
+    "langgraph-checkpoint-sqlite>=2.0",
+]
 harmonic = [
     "pyharmonics>=1.5.0",
 ]
